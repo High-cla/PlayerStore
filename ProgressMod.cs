@@ -5,7 +5,7 @@ using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.6.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.7.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -17,7 +17,7 @@ namespace ProgressMod
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("ProgressMod v1.6.0 init");
+            LoggerInstance.Msg("ProgressMod v1.7.0 init");
         }
 
         // ============ 机器进度强制满 ============
@@ -252,6 +252,61 @@ namespace ProgressMod
                 if (!NoDurability) return true;
                 if (amount < 0) return false;
                 return true;
+            }
+        }
+
+        // 水管/任何灌铁锈水入口: 改为灌 100% 纯水
+        [HarmonyPatch(typeof(WaterHelper), "AddRustWater")]
+        public static class PatchRustToPure
+        {
+            public static bool Prefix(GameItem __0, int __1)
+            {
+                try
+                {
+                    if (__0 == null) return false;
+                    MelonLogger.Msg($"[Water] AddRustWater({Describe(__0)}, +{__1}ml) -> 转为 PureWater");
+                    WaterHelper.AddPureWater(__0, __1);
+                    return false; // 跳过原逻辑
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] AddRustWater patch err: {e.Message}"); return true; }
+            }
+        }
+
+        // 总入口兜底: grade==4(RUST) -> 0(PURE)
+        [HarmonyPatch(typeof(WaterHelper), "AddWater")]
+        public static class PatchWaterGrade
+        {
+            public static bool Prefix(GameItem __0, int __1, int __2, bool __3, int __4, int __5, bool __6)
+            {
+                try
+                {
+                    if (__0 == null) return true;
+                    if (__1 == 4)
+                    {
+                        MelonLogger.Msg($"[Water] AddWater(grade={__1}=RUST, +{__2}ml) -> 转为 grade=0(PURE)");
+                        WaterHelper.AddWater(__0, 0, __2, __3, __4, __5, __6);
+                        return false;
+                    }
+                    return true;
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] AddWater patch err: {e.Message}"); return true; }
+            }
+        }
+
+        // 观察: AddLiquid 的 liquidId
+        [HarmonyPatch(typeof(WaterHelper), "AddLiquid")]
+        public static class PatchWaterLiquidLog
+        {
+            public static bool Prefix(GameItem __0, string __1, int __2)
+            {
+                try
+                {
+                    if (__0 == null) return true;
+                    if (__1 != null && __1.ToLower().Contains("rust"))
+                        MelonLogger.Msg($"[Water] AddLiquid(liquidId={__1}, +{__2}ml, container={Describe(__0)})");
+                    return true;
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] AddLiquid patch err: {e.Message}"); return true; }
             }
         }
 
