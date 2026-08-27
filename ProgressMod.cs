@@ -1,11 +1,12 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.7.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.8.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -17,7 +18,7 @@ namespace ProgressMod
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("ProgressMod v1.7.0 init");
+            LoggerInstance.Msg("ProgressMod v1.8.0 init");
         }
 
         // ============ 机器进度强制满 ============
@@ -290,6 +291,33 @@ namespace ProgressMod
                     return true;
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] AddWater patch err: {e.Message}"); return true; }
+            }
+        }
+
+        // 水管真实灌水入口(日志证实 AddRustWater/AddWater/AddLiquid 均未被调):
+        // FillWithRustWaterHighEnd/LowEnd(container) -> 直接灌 FillWithPureWater
+        [HarmonyPatch()]
+        public static class PatchTapRustToPure
+        {
+            public static IEnumerable<MethodBase> TargetMethods()
+            {
+                var he = AccessTools.Method(typeof(WaterHelper), "FillWithRustWaterHighEnd");
+                var le = AccessTools.Method(typeof(WaterHelper), "FillWithRustWaterLowEnd");
+                if (he != null) yield return he;
+                if (le != null) yield return le;
+                if (he == null && le == null) MelonLogger.Error("[Water] 未找到 FillWithRustWater 方法!");
+            }
+
+            public static bool Prefix(GameItem __0)
+            {
+                try
+                {
+                    if (__0 == null) return false;
+                    MelonLogger.Msg("[Water] FillWithRustWater(High/LowEnd) -> 转为 FillWithPureWater");
+                    WaterHelper.FillWithPureWater(__0);
+                    return false; // 跳过原逻辑
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] FillWithRustWater patch err: {e.Message}"); return true; }
             }
         }
 
