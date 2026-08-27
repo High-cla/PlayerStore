@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
@@ -55,7 +54,7 @@ namespace ProgressMod
                     if (ForceFinish && machine != null && tgtTag != null)
                     {
                         // 把当前进度直接设为目标 (ModifyTag 写回, GetTagReadonly 是只读副本)
-                        System.Action<Il2Cpp.TagState> setCur = (ts) => { if (ts != null) ts.SetInt(tgt); };
+                        Action<Il2Cpp.TagState> setCur = (ts) => { ts?.SetInt(tgt); };
                         machine.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", setCur);
                         MelonLogger.Msg($"[Continue] force CURRENT {cur} -> {tgt} (via ModifyTag)");
                         return true; // 让原逻辑继续: 推进后 current>=target 触发完成产出
@@ -98,7 +97,7 @@ namespace ProgressMod
 
                     if (ForceFinish && machine != null && tgtTag != null && cur < tgt)
                     {
-                        System.Action<Il2Cpp.TagState> setCur = (ts) => { if (ts != null) ts.SetInt(tgt); };
+                        Action<Il2Cpp.TagState> setCur = (ts) => { ts?.SetInt(tgt); };
                         machine.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", setCur);
                         MelonLogger.Msg($"[Update] force CURRENT {cur} -> {tgt}");
                     }
@@ -171,7 +170,7 @@ namespace ProgressMod
                             }
                             if (cur >= 0 && tgt > 0 && cur < tgt)
                             {
-                                System.Action<Il2Cpp.TagState> setCur = (ts) => { if (ts != null) ts.SetInt(tgt); };
+                                Action<Il2Cpp.TagState> setCur = (ts) => { ts?.SetInt(tgt); };
                                 it.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", setCur);
                                 MelonLogger.Msg($"[EndNight] force CURRENT {cur} -> {tgt}");
                                 forced++;
@@ -237,7 +236,7 @@ namespace ProgressMod
         [HarmonyPatch(typeof(DurabilityHelper), "ChangeDurability")]
         public static class PatchDurability
         {
-            public static bool Prefix(GameItem gameItem, int amount)
+            public static bool Prefix(int amount)
             {
                 if (!NoDurability) return true;
                 if (amount < 0) return false; // 负变化(消耗)直接跳过
@@ -248,7 +247,7 @@ namespace ProgressMod
         [HarmonyPatch(typeof(ModuleEffectHelper), "Degrade")]
         public static class PatchDegrade
         {
-            public static bool Prefix(GameItem gameItem, int amount)
+            public static bool Prefix(int amount)
             {
                 if (!NoDurability) return true;
                 if (amount < 0) return false;
