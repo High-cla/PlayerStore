@@ -5,7 +5,7 @@ using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.8.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.9.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -17,7 +17,7 @@ namespace ProgressMod
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("ProgressMod v1.8.0 init");
+            LoggerInstance.Msg("ProgressMod v1.9.0 init");
         }
 
         // ============ 机器进度强制满 ============
@@ -320,6 +320,38 @@ namespace ProgressMod
             }
         }
 
+        // 净水机: PurifyToBaseWater 内部走 AddBaseWater → 全部转纯水
+        [HarmonyPatch(typeof(WaterHelper), "AddBaseWater")]
+        public static class PatchPurifyToPure
+        {
+            public static bool Prefix(GameItem __0, int __1)
+            {
+                try
+                {
+                    if (__0 == null) return false;
+                    MelonLogger.Msg("[Water] AddBaseWater -> 转为 AddPureWater");
+                    WaterHelper.AddPureWater(__0, __1);
+                    return false;
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] AddBaseWater patch err: {e.Message}"); return true; }
+            }
+        }
+
+        // 观察: HandleFilter 过滤主通道(identifier 待实证)
+        [HarmonyPatch(typeof(WaterHelper), "HandleFilter")]
+        public static class PatchHandleFilterLog
+        {
+            public static bool Prefix(string __0, int __1, GameItem __2, GameItem __3)
+            {
+                try
+                {
+                    MelonLogger.Msg($"[Water] HandleFilter(id={__0}, amount={__1}, src={Describe(__2)}, filter={Describe(__3)})");
+                    return true;
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] HandleFilter patch err: {e.Message}"); return true; }
+            }
+        }
+
         // 观察: AddLiquid 的 liquidId
         [HarmonyPatch(typeof(WaterHelper), "AddLiquid")]
         public static class PatchWaterLiquidLog
@@ -329,8 +361,7 @@ namespace ProgressMod
                 try
                 {
                     if (__0 == null) return true;
-                    if (__1 != null && __1.ToLower().Contains("rust"))
-                        MelonLogger.Msg($"[Water] AddLiquid(liquidId={__1}, +{__2}ml, container={Describe(__0)})");
+                    MelonLogger.Msg($"[Water] AddLiquid(liquidId={__1}, +{__2}ml, container={Describe(__0)})");
                     return true;
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] AddLiquid patch err: {e.Message}"); return true; }
