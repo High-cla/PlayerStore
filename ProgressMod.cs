@@ -1,11 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.10.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.11.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -17,7 +16,7 @@ namespace ProgressMod
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("ProgressMod v1.10.0 init");
+            LoggerInstance.Msg("ProgressMod v1.11.0 init");
         }
 
         // ============ 机器进度强制满 ============
@@ -293,79 +292,22 @@ namespace ProgressMod
             }
         }
 
-        // 水管真实灌水入口(日志证实 AddRustWater/AddWater/AddLiquid 均未被调):
-        // FillWithRustWaterHighEnd/LowEnd(container) -> 直接灌 FillWithPureWater
-        [HarmonyPatch()]
-        public static class PatchTapRustToPure
+        // 净水器/净化器: PurifyToBaseWater -> 清空 + 加等量纯水 (净化效果100%)
+        [HarmonyPatch(typeof(WaterHelper), "PurifyToBaseWater")]
+        public static class PatchPurifyToPure
         {
-            public static IEnumerable<MethodBase> TargetMethods()
-            {
-                var he = AccessTools.Method(typeof(WaterHelper), "FillWithRustWaterHighEnd");
-                var le = AccessTools.Method(typeof(WaterHelper), "FillWithRustWaterLowEnd");
-                if (he != null) yield return he;
-                if (le != null) yield return le;
-                if (he == null && le == null) MelonLogger.Error("[Water] 未找到 FillWithRustWater 方法!");
-            }
-
             public static bool Prefix(GameItem __0)
             {
                 try
                 {
                     if (__0 == null) return false;
-                    MelonLogger.Msg("[Water] FillWithRustWater(High/LowEnd) -> 转为 FillWithHighQualityWater");
-                    WaterHelper.FillWithHighQualityWater(__0);
+                    int vol = WaterHelper.GetTotalVolume(__0);
+                    WaterHelper.EmptyContainer(__0);
+                    WaterHelper.AddPureWater(__0, vol);
+                    MelonLogger.Msg($"[Water] PurifyToBaseWater -> 净化100%纯水 (vol={vol}ml)");
                     return false; // 跳过原逻辑
                 }
-                catch (Exception e) { MelonLogger.Error($"[Water] FillWithRustWater patch err: {e.Message}"); return true; }
-            }
-        }
-
-        // 水管/一切锈水源头: ItemConditionList.CreateRustWater() -> 转 CreatePureWater()
-        // (dump 证实水管不走 WaterHelper, 灌水在条件层 CreateRustWater)
-        [HarmonyPatch(typeof(ItemConditionList), "CreateRustWater")]
-        public static class PatchRustWaterCondToPure
-        {
-            public static bool Prefix(ref ItemCondition __result)
-            {
-                try
-                {
-                    MelonLogger.Msg("[Water] CreateRustWater -> 转为 CreatePureWater");
-                    __result = ItemConditionList.CreatePureWater();
-                    return false; // 跳过原逻辑
-                }
-                catch (Exception e) { MelonLogger.Error($"[Water] CreateRustWater patch err: {e.Message}"); return true; }
-            }
-        }
-
-        // 净水机: PurifyToBaseWater 内部走 AddBaseWater → 全部转纯水
-        [HarmonyPatch(typeof(WaterHelper), "AddBaseWater")]
-        public static class PatchPurifyToPure
-        {
-            public static bool Prefix(GameItem __0, int __1)
-            {
-                try
-                {
-                    if (__0 == null) return false;
-                    MelonLogger.Msg("[Water] AddBaseWater -> 转为 AddPureWater");
-                    WaterHelper.AddPureWater(__0, __1);
-                    return false;
-                }
-                catch (Exception e) { MelonLogger.Error($"[Water] AddBaseWater patch err: {e.Message}"); return true; }
-            }
-        }
-
-        // 观察: HandleFilter 过滤主通道(identifier 待实证)
-        [HarmonyPatch(typeof(WaterHelper), "HandleFilter")]
-        public static class PatchHandleFilterLog
-        {
-            public static bool Prefix(string __0, int __1, GameItem __2, GameItem __3)
-            {
-                try
-                {
-                    MelonLogger.Msg($"[Water] HandleFilter(id={__0}, amount={__1}, src={Describe(__2)}, filter={Describe(__3)})");
-                    return true;
-                }
-                catch (Exception e) { MelonLogger.Error($"[Water] HandleFilter patch err: {e.Message}"); return true; }
+                catch (Exception e) { MelonLogger.Error($"[Water] PurifyToBaseWater patch err: {e.Message}"); return true; }
             }
         }
 
