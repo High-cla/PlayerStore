@@ -8,6 +8,10 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>D:\steam\steamapps\common\Probably Stolen Playtest\Mods\</OutputPath>
   </PropertyGroup>
+  <!-- 编译后自动本地提交: git add 全部变更并 commit. 无变更时静默跳过. -->
+  <Target Name="AutoCommit" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+    <Exec Command="git -c user.name=dev -c user.email=dev@local add -A &amp;&amp; git -c user.name=dev -c user.email=dev@local diff --cached --quiet || (git -c user.name=dev -c user.email=dev@local commit -m &quot;build: auto-commit $(Configuration) $(TargetFramework)&quot;)" IgnoreExitCode="true" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
   <ItemGroup>
     <Reference Include="MelonLoader">
       <HintPath>D:\steam\steamapps\common\Probably Stolen Playtest\MelonLoader\net6\MelonLoader.dll</HintPath>
