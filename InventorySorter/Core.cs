@@ -958,35 +958,85 @@ public class Core : MelonMod
 
 	private static Dictionary<GameItem, Placement> LayoutDense(List<GameItem> flat, Dictionary<GameItem, ItemMask> masks, int W, int H, List<GameItem> fixedItems)
 	{
-		// 小仓库(<100 格)跳过配对: 实测配对在小包有害(锁死紧密填充), 仅大包用
+		// 算法组合: 并行跑多个独立布局器, 各返回完整 Placement 字典, 取"剩余最大连续空矩"最大者.
+		List<Dictionary<GameItem, Placement>> candidates = new List<Dictionary<GameItem, Placement>>();
+		// 1) 落地堆积(大仓配对 → 拆死锁 → 无配对), 实测大仓紧凑, 小仓无配对较好
 		List<object> paired = (W * H >= 100) ? BuildUnits(flat, masks) : null;
 		if (paired != null)
 		{
 			paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
 			if (TryPlaceUnits(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dict))
 			{
-				return dict;
+				candidates.Add(dict);
 			}
-			// 定位死锁: 找到第一次放不下的单元并拆开, 只拆这一对, 保持其余配对
 			List<object> split = SplitFailedUnit(fixedItems, paired, masks, W, H);
 			if (split != null && TryPlaceUnits(fixedItems, split, masks, W, H, out Dictionary<GameItem, Placement> dictS))
 			{
-				return dictS;
+				candidates.Add(dictS);
 			}
 		}
-		// 兜底: 无配对单件落地(小仓库直接走这里)
 		List<object> singles = new List<object>(flat);
 		singles.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
 		if (TryPlaceUnits(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dict2))
 		{
-			return dict2;
+			candidates.Add(dict2);
 		}
-		// 终极: MinHole 逐件贪心最小化当前最大空矩(实测大仓最优, 剩余连续块最大)
+		// 2) MinHole: 实测大仓最优(挤出最大整块连续区), 小仓亦常最优
 		if (TryMinHole(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictM))
 		{
-			return dictM;
+			candidates.Add(dictM);
 		}
-		return null;
+		// 择优: 剩余最大连续空矩最大者
+		Dictionary<GameItem, Placement> best = null;
+		long bestArea = -1;
+		foreach (Dictionary<GameItem, Placement> cand in candidates)
+		{
+			bool[,] occ = new bool[W, H];
+			foreach (GameItem fixedItem in fixedItems)
+			{
+				MarkCurrentCells(occ, W, H, fixedItem);
+			}
+			bool ok = true;
+			foreach (KeyValuePair<GameItem, Placement> kv in cand)
+			{
+				if (!masks.TryGetValue(kv.Key, out ItemMask mm))
+				{
+					ok = false;
+					break;
+				}
+				List<(int, int)> cs = CellsOf(mm, kv.Value.O);
+				if (cs == null || cs.Count == 0)
+				{
+					cs = mm.C0;
+				}
+				foreach ((int dx, int dy) in cs)
+				{
+					int cx = kv.Value.X + dx;
+					int cy = kv.Value.Y + dy;
+					if (cx < 0 || cy < 0 || cx >= W || cy >= H || occ[cx, cy])
+					{
+						ok = false;
+						break;
+					}
+					occ[cx, cy] = true;
+				}
+				if (!ok)
+				{
+					break;
+				}
+			}
+			if (!ok)
+			{
+				continue;
+			}
+			long area = LargestEmptyArea(occ, W, H);
+			if (area > bestArea)
+			{
+				bestArea = area;
+				best = cand;
+			}
+		}
+		return best;
 	}
 
 	// MinHole: 每件物品在全部合法位置中, 选"放置后该背包最大连续空矩形最小"的位置(挤压碎片到边界, 留出最大整块)
