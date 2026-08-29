@@ -981,7 +981,117 @@ public class Core : MelonMod
 		{
 			return dict2;
 		}
+		// 终极: MinHole 逐件贪心最小化当前最大空矩(实测大仓最优, 剩余连续块最大)
+		if (TryMinHole(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictM))
+		{
+			return dictM;
+		}
 		return null;
+	}
+
+	// MinHole: 每件物品在全部合法位置中, 选"放置后该背包最大连续空矩形最小"的位置(挤压碎片到边界, 留出最大整块)
+	// 目标函数与用户相反(最小空矩)但实测反向最优: 挤压后剩余最大空矩反而更大(集中整块)
+	private static bool TryMinHole(List<GameItem> fixedItems, List<GameItem> flat, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	{
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem fixedItem in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, fixedItem);
+		}
+		dictionary = new Dictionary<GameItem, Placement>();
+		List<GameItem> order = new List<GameItem>(flat);
+		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+		foreach (GameItem item in order)
+		{
+			ItemMask m = masks[item];
+			long bestScore = long.MaxValue;
+			int bestX = -1;
+			int bestY = -1;
+			int bestO = 0;
+			for (int o = 0; o < 4; o++)
+			{
+				List<(int, int)> cells = CellsOf(m, o);
+				if (cells == null || cells.Count == 0)
+				{
+					continue;
+				}
+				int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+				int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+				if (gw > W || gh > H)
+				{
+					continue;
+				}
+				for (int py = 0; py + gh <= H; py++)
+				{
+					for (int px = 0; px + gw <= W; px++)
+					{
+						if (!CellsFree(occ, px, py, cells))
+						{
+							continue;
+						}
+						// 放置后最大空矩(直接计算, 不打临时数组)
+						bool[,] next = (bool[,])occ.Clone();
+						foreach ((int dx, int dy) in cells)
+						{
+							next[px + dx, py + dy] = true;
+						}
+						long area = LargestEmptyArea(next, W, H);
+						if (area < bestScore || (area == bestScore && (py < bestY || (py == bestY && px < bestX))))
+						{
+							bestScore = area;
+							bestX = px;
+							bestY = py;
+							bestO = o;
+						}
+					}
+				}
+			}
+			if (bestX < 0)
+			{
+				return false;
+			}
+			dictionary[item] = new Placement(bestX, bestY, bestO);
+			foreach ((int dx, int dy) in CellsOf(m, bestO))
+			{
+				occ[bestX + dx, bestY + dy] = true;
+			}
+		}
+		return true;
+	}
+
+	// 直方图+单调栈: 最大全空连续矩形面积
+	private static long LargestEmptyArea(bool[,] occ, int W, int H)
+	{
+		long best = 0;
+		int[] heights = new int[W];
+		int[] stack = new int[W + 1];
+		for (int y = 0; y < H; y++)
+		{
+			for (int x = 0; x < W; x++)
+			{
+				heights[x] = occ[x, y] ? 0 : heights[x] + 1;
+			}
+			int top = -1;
+			for (int x = 0; x <= W; x++)
+			{
+				int h = (x < W) ? heights[x] : 0;
+				while (top >= 0 && heights[stack[top]] > h)
+				{
+					int idx = stack[top--];
+					int left = (top >= 0) ? stack[top] + 1 : 0;
+					long area = (long)heights[idx] * (x - left);
+					if (area > best)
+					{
+						best = area;
+					}
+				}
+				if (x < W)
+				{
+					stack[++top] = x;
+				}
+			}
+		}
+		return best;
 	}
 
 	// 找出配对路径第一次死锁的单元, 若为 PairUnit 则仅拆开该对(重放至死锁点), 其余单元原样; 若死锁点非配对(单件也放不下)则返回 null
