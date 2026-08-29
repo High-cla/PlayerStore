@@ -1,0 +1,438 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="38">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>"PlayerStore.现金"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B816010</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"PlayerStore.零售加价（百分比）"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B81605C</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>2</ID>
+      <Description>"PlayerStore.违禁加价-低品质（百分比）"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B816060</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>3</ID>
+      <Description>"PlayerStore.违禁加价-中品质（百分比）"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B816064</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>4</ID>
+      <Description>"PlayerStore.违禁加价-高品质（百分比）"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B816068</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>5</ID>
+      <Description>"PlayerStore.违禁加价-极品（百分比）"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B81606C</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>6</ID>
+      <Description>"PlayerStore.商店吸引力"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B816078</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>7</ID>
+      <Description>"PlayerStore.投影仪吸引力加成"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B81607C</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>8</ID>
+      <Description>"PlayerStore.议价大师还价加成"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B816080</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>9</ID>
+      <Description>"PlayerStore.当前批发客户(1=是)"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>Byte</VariableType>
+      <Address>2160B8160F0</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>10</ID>
+      <Description>"PlayerStore.批发优惠(百分比,负=压价)"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>2160B8160F4</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>11</ID>
+      <Description>"PlayerStore.鉴定功能已解锁(1=是)"</Description>
+      <LastState Value="" RealAddress="00000000"/>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>Byte</VariableType>
+      <Address>2160B816120</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>12</ID>
+      <Description>"自动化:商店服务零冷却+强制激活(勾选启用)"</Description>
+      <Options moHideChildren="1"/>
+      <LastState Activated="0"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript><![CDATA[{$lua}
+if syntaxcheck then return "ok" end
+
+-- 商店服务零冷却+激活: hook StoreService.IsOnCooldown->false / IsActive->true
+-- 方法序言极短(3-5B), 直接 FF25+8B 绝对跳转
+
+function le64svc(v)
+  local t = {}
+  for i = 0, 7 do t[#t+1] = math.floor(v / 256^i) % 256 end
+  return t
+end
+
+local svc_state = _G["svc_hook_state"]
+
+function hookSvc()
+  if svc_state and svc_state.hooked then return true, "already" end
+  pcall(mono_setMonoMenuItem, true)
+  pcall(mono_OnProcessOpened)
+  local c = mono_findClass("Assembly-CSharp", "StoreService")
+  if not c then return false, "NOCLASS" end
+  local m1 = mono_class_findMethod(c, "IsOnCooldown")
+  local m2 = mono_class_findMethod(c, "IsActive")
+  local a1 = mono_compile_method(m1)
+  local a2 = mono_compile_method(m2)
+  if not a1 or a1 == 0 or not a2 or a2 == 0 then return false, "NOADDR" end
+  local o1 = readBytes(a1, 8, true)
+  local o2 = readBytes(a2, 18, true)
+  if not o1 or not o2 then return false, "READFAIL" end
+  local nm1 = allocateSharedMemory("svc_Iso", 512)
+  local nm2 = allocateSharedMemory("svc_IsA", 512)
+  local function doHook(addr, nm, body)
+    local pos = 0
+    writeBytes(nm + pos, body, false)
+    pos = pos + #body
+    writeBytes(nm + pos, {0xFF, 0x25, 0, 0, 0, 0}, false)
+    pos = pos + 6
+    writeBytes(nm + pos, le64svc(addr + #body), false)
+    writeBytes(addr, {0xFF, 0x25, 0, 0, 0, 0}, false)
+    writeBytes(addr + 6, le64svc(nm), false)
+    for i = 14, 21 do writeBytes(addr + i, {0x90}, false) end
+  end
+  doHook(a1, nm1, {0x32, 0xC0, 0xC3})  -- xor al,al; ret -> false (not on cooldown)
+  doHook(a2, nm2, {0xB0, 0x01, 0xC3})  -- mov al,1; ret -> true (active)
+  _G["svc_hook_state"] = { hooked = true, a1 = a1, a2 = a2, o1 = o1, o2 = o2 }
+  return true, "OK"
+end
+
+function unhookSvc()
+  local st = _G["svc_hook_state"]
+  if not st or not st.hooked then return true, "idle" end
+  writeBytes(st.a1, st.o1, false)
+  writeBytes(st.a2, st.o2, false)
+  _G["svc_hook_state"] = { hooked = false }
+  return true, "restored"
+end
+
+[ENABLE]
+local ok, msg = hookSvc()
+if not ok then print("ID12 hook failed: " .. tostring(msg)) end
+
+[DISABLE]
+local ok, msg = unhookSvc()
+if not ok then print("ID12 unhook failed: " .. tostring(msg)) end
+]]></AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>13</ID>
+      <Description>"自动化:物品耐久不减(勾选启用)"</Description>
+      <Options moHideChildren="1"/>
+      <LastState Activated="0"/>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript><![CDATA[{$lua}
+if syntaxcheck then return "ok" end
+
+local function activateMono()
+  pcall(mono_setMonoMenuItem, true)
+  pcall(mono_OnProcessOpened)
+end
+
+local function le64(n)
+  local b = {}
+  for i = 0, 7 do b[#b+1] = math.floor(n / 256^i) % 256 end
+  return b
+end
+
+-- 重写序言：RIP 相对指令（80 3D=cmp byte[rip+disp32],imm8 / 48 8B 05=mov rax,[rip+disp32]）改为绝对寻址
+-- newmem 在低地址，原 RIP 相对偏移在 newmem 中指向错误位置 → 必须重写
+local function rewritePrologue(orig, prologue_len, addr)
+  local b = {}
+  local i = 1
+  while i <= prologue_len do
+    if orig[i] == 0x80 and orig[i+1] == 0x3D and i + 6 <= prologue_len then
+      local rel = orig[i+2] | (orig[i+3] * 0x100) | (orig[i+4] * 0x10000) | (orig[i+5] * 0x1000000)
+      if rel >= 0x80000000 then rel = rel - 0x100000000 end
+      local target = addr + (i - 1) + 7 + rel
+      b[#b+1] = 0x49; b[#b+1] = 0xBA                    -- mov r10, imm64
+      local le = le64(target)
+      for j = 1, 8 do b[#b+1] = le[j] end
+      b[#b+1] = 0x41; b[#b+1] = 0x80; b[#b+1] = 0x3A; b[#b+1] = 0x00    -- cmp byte[r10], 0
+      i = i + 7
+    elseif orig[i] == 0x48 and orig[i+1] == 0x8B and orig[i+2] == 0x05 and i + 6 <= prologue_len then
+      local rel = orig[i+3] | (orig[i+4] * 0x100) | (orig[i+5] * 0x10000) | (orig[i+6] * 0x1000000)
+      if rel >= 0x80000000 then rel = rel - 0x100000000 end
+      local target = addr + (i - 1) + 7 + rel
+      b[#b+1] = 0x49; b[#b+1] = 0xBA                    -- mov r10, imm64
+      local le = le64(target)
+      for j = 1, 8 do b[#b+1] = le[j] end
+      b[#b+1] = 0x49; b[#b+1] = 0x8B; b[#b+1] = 0x12    -- mov r10,[r10]
+      i = i + 7
+    else
+      b[#b+1] = orig[i]
+      i = i + 1
+    end
+  end
+  return b
+end
+
+local function hookDur(cls, meth, prologue_len)
+  local sn = "dur_state_" .. cls .. "_" .. meth
+  if _G[sn] then return true, "already" end
+  local c = mono_findClass("Assembly-CSharp", cls)
+  if not c then return false, "no class" end
+  local m = mono_class_findMethod(c, meth)
+  if not m or m == 0 then return false, "no method" end
+  local addr = mono_compile_method(m)
+  if not addr or addr == 0 then return false, "no addr" end
+  local orig = readBytes(addr, prologue_len, true)
+  if not orig or #orig ~= prologue_len then return false, "read fail" end
+  local nm_name = "dur_" .. cls .. "_" .. meth
+  local nm = allocateSharedMemory(nm_name, 512)
+  if not nm or nm == 0 then return false, "alloc fail" end
+  local buf = {0x83, 0xFA, 0x00, 0x79, 0x05, 0xBA, 0x00, 0x00, 0x00, 0x00}
+  local rw = rewritePrologue(orig, prologue_len, addr)
+  -- 分段写入，避免大表 # 长度问题
+  writeBytes(nm, buf, false)
+  writeBytes(nm + 10, rw, false)
+  writeBytes(nm + 10 + #rw, {0xFF, 0x25, 0, 0, 0, 0}, false)
+  local ptr_off = 10 + #rw + 6
+  writeBytes(nm + ptr_off, le64(addr + prologue_len), false)
+  writeBytes(addr, {0xFF, 0x25, 0, 0, 0, 0}, false)
+  writeBytes(addr + 6, le64(nm), false)
+  for i = 14, prologue_len - 1 do
+    writeBytes(addr + i, {0x90}, false)
+  end
+  _G[sn] = {addr = addr, prologue_len = prologue_len, orig = orig, nm = nm, nm_name = nm_name}
+  return true, string.format("OK %X", addr)
+end
+
+local function unhookDur(cls, meth)
+  local sn = "dur_state_" .. cls .. "_" .. meth
+  local st = _G[sn]
+  if not st then return false, "no state" end
+  writeBytes(st.addr, st.orig, false)
+  _G[sn] = nil
+  return true, "restored"
+end
+
+activateMono()
+
+[ENABLE]
+local ok1, msg1 = hookDur("DurabilityHelper", "ChangeDurability", 14)
+local ok2, msg2 = hookDur("ModuleEffectHelper", "Degrade", 15)
+
+[DISABLE]
+local ok1, msg1 = unhookDur("DurabilityHelper", "ChangeDurability")
+local ok2, msg2 = unhookDur("ModuleEffectHelper", "Degrade")
+]]></AssemblerScript>
+    </CheatEntry>
+  
+  
+
+  
+</CheatEntries>
+  <LuaScript><![CDATA[local offs = {
+  [0]=0x10,[1]=0x5C,[2]=0x60,[3]=0x64,[4]=0x68,[5]=0x6C,
+  [6]=0x78,[7]=0x7C,[8]=0x80,[11]=0x120
+}
+local WS_BOOL, WS_DISC = 9, 10
+local safeMem = 0
+local psCache = 0
+local runIDCache = nil
+
+local function activateMono()
+  pcall(mono_setMonoMenuItem, true)
+  pcall(mono_OnProcessOpened)
+end
+
+-- read runID (String@+0x28) as (len, ascii-fingerprint); nil if invalid
+local function getRunID(a)
+  if not a or a == 0 then return nil end
+  local okP, sp = pcall(readQword, a + 0x28)
+  if not okP or not sp or sp == 0 then return nil end
+  local okL, len = pcall(readInteger, sp + 0x10)
+  if not okL or not len or len < 1 or len > 128 then return nil end
+  local s = ""
+  pcall(function()
+    local okR, r = pcall(readString, sp + 0x14, len * 2, true)
+    if okR and r and #r > 0 then s = r end
+  end)
+  if #s == 0 then return nil end
+  return len, s
+end
+
+local function psValid(a)
+  if not a or a == 0 then return false end
+  local ok1, cash = pcall(readInteger, a + 0x10)
+  local ok2, rent = pcall(readInteger, a + 0x48)
+  local ok3, loan = pcall(readInteger, a + 0x50)
+  local ok4, runN = pcall(readInteger, a + 0x30)
+  if not (ok1 and ok2 and ok3 and ok4
+     and cash and cash > 10 and cash < 10000000
+     and rent and rent >= 0 and rent < 100000
+     and loan and loan >= 0 and loan < 100000
+     and runN and runN >= 0 and runN < 1000) then return false end
+  -- strong discriminator: only the real PlayerStore carries a valid runID GUID
+  return getRunID(a) ~= nil
+end
+
+local function findPS()
+  local cls = mono_findClass("Assembly-CSharp", "PlayerStore")
+  if not cls then return 0 end
+  local inst = mono_class_findInstancesOfClassListOnly(cls)
+  if not inst or #inst == 0 then return 0 end
+  local found = {}
+  for i = 1, #inst do
+    local obj = inst[i]
+    local addr = 0
+    if type(obj) == "userdata" then
+      addr = mono_object_findRealStartOfObject(obj) or 0
+    else addr = obj end
+    if psValid(addr) then found[#found + 1] = addr end
+  end
+  if #found == 0 then return 0 end
+  -- prefer the instance whose runID matches the cached save slot
+  if runIDCache then
+    for i = 1, #found do
+      local _, rid = getRunID(found[i])
+      if rid == runIDCache then return found[i] end
+    end
+  end
+  return found[1]
+end
+
+local function clientValid(sc)
+  if not sc or sc == 0 then return false end
+  local okS, sp = pcall(readQword, sc + 0x10)
+  if not okS or not sp or sp == 0 then return false end
+  local okL, len = pcall(readInteger, sp + 0x10)
+  return okL and len and len >= 1 and len <= 64
+end
+
+local function getServiceAuto()
+  if not psValid(psCache) then psCache = findPS() end
+  if psCache == 0 then return end
+  local okL, list = pcall(readQword, psCache + 0x138)
+  if not okL or not list or list == 0 then return end
+  local okA, arr = pcall(readQword, list + 0x10)
+  if not okA or not arr or arr == 0 then return end
+  local n = readInteger(arr + 0x18) or 0
+  for i = 0, math.min(n, 64) - 1 do
+    local okS, svc = pcall(readQword, arr + 0x20 + i * 8)
+    if okS and svc and svc ~= 0 then
+      pcall(writeInteger, svc + 0x2C, 0)  -- 仅无冷却, 不改 unlocked
+    end
+  end
+end
+
+activateMono()
+
+local tries = 0
+local t = createTimer(nil, false)
+t.Interval = 15000
+t.OnTimer = function()
+  -- save-slot fingerprint: runID string; fallback runNumber
+  local fp = 0
+  if psCache ~= 0 then
+    local _, rid = getRunID(psCache)
+    if rid then fp = rid
+    else
+      local ok, rn = pcall(readInteger, psCache + 0x30)
+      if ok and rn then fp = "rn:" .. tostring(rn) end
+    end
+  end
+  if fp ~= 0 and fp ~= runIDCache then
+    psCache = 0 -- save changed: force rescan
+  end
+  if not psValid(psCache) then psCache = findPS() end
+  if psCache == 0 then
+    tries = tries + 1
+    if tries >= 60 then t.destroy() end
+    return
+  end
+  local _, rid2 = getRunID(psCache)
+  if rid2 then runIDCache = rid2
+  else
+    local ok, rn = pcall(readInteger, psCache + 0x30)
+    if ok and rn then runIDCache = "rn:" .. tostring(rn) end
+  end
+  local al = getAddressList()
+  for id, off in pairs(offs) do
+    local rec = al.getMemoryRecordByID(id)
+    if rec then rec.Address = string.format("%X", psCache + off) end
+  end
+  if safeMem == 0 then
+    local ok, m = pcall(allocateSharedMemory, "wsSafe", 16)
+    if ok and m and m ~= 0 then safeMem = m end
+  end
+  local sci = readQword(psCache + 0xC0)
+  local sc = 0
+  if sci and sci ~= 0 then
+    local okS, v = pcall(readQword, sci + 0x18)
+    if okS then sc = v or 0 end
+  end
+  local wsRec = al.getMemoryRecordByID(WS_BOOL)
+  local wdRec = al.getMemoryRecordByID(WS_DISC)
+  if clientValid(sc) then
+    if wsRec then wsRec.Address = string.format("%X", sc + 0xF0) end
+    if wdRec then wdRec.Address = string.format("%X", sc + 0xF4) end
+  elseif safeMem ~= 0 then
+    if wsRec then wsRec.Address = string.format("%X", safeMem) end
+    if wdRec then wdRec.Address = string.format("%X", safeMem + 4) end
+  end
+end
+t.Enabled = true
+
+local ta = createTimer(nil, false)
+ta.Interval = 100
+ta.OnTimer = function()
+  -- ID12 now hooks StoreService.IsOnCooldown/IsActive directly (no polling)
+end
+ta.Enabled = true
+]]></LuaScript>
+</CheatTable>
