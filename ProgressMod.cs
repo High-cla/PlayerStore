@@ -55,8 +55,7 @@ namespace ProgressMod
                     if (ForceFinish && machine != null && tgtTag != null)
                     {
                         // 把当前进度直接设为目标 (ModifyTag 写回, GetTagReadonly 是只读副本)
-                        Action<Il2Cpp.TagState> setCur = (ts) => { ts?.SetInt(tgt); };
-                        machine.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", setCur);
+                        machine.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", SetIntAction(tgt));
                         MelonLogger.Msg($"[Continue] force CURRENT {cur} -> {tgt} (via ModifyTag)");
                         return true; // 让原逻辑继续: 推进后 current>=target 触发完成产出
                     }
@@ -98,8 +97,7 @@ namespace ProgressMod
 
                     if (ForceFinish && machine != null && tgtTag != null && cur < tgt)
                     {
-                        Action<Il2Cpp.TagState> setCur = (ts) => { ts?.SetInt(tgt); };
-                        machine.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", setCur);
+                        machine.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", SetIntAction(tgt));
                         MelonLogger.Msg($"[Update] force CURRENT {cur} -> {tgt}");
                     }
                     return true; // 让原推进逻辑继续
@@ -171,8 +169,7 @@ namespace ProgressMod
                             }
                             if (cur >= 0 && tgt > 0 && cur < tgt)
                             {
-                                Action<Il2Cpp.TagState> setCur = (ts) => { ts?.SetInt(tgt); };
-                                it.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", setCur);
+                                it.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", SetIntAction(tgt));
                                 MelonLogger.Msg($"[EndNight] force CURRENT {cur} -> {tgt}");
                                 forced++;
                             }
@@ -335,7 +332,7 @@ namespace ProgressMod
         [HarmonyPatch(typeof(ModuleHelper), "InitModuleItem")]
         public static class PatchModuleBoost
         {
-            public static bool Prefix(GameItem __0, string __1, ref int __2, ref int __3, ref int __4)
+            public static bool Prefix(GameItem _, string __1, ref int __2, ref int __3, ref int __4)
             {
                 try
                 {
@@ -402,7 +399,7 @@ namespace ProgressMod
         [HarmonyPatch(typeof(MachineHelper), "TryDrawCyclePower")]
         public static class PatchTryDrawPower
         {
-            public static bool Prefix(GameItem __0, GameSlotInventory __1, ref bool __result)
+            public static bool Prefix(GameItem __0, GameSlotInventory _, ref bool __result)
             {
                 try
                 {
@@ -415,6 +412,13 @@ namespace ProgressMod
                 }
                 catch { return true; }
             }
+        }
+
+        // Il2Cpp 的 ModifyTag 需要 Il2CppSystem.Action<TagState>, 不能直接传 C# lambda
+        private static Il2CppSystem.Action<TagState> SetIntAction(int val)
+        {
+            Action<TagState> a = ts => ts?.SetInt(val);
+            return a;
         }
 
         private static string Describe(GameItem it)
