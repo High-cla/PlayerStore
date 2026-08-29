@@ -993,6 +993,15 @@ public class Core : MelonMod
 		{
 			candidates.Add(dictMC);
 		}
+		// 3) 堆叠叠放: 堆叠物品允许压已占格(>=1 新格可见), 少占地面, 释放空间
+		if (TryMinHoleStack(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictS2))
+		{
+			candidates.Add(dictS2);
+		}
+		if (paired != null && TryMinHoleStack(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictPS2))
+		{
+			candidates.Add(dictPS2);
+		}
 		// 择优: 剩余最大连续空矩最大者
 		Dictionary<GameItem, Placement> best = null;
 		long bestArea = -1;
@@ -1016,16 +1025,35 @@ public class Core : MelonMod
 				{
 					cs = mm.C0;
 				}
+				// 堆叠物品在堆叠叠放候选中允许与已占格重叠(叠上去), 只标新空格; 其余物品必须全空格(不重叠)
+				bool stackable = Stacked(kv.Key);
+				int freshCells = 0;
 				foreach ((int dx, int dy) in cs)
 				{
 					int cx = kv.Value.X + dx;
 					int cy = kv.Value.Y + dy;
-					if (cx < 0 || cy < 0 || cx >= W || cy >= H || occ[cx, cy])
+					if (cx < 0 || cy < 0 || cx >= W || cy >= H)
 					{
 						ok = false;
 						break;
 					}
+					if (occ[cx, cy])
+					{
+						if (!stackable)
+						{
+							ok = false;
+							break;
+						}
+						continue; // 堆叠物压已占格: 不重复标记
+					}
 					occ[cx, cy] = true;
+					freshCells++;
+				}
+				// 堆叠物至少 1 格可见约束
+				if (stackable && freshCells == 0)
+				{
+					ok = false;
+					break;
 				}
 				if (!ok)
 				{
@@ -1127,6 +1155,120 @@ public class Core : MelonMod
 				foreach ((int dx, int dy) in CellsOf(m, bestO))
 				{
 					occ[bestX + dx, bestY + dy] = true;
+				}
+			}
+		}
+		return true;
+	}
+
+	// MinHoleStack: 堆叠叠放变体. 堆叠物品(unitCount>1)允许压已占格(叠上去), 但至少 1 格新空格(可见约束);
+	// 评分 = 新格数最小(少占地面) -> 再最小化放置后最大空矩(挤出整块). 非堆叠/配对单元照旧 MinHole.
+	private static bool TryMinHoleStack(List<GameItem> fixedItems, List<object> units, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	{
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem fixedItem in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, fixedItem);
+		}
+		dictionary = new Dictionary<GameItem, Placement>();
+		List<object> order = new List<object>(units);
+		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+		foreach (object unit in order)
+		{
+			bool isPair = unit is PairUnit;
+			bool stackable = !isPair && Stacked((GameItem)unit);
+			ItemMask m = isPair ? ((PairUnit)unit).M : masks[(GameItem)unit];
+			long bestScore = long.MaxValue;
+			int bestX = -1;
+			int bestY = -1;
+			int bestO = 0;
+			for (int o = 0; o < 4; o++)
+			{
+				List<(int, int)> cells = CellsOf(m, o);
+				if (cells == null || cells.Count == 0)
+				{
+					continue;
+				}
+				int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+				int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+				if (gw > W || gh > H)
+				{
+					continue;
+				}
+				for (int py = 0; py + gh <= H; py++)
+				{
+					for (int px = 0; px + gw <= W; px++)
+					{
+						// 合法性: 堆叠物允许格重叠(反向下), 但须 >=1 格新空格; 非堆叠全空格
+						int fresh = 0;
+						bool ok = true;
+						foreach ((int dx, int dy) in cells)
+						{
+							int cx = px + dx;
+							int cy = py + dy;
+							if (cx < 0 || cy < 0 || cx >= W || cy >= H)
+							{
+								ok = false;
+								break;
+							}
+							if (occ[cx, cy])
+							{
+								if (!stackable)
+								{
+									ok = false;
+									break;
+								}
+								continue;
+							}
+							fresh++;
+						}
+						if (!ok || (stackable && fresh == 0))
+						{
+							continue;
+						}
+						// 评分: 1) 新格数小 2) 放置后最大空矩小(取候选) 3) tie 左上
+						bool[,] next = (bool[,])occ.Clone();
+						foreach ((int dx, int dy) in cells)
+						{
+							next[px + dx, py + dy] = true;
+						}
+						long la = LargestEmptyArea(next, W, H);
+						long score = stackable ? ((long)fresh << 32) | la : la;
+						if (score < bestScore)
+						{
+							bestScore = score;
+							bestX = px;
+							bestY = py;
+							bestO = o;
+						}
+					}
+				}
+			}
+			if (bestX < 0)
+			{
+				return false;
+			}
+			if (isPair)
+			{
+				PairUnit pf = (PairUnit)unit;
+				dictionary[pf.A] = new Placement(bestX + pf.Ax, bestY + pf.Ay, pf.OA);
+				dictionary[pf.B] = new Placement(bestX + pf.Bx, bestY + pf.By, pf.OB);
+				foreach ((int dx, int dy) in pf.M.C0)
+				{
+					occ[bestX + dx, bestY + dy] = true;
+				}
+			}
+			else
+			{
+				GameItem item = (GameItem)unit;
+				dictionary[item] = new Placement(bestX, bestY, bestO);
+				foreach ((int dx, int dy) in CellsOf(m, bestO))
+				{
+					// 堆叠物只标新空格(叠层不重复占用)
+					if (!occ[bestX + dx, bestY + dy])
+					{
+						occ[bestX + dx, bestY + dy] = true;
+					}
 				}
 			}
 		}
