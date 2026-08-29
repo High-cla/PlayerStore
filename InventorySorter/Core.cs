@@ -959,20 +959,23 @@ public class Core : MelonMod
 
 	private static Dictionary<GameItem, Placement> LayoutDense(List<GameItem> flat, Dictionary<GameItem, ItemMask> masks, int W, int H, List<GameItem> fixedItems)
 	{
-		// 先尝试互补配对 + 落地堆积; 若某个配对单元死锁, 仅拆开死锁的那对(其余配对保留), 重试
-		List<object> paired = BuildUnits(flat, masks);
-		paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
-		if (TryPlaceUnits(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dict))
+		// 小仓库(<100 格)跳过配对: 实测配对在小包有害(锁死紧密填充), 仅大包用
+		List<object> paired = (W * H >= 100) ? BuildUnits(flat, masks) : null;
+		if (paired != null)
 		{
-			return dict;
+			paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+			if (TryPlaceUnits(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dict))
+			{
+				return dict;
+			}
+			// 定位死锁: 找到第一次放不下的单元并拆开, 只拆这一对, 保持其余配对
+			List<object> split = SplitFailedUnit(fixedItems, paired, masks, W, H);
+			if (split != null && TryPlaceUnits(fixedItems, split, masks, W, H, out Dictionary<GameItem, Placement> dictS))
+			{
+				return dictS;
+			}
 		}
-		// 定位死锁: 找到第一次放不下的单元并拆开, 只拆这一对, 保持其余配对
-		List<object> split = SplitFailedUnit(fixedItems, paired, masks, W, H);
-		if (split != null && TryPlaceUnits(fixedItems, split, masks, W, H, out Dictionary<GameItem, Placement> dictS))
-		{
-			return dictS;
-		}
-		// 最后兜底: 完全无配对单件落地
+		// 兜底: 无配对单件落地(小仓库直接走这里)
 		List<object> singles = new List<object>(flat);
 		singles.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
 		if (TryPlaceUnits(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dict2))
