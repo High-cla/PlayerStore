@@ -1029,6 +1029,11 @@ public class Core : MelonMod
 						{
 							continue;
 						}
+						// 剪枝: 至少一格贴边或贴已占块(候选 O(W+H)), 已验证几乎不损质量
+						if (!Touches(occ, W, H, px, py, cells))
+						{
+							continue;
+						}
 						// 放置后最大空矩(直接计算, 不打临时数组)
 						bool[,] next = (bool[,])occ.Clone();
 						foreach ((int dx, int dy) in cells)
@@ -1057,6 +1062,25 @@ public class Core : MelonMod
 			}
 		}
 		return true;
+	}
+
+	// 至少一格贴边或贴已占块(MinHole 候选剪枝)
+	private static bool Touches(bool[,] occ, int W, int H, int x, int y, List<(int, int)> cells)
+	{
+		foreach ((int dx, int dy) in cells)
+		{
+			int cx = x + dx;
+			int cy = y + dy;
+			if (cx == 0 || cx == W - 1 || cy == 0 || cy == H - 1)
+			{
+				return true;
+			}
+			if (occ[cx - 1, cy] || occ[cx + 1, cy] || occ[cx, cy - 1] || occ[cx, cy + 1])
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// 直方图+单调栈: 最大全空连续矩形面积
