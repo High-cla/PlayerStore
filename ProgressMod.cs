@@ -341,9 +341,12 @@ namespace ProgressMod
                 try
                 {
                     if (ModuleBoostMult <= 1) return true;
-                    if (__2 != 0) { MelonLogger.Msg($"[Module] {__1}: perf {__2} -> {__2 * ModuleBoostMult}"); __2 *= ModuleBoostMult; }
-                    if (__3 != 0) { MelonLogger.Msg($"[Module] {__1}: eff {__3} -> {__3 * ModuleBoostMult}"); __3 *= ModuleBoostMult; }
-                    if (__4 != 0) { MelonLogger.Msg($"[Module] {__1}: qual {__4} -> {__4 * ModuleBoostMult}"); __4 *= ModuleBoostMult; }
+                    if (__2 > 0) { MelonLogger.Msg($"[Module] {__1}: perf {__2} -> {__2 * ModuleBoostMult}"); __2 *= ModuleBoostMult; }
+                    else if (__2 < 0) { MelonLogger.Msg($"[Module] {__1}: perf debuff {__2} -> {Math.Abs(__2)}"); __2 = Math.Abs(__2); }
+                    if (__3 > 0) { MelonLogger.Msg($"[Module] {__1}: eff {__3} -> {__3 * ModuleBoostMult}"); __3 *= ModuleBoostMult; }
+                    else if (__3 < 0) { MelonLogger.Msg($"[Module] {__1}: eff debuff {__3} -> {Math.Abs(__3)}"); __3 = Math.Abs(__3); }
+                    if (__4 > 0) { MelonLogger.Msg($"[Module] {__1}: qual {__4} -> {__4 * ModuleBoostMult}"); __4 *= ModuleBoostMult; }
+                    else if (__4 < 0) { MelonLogger.Msg($"[Module] {__1}: qual debuff {__4} -> {Math.Abs(__4)}"); __4 = Math.Abs(__4); }
                     return true; // 让原逻辑用放大后的值
                 }
                 catch (Exception e) { MelonLogger.Error($"[Module] InitModuleItem patch err: {e.Message}"); return true; }
