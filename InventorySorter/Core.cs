@@ -2181,14 +2181,15 @@ public class Core : MelonMod
 					while (top >= 0 && hist[stack[top]] > ch)
 					{
 						int idx = stack[top--];
-						int width = (top >= 0) ? (x - stack[top] - 1) : x;
+						int leftBound = (top >= 0) ? stack[top] + 1 : 0;
+						int width = x - leftBound;
 						int area = hist[idx] * width;
 						if (area > maxA)
 						{
 							maxA = area;
 							mw = width;
 							mh = hist[idx];
-							mx = (top >= 0) ? stack[top] + 1 : 0;
+							mx = leftBound;
 							my = y - hist[idx] + 1;
 						}
 					}
