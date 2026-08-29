@@ -852,7 +852,10 @@ public class Core : MelonMod
 				return;
 			}
 			int num = 0;
-			foreach (KeyValuePair<GameItem, Placement> item11 in dictionary3)
+			// 堆叠物品(unitCount>1)最后放置: 游戏按放置顺序渲染, 后放的贴图在上层, 保证堆叠物至少一格视觉可见(否则被盖住看着取不出)
+			List<KeyValuePair<GameItem, Placement>> order11 = new List<KeyValuePair<GameItem, Placement>>(dictionary3);
+			order11.Sort((a, b) => (Stacked(a.Key) ? 1 : 0).CompareTo(Stacked(b.Key) ? 1 : 0));
+			foreach (KeyValuePair<GameItem, Placement> item11 in order11)
 			{
 				Placement value3 = item11.Value;
 				PlaceItem(item11.Key, value3.X, value3.Y, value3.O);
@@ -2245,6 +2248,19 @@ public class Core : MelonMod
 		catch
 		{
 			return 1;
+		}
+	}
+
+	// 堆叠物品: unitCount > 1 (多份叠在一起); 排序最后放置使其渲染在上层, 至少一格可见
+	private static bool Stacked(GameItem it)
+	{
+		try
+		{
+			return it.unitCount > 1;
+		}
+		catch
+		{
+			return false;
 		}
 	}
 

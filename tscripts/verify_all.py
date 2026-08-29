@@ -197,12 +197,17 @@ ALGOS = {
 
 
 def run():
-    groups = parse_dump()
+    sessions = parse_dump()
     out = []
-    for (w, h), items in sorted(groups.items()):
+    best_by_key = {}
+    for w, h, items in sessions:
         total = sum(len(i["cells"]) for i in items)
         if total > w * h or total == 0:
             continue
+        data = (w, h, items, total)
+        if data[0:2] not in best_by_key or total > best_by_key[data[0:2]][3]:
+            best_by_key[data[0:2]] = data
+    for w, h, items, total in best_by_key.values():
         v.W, v.H = w, h
         row = {"group": f"{w}x{h}", "n": len(items), "cells": total}
         for name, fn in ALGOS.items():
