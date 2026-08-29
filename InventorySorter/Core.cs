@@ -814,9 +814,8 @@ public class Core : MelonMod
 			{
 				dictionary2[item9] = BuildMask(item9);
 			}
-			// 诊断插桩: 每次排序无条件 dump 新形状(缓存去重)到 Mods/inv_shape_dump.txt
-			DumpShapes(w, h, dictionary2);
-			Dictionary<GameItem, Placement> dictionary3 = null;
+			// 诊断插桩: 每次排序无条件 dump 新形状(缓存去重)+当前空间统计 到 Mods/inv_shape_dump.txt
+			DumpShapes(w, h, dictionary2, list4);			Dictionary<GameItem, Placement> dictionary3 = null;
 			string value2 = null;
 			if (GroupByTag.Value)
 			{
@@ -2122,10 +2121,83 @@ public class Core : MelonMod
 	// 诊断: dump 背包尺寸 + 每件散件形状(缓存: 每唯一形状仅首见 dump)到 Mods/inv_shape_dump.txt. 编译后自动调用, 无需开关.
 	private static readonly HashSet<string> _dumpedShapes = new HashSet<string>();
 
-	private static void DumpShapes(int w, int h, Dictionary<GameItem, ItemMask> masks)
+	private static void DumpShapes(int w, int h, Dictionary<GameItem, ItemMask> masks, List<(GameItem, int, int, int, bool)> placed)
 	{
 		try
 		{
+			// 当前占用统计: 用每件物品当前位置(minX/minY/orientation) + mask cells 重建占用网格
+			bool[,] occ = new bool[w, h];
+			foreach ((GameItem it, int px, int py, int po, bool flip) in placed)
+			{
+				if (!masks.TryGetValue(it, out ItemMask m))
+				{
+					continue;
+				}
+				List<(int, int)> cells = CellsOf(m, po);
+				if (cells == null || cells.Count == 0)
+				{
+					cells = m.C0;
+				}
+				foreach ((int dx, int dy) in cells)
+				{
+					int cx = px + dx;
+					int cy = py + dy;
+					if (cx >= 0 && cx < w && cy >= 0 && cy < h)
+					{
+						occ[cx, cy] = true;
+					}
+				}
+			}
+			int occupied = 0;
+			for (int x = 0; x < w; x++)
+			{
+				for (int y = 0; y < h; y++)
+				{
+					if (occ[x, y])
+					{
+						occupied++;
+					}
+				}
+			}
+			int free = w * h - occupied;
+			// 最大连续空矩形: 逐行直方图 + 单调栈 O(W*H)
+			int maxA = 0;
+			int mx = 0;
+			int my = 0;
+			int mw = 0;
+			int mh = 0;
+			int[] hist = new int[w];
+			int[] stack = new int[w + 1];
+			for (int y = 0; y < h; y++)
+			{
+				for (int x = 0; x < w; x++)
+				{
+					hist[x] = occ[x, y] ? 0 : hist[x] + 1;
+				}
+				int top = -1;
+				for (int x = 0; x <= w; x++)
+				{
+					int ch = (x < w) ? hist[x] : 0;
+					while (top >= 0 && hist[stack[top]] > ch)
+					{
+						int idx = stack[top--];
+						int width = (top >= 0) ? (x - stack[top] - 1) : x;
+						int area = hist[idx] * width;
+						if (area > maxA)
+						{
+							maxA = area;
+							mw = width;
+							mh = hist[idx];
+							mx = (top >= 0) ? stack[top] + 1 : 0;
+							my = y - hist[idx] + 1;
+						}
+					}
+					if (x < w)
+					{
+						stack[++top] = x;
+					}
+				}
+			}
 			List<string> lines = new List<string>();
 			foreach (KeyValuePair<GameItem, ItemMask> pair in masks)
 			{
@@ -2178,8 +2250,9 @@ public class Core : MelonMod
 					lines.Add(new string(row));
 				}
 			}
-			// 头部: 背包尺寸
-			string header = "== inv " + w + "x" + h + " == " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+			// 头部: 背包尺寸 + 当前占用/剩余/最大连续空矩形
+			string header = "== inv " + w + "x" + h + " == " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
+				+ " occ=" + occupied + " free=" + free + " maxempty=" + maxA + " @" + mx + "," + my + " " + mw + "x" + mh;
 			string file = Path.Combine(Path.GetDirectoryName(typeof(Core).Assembly.Location), "inv_shape_dump.txt");
 			string text = header + "\n" + string.Join("\n", lines) + "\n";
 			File.AppendAllText(file, text, Encoding.UTF8);
