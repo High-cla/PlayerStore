@@ -2325,6 +2325,8 @@ public class Core : MelonMod
 	{
 		try
 		{
+			// per-session: 每次排序会话内去重(相同形状只打印一次), 跨会话不缓存 — 保证每会话完整物品集可重建
+			_dumpedShapes.Clear();
 			// 当前占用统计: 用每件物品当前位置(minX/minY/orientation) + mask cells 重建占用网格
 			bool[,] occ = new bool[w, h];
 			foreach ((GameItem it, int px, int py, int po, bool flip) in placed)
@@ -2421,8 +2423,8 @@ public class Core : MelonMod
 					tag = TagKey(it);
 				}
 				catch { }
-				ItemMask m = pair.Value;
-				// 形状签名: ident + 尺寸 + C0 格子序列; 已 dump 过则跳过(缓存)
+			ItemMask m = pair.Value;
+				// 形状签名: ident + 尺寸 + C0 格子序列; 本会话内已 dump 过则跳过(per-session 缓存)
 				StringBuilder sb = new StringBuilder();
 				foreach ((int dx, int dy) in m.C0)
 				{
