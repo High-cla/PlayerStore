@@ -312,8 +312,8 @@ namespace ProgressMod
                 try
                 {
                     if (__0 == null) return false;
-                    MelonLogger.Msg("[Water] FillWithRustWater(High/LowEnd) -> 转为 FillWithPureWater");
-                    WaterHelper.FillWithPureWater(__0);
+                    MelonLogger.Msg("[Water] FillWithRustWater(High/LowEnd) -> 转为 FillWithHighQualityWater");
+                    WaterHelper.FillWithHighQualityWater(__0);
                     return false; // 跳过原逻辑
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] FillWithRustWater patch err: {e.Message}"); return true; }
