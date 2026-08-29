@@ -981,10 +981,14 @@ public class Core : MelonMod
 		{
 			candidates.Add(dict2);
 		}
-		// 2) MinHole: 实测大仓最优(挤出最大整块连续区), 小仓亦常最优
-		if (TryMinHole(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictM))
+		// 2) MinHole: 实测大仓最优(挤出最大整块连续区), 小仓亦常最优. 两个变体: 裸单件 + 级联(配对单元进MinHole)
+		if (TryMinHole(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictM))
 		{
 			candidates.Add(dictM);
+		}
+		if (paired != null && TryMinHole(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictMC))
+		{
+			candidates.Add(dictMC);
 		}
 		// 择优: 剩余最大连续空矩最大者
 		Dictionary<GameItem, Placement> best = null;
@@ -1039,9 +1043,8 @@ public class Core : MelonMod
 		return best;
 	}
 
-	// MinHole: 每件物品在全部合法位置中, 选"放置后该背包最大连续空矩形最小"的位置(挤压碎片到边界, 留出最大整块)
-	// 目标函数与用户相反(最小空矩)但实测反向最优: 挤压后剩余最大空矩反而更大(集中整块)
-	private static bool TryMinHole(List<GameItem> fixedItems, List<GameItem> flat, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	// MinHole(级联版): 输入可以是已配对的单元(接力: 先用 BuildUnits 配对, 再对单元跑 MinHole)
+	private static bool TryMinHole(List<GameItem> fixedItems, List<object> units, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
 	{
 		bool[,] occ = new bool[W, H];
 		foreach (GameItem fixedItem in fixedItems)
@@ -1049,11 +1052,11 @@ public class Core : MelonMod
 			MarkCurrentCells(occ, W, H, fixedItem);
 		}
 		dictionary = new Dictionary<GameItem, Placement>();
-		List<GameItem> order = new List<GameItem>(flat);
+		List<object> order = new List<object>(units);
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
-		foreach (GameItem item in order)
+		foreach (object unit in order)
 		{
-			ItemMask m = masks[item];
+			ItemMask m = (unit is PairUnit pu) ? pu.M : masks[(GameItem)unit];
 			long bestScore = long.MaxValue;
 			int bestX = -1;
 			int bestY = -1;
@@ -1105,10 +1108,23 @@ public class Core : MelonMod
 			{
 				return false;
 			}
-			dictionary[item] = new Placement(bestX, bestY, bestO);
-			foreach ((int dx, int dy) in CellsOf(m, bestO))
+			if (unit is PairUnit pf)
 			{
-				occ[bestX + dx, bestY + dy] = true;
+				dictionary[pf.A] = new Placement(bestX + pf.Ax, bestY + pf.Ay, pf.OA);
+				dictionary[pf.B] = new Placement(bestX + pf.Bx, bestY + pf.By, pf.OB);
+				foreach ((int dx, int dy) in pf.M.C0)
+				{
+					occ[bestX + dx, bestY + dy] = true;
+				}
+			}
+			else
+			{
+				GameItem item = (GameItem)unit;
+				dictionary[item] = new Placement(bestX, bestY, bestO);
+				foreach ((int dx, int dy) in CellsOf(m, bestO))
+				{
+					occ[bestX + dx, bestY + dy] = true;
+				}
 			}
 		}
 		return true;
