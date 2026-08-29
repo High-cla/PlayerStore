@@ -332,17 +332,17 @@ namespace ProgressMod
         [HarmonyPatch(typeof(ModuleHelper), "InitModuleItem")]
         public static class PatchModuleBoost
         {
-            public static bool Prefix(GameItem _, string __1, ref int __2, ref int __3, ref int __4)
+            public static bool Prefix(GameItem item, string moduleType, ref int bonusPercentagePerformance, ref int bonusPercentageEfficiency, ref int bonusPercentageQuality)
             {
                 try
                 {
                     if (ModuleBoostMult <= 1) return true;
-                    if (__2 > 0) { MelonLogger.Msg($"[Module] {__1}: perf {__2} -> {__2 * ModuleBoostMult}"); __2 *= ModuleBoostMult; }
-                    else if (__2 < 0) { MelonLogger.Msg($"[Module] {__1}: perf debuff {__2} -> {Math.Abs(__2)}"); __2 = Math.Abs(__2); }
-                    if (__3 > 0) { MelonLogger.Msg($"[Module] {__1}: eff {__3} -> {__3 * ModuleBoostMult}"); __3 *= ModuleBoostMult; }
-                    else if (__3 < 0) { MelonLogger.Msg($"[Module] {__1}: eff debuff {__3} -> {Math.Abs(__3)}"); __3 = Math.Abs(__3); }
-                    if (__4 > 0) { MelonLogger.Msg($"[Module] {__1}: qual {__4} -> {__4 * ModuleBoostMult}"); __4 *= ModuleBoostMult; }
-                    else if (__4 < 0) { MelonLogger.Msg($"[Module] {__1}: qual debuff {__4} -> {Math.Abs(__4)}"); __4 = Math.Abs(__4); }
+                    if (bonusPercentagePerformance > 0) { MelonLogger.Msg($"[Module] {moduleType}: perf {bonusPercentagePerformance} -> {bonusPercentagePerformance * ModuleBoostMult}"); bonusPercentagePerformance *= ModuleBoostMult; }
+                    else if (bonusPercentagePerformance < 0) { MelonLogger.Msg($"[Module] {moduleType}: perf debuff {bonusPercentagePerformance} -> {Math.Abs(bonusPercentagePerformance)}"); bonusPercentagePerformance = Math.Abs(bonusPercentagePerformance); }
+                    if (bonusPercentageEfficiency > 0) { MelonLogger.Msg($"[Module] {moduleType}: eff {bonusPercentageEfficiency} -> {bonusPercentageEfficiency * ModuleBoostMult}"); bonusPercentageEfficiency *= ModuleBoostMult; }
+                    else if (bonusPercentageEfficiency < 0) { MelonLogger.Msg($"[Module] {moduleType}: eff debuff {bonusPercentageEfficiency} -> {Math.Abs(bonusPercentageEfficiency)}"); bonusPercentageEfficiency = Math.Abs(bonusPercentageEfficiency); }
+                    if (bonusPercentageQuality > 0) { MelonLogger.Msg($"[Module] {moduleType}: qual {bonusPercentageQuality} -> {bonusPercentageQuality * ModuleBoostMult}"); bonusPercentageQuality *= ModuleBoostMult; }
+                    else if (bonusPercentageQuality < 0) { MelonLogger.Msg($"[Module] {moduleType}: qual debuff {bonusPercentageQuality} -> {Math.Abs(bonusPercentageQuality)}"); bonusPercentageQuality = Math.Abs(bonusPercentageQuality); }
                     return true; // 让原逻辑用放大后的值
                 }
                 catch (Exception e) { MelonLogger.Error($"[Module] InitModuleItem patch err: {e.Message}"); return true; }
@@ -378,14 +378,14 @@ namespace ProgressMod
 
         // ============ 免电运转 ============
         // CanPower 恒真 + TryDrawCyclePower 跳过原逻辑(不扣电)
-        [HarmonyPatch(typeof(MachineHelper), "CanPower")]
+        [HarmonyPatch(typeof(MachineHelper), "CanPower", new Type[] { typeof(GameItem), typeof(GameSlotInventory) })]
         public static class PatchCanPower
         {
-            public static bool Prefix(GameItem __0, ref bool __result)
+            public static bool Prefix(GameItem machine, ref bool __result)
             {
                 try
                 {
-                    if (FreePower && __0 != null)
+                    if (FreePower && machine != null)
                     {
                         __result = true;
                         return false; // 跳过原检查
@@ -399,11 +399,11 @@ namespace ProgressMod
         [HarmonyPatch(typeof(MachineHelper), "TryDrawCyclePower")]
         public static class PatchTryDrawPower
         {
-            public static bool Prefix(GameItem __0, GameSlotInventory _, ref bool __result)
+            public static bool Prefix(GameItem machine, GameSlotInventory batterySlot, ref bool __result)
             {
                 try
                 {
-                    if (FreePower && __0 != null)
+                    if (FreePower && machine != null)
                     {
                         __result = true;
                         return false; // 不消耗电池, 视为供电成功
