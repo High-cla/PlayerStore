@@ -5,7 +5,7 @@ using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.9.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.10.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -17,7 +17,7 @@ namespace ProgressMod
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("ProgressMod v1.9.0 init");
+            LoggerInstance.Msg("ProgressMod v1.10.0 init");
         }
 
         // ============ 机器进度强制满 ============
@@ -317,6 +317,23 @@ namespace ProgressMod
                     return false; // 跳过原逻辑
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] FillWithRustWater patch err: {e.Message}"); return true; }
+            }
+        }
+
+        // 水管/一切锈水源头: ItemConditionList.CreateRustWater() -> 转 CreatePureWater()
+        // (dump 证实水管不走 WaterHelper, 灌水在条件层 CreateRustWater)
+        [HarmonyPatch(typeof(ItemConditionList), "CreateRustWater")]
+        public static class PatchRustWaterCondToPure
+        {
+            public static bool Prefix(ref ItemCondition __result)
+            {
+                try
+                {
+                    MelonLogger.Msg("[Water] CreateRustWater -> 转为 CreatePureWater");
+                    __result = ItemConditionList.CreatePureWater();
+                    return false; // 跳过原逻辑
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] CreateRustWater patch err: {e.Message}"); return true; }
             }
         }
 
