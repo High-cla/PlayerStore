@@ -4,7 +4,7 @@ using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.11.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.12.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -13,10 +13,13 @@ namespace ProgressMod
     {
         public static readonly bool ForceFinish = true;   // 进度满: 拦截推进并直接完成
         public static readonly bool NoDurability = true;  // 不消耗耐久
+        public static readonly int ModuleBoostMult = 10;  // 模块加成倍率
+        public static readonly bool FreePower = true;     // 免电运转
+        public static readonly bool MaxWineQuality = true; // 酒品质最高档
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("ProgressMod v1.11.0 init");
+            LoggerInstance.Msg("ProgressMod v1.12.0 init");
         }
 
         // ============ 机器进度强制满 ============
@@ -324,6 +327,91 @@ namespace ProgressMod
                     return true;
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] AddLiquid patch err: {e.Message}"); return true; }
+            }
+        }
+
+        // ============ 模块加成强化 ============
+        // ModuleHelper.InitModuleItem 是所有模块(含神经模组)初始化入口,
+        // 3 个加成百分比直接乘大。模块创建时调用一次。
+        [HarmonyPatch(typeof(ModuleHelper), "InitModuleItem")]
+        public static class PatchModuleBoost
+        {
+            public static bool Prefix(GameItem __0, string __1, ref int __2, ref int __3, ref int __4)
+            {
+                try
+                {
+                    if (ModuleBoostMult <= 1) return true;
+                    if (__2 != 0) { MelonLogger.Msg($"[Module] {__1}: perf {__2} -> {__2 * ModuleBoostMult}"); __2 *= ModuleBoostMult; }
+                    if (__3 != 0) { MelonLogger.Msg($"[Module] {__1}: eff {__3} -> {__3 * ModuleBoostMult}"); __3 *= ModuleBoostMult; }
+                    if (__4 != 0) { MelonLogger.Msg($"[Module] {__1}: qual {__4} -> {__4 * ModuleBoostMult}"); __4 *= ModuleBoostMult; }
+                    return true; // 让原逻辑用放大后的值
+                }
+                catch (Exception e) { MelonLogger.Error($"[Module] InitModuleItem patch err: {e.Message}"); return true; }
+            }
+        }
+
+        // ============ TurboBooster 永远就绪 ============
+        [HarmonyPatch(typeof(MachineTurboBoosterAdv), "IsTurboReady")]
+        public static class PatchTurboReady
+        {
+            public static void Postfix(ref bool __result)
+            {
+                try { if (ForceFinish) __result = true; }
+                catch { }
+            }
+        }
+
+        // ============ 酒品质最高档 ============
+        [HarmonyPatch(typeof(WineHelper), "GetWineQualityTier")]
+        public static class PatchWineQuality
+        {
+            public static void Postfix(GameItem __0, ref int __result)
+            {
+                try
+                {
+                    if (!MaxWineQuality || __0 == null) return;
+                    // 最高档取 6 (游戏酒品质 tier 范围约 0-5)
+                    __result = Math.Max(__result, 6);
+                }
+                catch { }
+            }
+        }
+
+        // ============ 免电运转 ============
+        // CanPower 恒真 + TryDrawCyclePower 跳过原逻辑(不扣电)
+        [HarmonyPatch(typeof(MachineHelper), "CanPower")]
+        public static class PatchCanPower
+        {
+            public static bool Prefix(GameItem __0, ref bool __result)
+            {
+                try
+                {
+                    if (FreePower && __0 != null)
+                    {
+                        __result = true;
+                        return false; // 跳过原检查
+                    }
+                    return true;
+                }
+                catch { return true; }
+            }
+        }
+
+        [HarmonyPatch(typeof(MachineHelper), "TryDrawCyclePower")]
+        public static class PatchTryDrawPower
+        {
+            public static bool Prefix(GameItem __0, GameSlotInventory __1, ref bool __result)
+            {
+                try
+                {
+                    if (FreePower && __0 != null)
+                    {
+                        __result = true;
+                        return false; // 不消耗电池, 视为供电成功
+                    }
+                    return true;
+                }
+                catch { return true; }
             }
         }
 
