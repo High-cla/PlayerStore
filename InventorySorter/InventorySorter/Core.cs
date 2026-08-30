@@ -85,6 +85,12 @@ public class Core : MelonMod
 
 	internal static bool ButtonsVisible = true;
 
+	// OnGUI 缓存: GUI 事件循环同帧多次调用 OnGUI, CollectSortables 结果同帧不变, 只算一次
+	private static float _guiCacheTimer = -999f;
+	private static readonly List<GameInventory> _guiInvs = new List<GameInventory>();
+	private static readonly List<string> _guiLabels = new List<string>();
+	private static int _guiCount = -1;
+
 	internal static string LastAction = "";
 
 	private static float _lastActionAt = -999f;
@@ -348,9 +354,18 @@ public class Core : MelonMod
 		{
 			return;
 		}
-		List<GameInventory> list = new List<GameInventory>();
-		List<string> list2 = new List<string>();
-		int value = CollectSortables(list, list2);
+		// 同帧缓存: GUI 事件循环(Repaint/Layout/...)同帧多次调用 OnGUI, 结果不变. 每 0.3s 重算一次.
+		float nowGui = Time.realtimeSinceStartup;
+		if (nowGui - _guiCacheTimer > 0.3f)
+		{
+			_guiCacheTimer = nowGui;
+			_guiInvs.Clear();
+			_guiLabels.Clear();
+			_guiCount = CollectSortables(_guiInvs, _guiLabels);
+		}
+		List<GameInventory> list = _guiInvs;
+		List<string> list2 = _guiLabels;
+		int value = _guiCount;
 		Event current = Event.current;
 		bool flag = current != null && (int)current.type == 0 && current.button == 0;
 		Vector2 val = (Vector2)((current != null) ? current.mousePosition : new Vector2(-1f, -1f));
