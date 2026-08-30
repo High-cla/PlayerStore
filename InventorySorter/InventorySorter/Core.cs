@@ -128,7 +128,7 @@ public class Core : MelonMod
 	{
 		Cfg = MelonPreferences.CreateCategory("InventorySorter");
 		Enabled = Cfg.CreateEntry<bool>("Enabled", true, (string)null, "Master on/off for the Sort buttons.", false, false, (ValueValidator)null, (string)null);
-		KeepContainers = Cfg.CreateEntry<bool>("KeepContainersInPlace", true, (string)null, "Leave placed storage units (bays/cages) where they are; sort only loose items.", false, false, (ValueValidator)null, (string)null);
+		KeepContainers = Cfg.CreateEntry<bool>("KeepContainersInPlace", false, (string)null, "Leave placed storage units (bays/cages) where they are; sort only loose items. Disabled: containers (incl. liquid bottles) sort too.", false, false, (ValueValidator)null, (string)null);
 		SkipBarter = Cfg.CreateEntry<bool>("SkipBarterWindows", true, (string)null, "Do not add a Sort button to the barter / item-choose popups.", false, false, (ValueValidator)null, (string)null);
 		MinCells = Cfg.CreateEntry<int>("MinCells", 10, (string)null, "Hide any grid smaller than this many cells (drops tiny slot/junk grids).", false, false, (ValueValidator)null, (string)null);
 		ShowBackground = Cfg.CreateEntry<bool>("ShowBackground", true, (string)null, "Show the always-open inventories (display case / main storage). Titled containers always show.", false, false, (ValueValidator)null, (string)null);
