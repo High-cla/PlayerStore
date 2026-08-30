@@ -10,12 +10,20 @@ namespace ProgressMod
 {
     public class Core : MelonMod
     {
-        public static readonly bool ForceFinish = true;   // 进度满: 拦截推进并直接完成
-        public static readonly bool NoDurability = true;  // 不消耗耐久
-        public static readonly int ModuleBoostMult = 10;  // 模块加成倍率
-        public static readonly bool FreePower = true;     // 免电运转
-        public static readonly bool MaxWineQuality = true; // 酒品质最高档
-        public static readonly bool AutoIdentify = true;    // 对质类物品(香烟/注射器/印章)自动鉴定
+        private static readonly MelonPreferences_Category Cfg = MelonPreferences.CreateCategory("ProgressMod");
+        public static readonly MelonPreferences_Entry<bool> CfgForceFinish = Cfg.CreateEntry<bool>("ForceFinish", true, "进度满: 拦截推进并直接完成");
+        public static readonly MelonPreferences_Entry<bool> CfgNoDurability = Cfg.CreateEntry<bool>("NoDurability", true, "不消耗耐久");
+        public static readonly MelonPreferences_Entry<int> CfgModuleBoostMult = Cfg.CreateEntry<int>("ModuleBoostMult", 10, "模块加成倍率");
+        public static readonly MelonPreferences_Entry<bool> CfgFreePower = Cfg.CreateEntry<bool>("FreePower", true, "免电运转");
+        public static readonly MelonPreferences_Entry<bool> CfgMaxWineQuality = Cfg.CreateEntry<bool>("MaxWineQuality", true, "酒品质最高档");
+        public static readonly MelonPreferences_Entry<bool> CfgAutoIdentify = Cfg.CreateEntry<bool>("AutoIdentify", true, "对质类物品(香烟/注射器/印章)自动鉴定");
+        // 逻辑引用保持同名只读属性, 24 处调用处零改动
+        public static bool ForceFinish => CfgForceFinish.Value;
+        public static bool NoDurability => CfgNoDurability.Value;
+        public static int ModuleBoostMult => CfgModuleBoostMult.Value;
+        public static bool FreePower => CfgFreePower.Value;
+        public static bool MaxWineQuality => CfgMaxWineQuality.Value;
+        public static bool AutoIdentify => CfgAutoIdentify.Value;
 
         public override void OnInitializeMelon()
         {
