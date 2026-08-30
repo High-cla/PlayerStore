@@ -1412,13 +1412,22 @@ public class Core : MelonMod
 		List<GameItem> order = new List<GameItem>(singles);
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
 		List<(int x, int y, int w, int h)> freerects = new List<(int x, int y, int w, int h)> { (0, 0, W, H) };
+		// 全局最小物品包围盒: 碎片放不下任何物品(旋转后) 即死洞, 死洞面积计入评分
+		int minW = int.MaxValue, minH = int.MaxValue;
+		foreach (GameItem it in order)
+		{
+			ItemMask mm = masks[it];
+			minW = Math.Min(minW, Math.Min(mm.Gw0, mm.Gh0));
+			minH = Math.Min(minH, Math.Min(mm.Gw0, mm.Gh0));
+		}
+		if (minW == int.MaxValue) minW = minH = 1;
 		foreach (GameItem item in order)
 		{
 			ItemMask m = masks[item];
-			// 选 waste 最小候选 (free rect + 朝向)
+			// 选 评分最小候选 (free rect + 朝向): waste + 0.1*死洞面积
 			int bestFi = -1;
 			int bestO = 0;
-			int bestWaste = int.MaxValue;
+			long bestScore = long.MaxValue;
 			for (int fi = 0; fi < freerects.Count; fi++)
 			{
 				(var frx, var fry, var frw, var frh) = freerects[fi];
@@ -1430,9 +1439,16 @@ public class Core : MelonMod
 					int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
 					if (gw > frw || gh > frh) continue;
 					int waste = frw * frh - gw * gh;
-					if (waste < bestWaste)
+					// 死洞: 割裂产生的碎片中放不下全局最小物品的碎片面积
+					long dead = 0;
+					int dRight = frw - gw;
+					int dBelow = frh - gh;
+					if (dBelow > 0 && (frw < minW || dBelow < minH)) dead += (long)frw * dBelow;
+					if (dRight > 0 && (dRight < minW || frh < minH)) dead += (long)dRight * frh;
+					long score = waste * 10 + dead; // 等价 waste + 0.1*dead (整型避免浮点)
+					if (score < bestScore)
 					{
-						bestWaste = waste;
+						bestScore = score;
 						bestFi = fi;
 						bestO = o;
 					}
