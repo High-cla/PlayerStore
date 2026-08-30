@@ -133,33 +133,33 @@ namespace ProgressMod
                         var sb = new System.Text.StringBuilder();
                         var errSb = new System.Text.StringBuilder();
                         int dirCount = 0, itemCount = 0;
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "AmenitiesItemDirectory", () => DirectoryMaster.GetIdentifierList<AmenitiesItemDirectory>("AmenitiesItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ArmorItemDirectory", () => DirectoryMaster.GetIdentifierList<ArmorItemDirectory>("ArmorItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ConstructionItemDirectory", () => DirectoryMaster.GetIdentifierList<ConstructionItemDirectory>("ConstructionItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ContainerItemDirectory", () => DirectoryMaster.GetIdentifierList<ContainerItemDirectory>("ContainerItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "EquipmentDirectory", () => DirectoryMaster.GetIdentifierList<EquipmentDirectory>("EquipmentDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ExplosiveItemDirectory", () => DirectoryMaster.GetIdentifierList<ExplosiveItemDirectory>("ExplosiveItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "FoodItemDirectory", () => DirectoryMaster.GetIdentifierList<FoodItemDirectory>("FoodItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "FurnitureItemDirectory", () => DirectoryMaster.GetIdentifierList<FurnitureItemDirectory>("FurnitureItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "GunModDirectory", () => DirectoryMaster.GetIdentifierList<GunModDirectory>("GunModDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "GunsItemDirectory", () => DirectoryMaster.GetIdentifierList<GunsItemDirectory>("GunsItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "HusbandryDirectory", () => DirectoryMaster.GetIdentifierList<HusbandryDirectory>("HusbandryDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "HydroponicDirectory", () => DirectoryMaster.GetIdentifierList<HydroponicDirectory>("HydroponicDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "KeyItemDirectory", () => DirectoryMaster.GetIdentifierList<KeyItemDirectory>("KeyItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MaterialDirectory", () => DirectoryMaster.GetIdentifierList<MaterialDirectory>("MaterialDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MedsItemDirectory", () => DirectoryMaster.GetIdentifierList<MedsItemDirectory>("MedsItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MeleeWeaponItemDirectory", () => DirectoryMaster.GetIdentifierList<MeleeWeaponItemDirectory>("MeleeWeaponItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MiscItemDirectory", () => DirectoryMaster.GetIdentifierList<MiscItemDirectory>("MiscItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ModItemDirectory", () => DirectoryMaster.GetIdentifierList<ModItemDirectory>("ModItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ModuleDirectory", () => DirectoryMaster.GetIdentifierList<ModuleDirectory>("ModuleDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "OrganDirectory", () => DirectoryMaster.GetIdentifierList<OrganDirectory>("OrganDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "RuinedMachineDirectory", () => DirectoryMaster.GetIdentifierList<RuinedMachineDirectory>("RuinedMachineDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ShipItemDirectory", () => DirectoryMaster.GetIdentifierList<ShipItemDirectory>("ShipItemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ShipSystemDirectory", () => DirectoryMaster.GetIdentifierList<ShipSystemDirectory>("ShipSystemDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "TechnicianBackpackDirectory", () => DirectoryMaster.GetIdentifierList<TechnicianBackpackDirectory>("TechnicianBackpackDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ToolDirectory", () => DirectoryMaster.GetIdentifierList<ToolDirectory>("ToolDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "UnusedDirectory", () => DirectoryMaster.GetIdentifierList<UnusedDirectory>("UnusedDirectory"));
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "WineDirectory", () => DirectoryMaster.GetIdentifierList<WineDirectory>("WineDirectory"));
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "AmenitiesItemDirectory", () => GetDirectorKeys<AmenitiesItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ArmorItemDirectory", () => GetDirectorKeys<ArmorItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ConstructionItemDirectory", () => GetDirectorKeys<ConstructionItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ContainerItemDirectory", () => GetDirectorKeys<ContainerItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "EquipmentDirectory", () => GetDirectorKeys<EquipmentDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ExplosiveItemDirectory", () => GetDirectorKeys<ExplosiveItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "FoodItemDirectory", () => GetDirectorKeys<FoodItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "FurnitureItemDirectory", () => GetDirectorKeys<FurnitureItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "GunModDirectory", () => GetDirectorKeys<GunModDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "GunsItemDirectory", () => GetDirectorKeys<GunsItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "HusbandryDirectory", () => GetDirectorKeys<HusbandryDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "HydroponicDirectory", () => GetDirectorKeys<HydroponicDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "KeyItemDirectory", () => GetDirectorKeys<KeyItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MaterialDirectory", () => GetDirectorKeys<MaterialDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MedsItemDirectory", () => GetDirectorKeys<MedsItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MeleeWeaponItemDirectory", () => GetDirectorKeys<MeleeWeaponItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MiscItemDirectory", () => GetDirectorKeys<MiscItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ModItemDirectory", () => GetDirectorKeys<ModItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ModuleDirectory", () => GetDirectorKeys<ModuleDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "OrganDirectory", () => GetDirectorKeys<OrganDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "RuinedMachineDirectory", () => GetDirectorKeys<RuinedMachineDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ShipItemDirectory", () => GetDirectorKeys<ShipItemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ShipSystemDirectory", () => GetDirectorKeys<ShipSystemDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "TechnicianBackpackDirectory", () => GetDirectorKeys<TechnicianBackpackDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ToolDirectory", () => GetDirectorKeys<ToolDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "UnusedDirectory", () => GetDirectorKeys<UnusedDirectory>());
+                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "WineDirectory", () => GetDirectorKeys<WineDirectory>());
                         body = "{\"ok\":true,\"dirCount\":" + dirCount + ",\"count\":" + itemCount + ",\"ids\":[" + sb.ToString() + "],\"errs\":[" + errSb.ToString() + "]}";
                         code = 200;
                     }
@@ -205,30 +205,41 @@ else if (req.Url.AbsolutePath == "/api/health")
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
         }
 
-        // ============ 物品目录导出: 强类型 GetIdentifierList ============
-        // IL2CPP 泛型反射受限, 用编译时强类型调用 (每目录一行).
-        private static void AppendIds(ref System.Text.StringBuilder sb, ref int dirCount, ref int itemCount,
-            ref System.Text.StringBuilder errSb, string dirName,
-            Func<Il2CppSystem.Collections.Generic.List<string>> getter)
+        private static void AppendIds(ref System.Text.StringBuilder sb, ref int dirCount, ref int itemCount, ref System.Text.StringBuilder errSb, string dirName, Func<System.Collections.Generic.List<string>> getter)
         {
             try
             {
-                var list = getter();
-                if (list == null) return;
+                var ids = getter();
+                if (ids == null) { errSb.Append(dirName).Append(":null;"); return; }
                 dirCount++;
-                foreach (var id in list)
+                foreach (var id in ids)
                 {
-                    if (sb.Length > 0) sb.Append(',');
-                    sb.Append(System.Text.Json.JsonSerializer.Serialize(id));
+                    sb.Append(id).Append("\n");
                     itemCount++;
                 }
             }
-            catch (Exception einner)
+            catch (Exception e) { errSb.Append(dirName).Append(":ex;"); MelonLogger.Warning($"[List] {dirName} ex: {e.Message}"); }
+        }
+
+        private static System.Collections.Generic.List<string> GetDirectorKeys<X>() where X : Directory<GameItem>
+        {
+            try
             {
-                if (errSb.Length > 0) errSb.Append(',');
-                errSb.Append(System.Text.Json.JsonSerializer.Serialize(dirName + ": " + einner.Message));
-                MelonLogger.Warning($"[List] dir {dirName} ex: {einner.Message}");
+                var t = Il2CppSystem.Type.GetType(typeof(X).FullName);
+                if (DirectoryMaster.directories.TryGetValue(t, out var insts) && insts != null && insts.Count > 0)
+                {
+                    var inst = insts[0] as Directory<GameItem>;
+                    if (inst != null && inst.factoryDictionary != null)
+                    {
+                        var outList = new System.Collections.Generic.List<string>();
+                        foreach (var kv in inst.factoryDictionary)
+                            outList.Add(kv.Key);
+                        return outList;
+                    }
+                }
             }
+            catch (Exception e) { MelonLogger.Warning($"[List] {typeof(X).Name} getter ex: {e.Message}"); }
+            return null;
         }
 
         // ============ 机器进度强制满 ============
