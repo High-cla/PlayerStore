@@ -1,4 +1,4 @@
-const ITEMS = [
+let ITEMS = [
  {
   "kind": "ITEM",
   "stableId": "box_tampon",

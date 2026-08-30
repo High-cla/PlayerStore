@@ -54,6 +54,9 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
 .toast{position:fixed;top:20px;right:20px;background:#212530;border:1px solid #5a9fd4;color:#e8eaf0;padding:12px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;transition:opacity .3s;pointer-events:none}
 .toast.show{opacity:1}
 .toast.ok{border-color:#4caf50}.toast.bad{border-color:#f44336}
+#refreshBtn{background:#2b4a6b;border:1px solid #3a5a7d;color:#cfe4f5;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;white-space:nowrap}
+#refreshBtn:hover{background:#35597d}
+#refreshBtn:disabled{opacity:.6;cursor:wait}
 </style>
 </head>
 <body>
@@ -63,6 +66,7 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
   <div class="search-bar">
     <input type="text" id="search" placeholder="搜索名称 / ID / 描述...（支持中英）">
     <span class="count-badge" id="count">0 项</span>
+    <button id="refreshBtn">↻ 从服务器刷新完整物品表</button>
   </div>
   <div class="server-status">
     <span class="dot" id="svDot"></span>
@@ -258,6 +262,34 @@ document.body.addEventListener('click', e => {
 });
 setInterval(()=>{ const d = document.querySelector('.dot'); checkServer(); }, 5000);
 checkServer();
+
+// 从 ProgressMod 服务器刷新完整物品表 (调 /api/list, 替换 ITEMS)
+async function refreshFromServer(){
+  const btn = document.getElementById('refreshBtn');
+  if(!(await checkServer())){ toast('服务器离线, 请先打开游戏', 'bad'); return; }
+  btn.disabled = true; btn.textContent = '刷新中...';
+  try{
+    const r = await fetch(API + '/api/list');
+    const j = await r.json();
+    if(j.ok){
+      const ids = j.ids || [];
+      const existing = new Map(ITEMS.map(i => [i.stableId, i]));
+      const merged = [];
+      ids.forEach(id => {
+        if(existing.has(id)) merged.push(existing.get(id));
+        else merged.push({ stableId: id, nameZh: '', nameEn: id, descriptionZh: '', categories: [], itemTypes: [], kind: 'ITEM', directory: '' });
+      });
+      ITEMS = merged;
+      renderCats(); renderGrid();
+      document.getElementById('count').textContent = ITEMS.length + ' 项';
+      toast('已从服务器加载 ' + ids.length + ' 个物品 (含' + j.dirCount + '目录)', 'ok');
+    } else { toast('服务器返回异常: ' + (j.err||''), 'bad'); }
+  }catch(e){
+    toast('刷新失败: ' + e, 'bad');
+  }
+  btn.disabled = false; btn.textContent = '↻ 从服务器刷新完整物品表';
+}
+document.getElementById('refreshBtn').onclick = refreshFromServer;
 
 renderCats(); renderGrid();
 </script>
