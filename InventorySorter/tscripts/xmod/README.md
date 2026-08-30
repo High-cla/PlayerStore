@@ -1,6 +1,6 @@
-# xmod 逆向产物备份
+# 逆向产物备份
 
-来源：游戏目录 `BepInEx/plugins/xmod/ProbablyStolenPlaytest.dll`（付费 ModFramework mod），
+来源：游戏目录 `BepInEx/plugins/ProbablyStolenPlaytest.dll`（ModFramework mod），
 2026-08-31 因与 MelonLoader 7 框架冲突已从游戏目录删除，此处为纯数据/代码备份。
 
 ## 文件

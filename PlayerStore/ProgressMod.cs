@@ -46,7 +46,7 @@ namespace ProgressMod
         }
 
         // ============ 生成物品: HTTP 本地服务器 (网页点击生成) ============
-        // 复刻 xmod 生成逻辑: DirectoryMaster.Item(stableId, true) → MayHaveValidInventorySlot → UncheckedAccept
+        // 复刻生成逻辑: DirectoryMaster.Item(stableId, true) → MayHaveValidInventorySlot → UncheckedAccept
         // 主背包 = EmporiumEntry.Instance.invElement (GameGridInventory, 转 GameInventory)
         // HTTP 线程只入队, 主线程 OnUpdate 消费 (避免 Il2Cpp 跨线程操作)
         private static readonly System.Collections.Concurrent.ConcurrentQueue<(string, int)> PendingSpawns =

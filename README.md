@@ -32,7 +32,7 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 - **网页端物品浏览器**：https://high-cla.github.io/PlayerStore/items_browser.html
   （397 物品，可按分类筛选/搜索；点击"生成 ×1" → 直接进主背包）
 - **通信链**：浏览器 fetch → 本地 HTTP → ProgressMod → 主背包
-- **生成逻辑**（复刻 xmod 付费 mod）：
+- **生成逻辑**（生成逻辑）：
   ```csharp
   GameItem item = DirectoryMaster.Item(stableId, true);   // 稳定ID创建
   if (!inventory.MayHaveValidInventorySlot(item)) ...     // 校验槽位
@@ -123,7 +123,6 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 | `guillotine_test.py` | Guillotine vs Shelf 对比 |
 | `guillotine_deadpen_test.py` | 死洞惩罚项验证 |
 | `optimal_combo.py` / `benchmark_combo.py` | 组合择优/基准 |
-| `xmod/` | BepInEx xmod 付费 mod 逆向备份（生成物品逻辑参考 + 397 物品目录 + 网页浏览器） |
 
 ---
 
