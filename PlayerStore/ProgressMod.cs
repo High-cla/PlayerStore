@@ -15,6 +15,7 @@ namespace ProgressMod
         public static readonly int ModuleBoostMult = 10;  // 模块加成倍率
         public static readonly bool FreePower = true;     // 免电运转
         public static readonly bool MaxWineQuality = true; // 酒品质最高档
+        public static readonly bool AutoIdentify = true;    // 对质类物品(香烟/注射器/印章)自动鉴定
 
         public override void OnInitializeMelon()
         {
@@ -309,11 +310,11 @@ namespace ProgressMod
                 {
                     if (ModuleBoostMult <= 1) return true;
                     if (bonusPercentagePerformance > 0) { MelonLogger.Msg($"[Module] {moduleType}: perf {bonusPercentagePerformance} -> {bonusPercentagePerformance * ModuleBoostMult}"); bonusPercentagePerformance *= ModuleBoostMult; }
-                    else if (bonusPercentagePerformance < 0) { MelonLogger.Msg($"[Module] {moduleType}: perf debuff {bonusPercentagePerformance} -> {Math.Abs(bonusPercentagePerformance)}"); bonusPercentagePerformance = Math.Abs(bonusPercentagePerformance); }
+                    else if (bonusPercentagePerformance < 0) { MelonLogger.Msg($"[Module] {moduleType}: perf {bonusPercentagePerformance} -> {Math.Abs(bonusPercentagePerformance) * ModuleBoostMult}"); bonusPercentagePerformance = Math.Abs(bonusPercentagePerformance) * ModuleBoostMult; }
                     if (bonusPercentageEfficiency > 0) { MelonLogger.Msg($"[Module] {moduleType}: eff {bonusPercentageEfficiency} -> {bonusPercentageEfficiency * ModuleBoostMult}"); bonusPercentageEfficiency *= ModuleBoostMult; }
-                    else if (bonusPercentageEfficiency < 0) { MelonLogger.Msg($"[Module] {moduleType}: eff debuff {bonusPercentageEfficiency} -> {Math.Abs(bonusPercentageEfficiency)}"); bonusPercentageEfficiency = Math.Abs(bonusPercentageEfficiency); }
+                    else if (bonusPercentageEfficiency < 0) { MelonLogger.Msg($"[Module] {moduleType}: eff {bonusPercentageEfficiency} -> {Math.Abs(bonusPercentageEfficiency) * ModuleBoostMult}"); bonusPercentageEfficiency = Math.Abs(bonusPercentageEfficiency) * ModuleBoostMult; }
                     if (bonusPercentageQuality > 0) { MelonLogger.Msg($"[Module] {moduleType}: qual {bonusPercentageQuality} -> {bonusPercentageQuality * ModuleBoostMult}"); bonusPercentageQuality *= ModuleBoostMult; }
-                    else if (bonusPercentageQuality < 0) { MelonLogger.Msg($"[Module] {moduleType}: qual debuff {bonusPercentageQuality} -> {Math.Abs(bonusPercentageQuality)}"); bonusPercentageQuality = Math.Abs(bonusPercentageQuality); }
+                    else if (bonusPercentageQuality < 0) { MelonLogger.Msg($"[Module] {moduleType}: qual {bonusPercentageQuality} -> {Math.Abs(bonusPercentageQuality) * ModuleBoostMult}"); bonusPercentageQuality = Math.Abs(bonusPercentageQuality) * ModuleBoostMult; }
                     return true; // 让原逻辑用放大后的值
                 }
                 catch (Exception e) { MelonLogger.Error($"[Module] InitModuleItem patch err: {e.Message}"); return true; }
@@ -406,6 +407,24 @@ namespace ProgressMod
             catch
             {
                 return "@?";
+            }
+        }
+
+        // ============ 自动鉴定: 对质类物品(香烟/注射器/印章) 进入待鉴定即完成 ============
+        // InspectableHelper.InitInspectableItem 在物品被标记为待鉴定时调用.
+        // Postfix: 直接调 OnConfrontSuccess 完成鉴定, 无需玩家手动对质.
+        [HarmonyPatch(typeof(InspectableHelper), "InitInspectableItem")]
+        public static class PatchAutoIdentify
+        {
+            public static void Postfix(GameItem gameItem)
+            {
+                try
+                {
+                    if (!AutoIdentify || gameItem == null) return;
+                    InspectableHelper.OnConfrontSuccess(gameItem);
+                    MelonLogger.Msg($"[Identify] auto-identified {Describe(gameItem)}");
+                }
+                catch (Exception e) { MelonLogger.Error($"[Identify] ex: {e.Message}"); }
             }
         }
 

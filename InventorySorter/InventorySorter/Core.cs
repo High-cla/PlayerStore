@@ -986,7 +986,14 @@ public class Core : MelonMod
 					}
 					if (rep != null && dictionary3.TryGetValue(rep, out Placement rp))
 					{
-						PlaceItem(absorbed, rp.X, rp.Y, rp.O);
+						if (!PlaceItem(absorbed, rp.X, rp.Y, rp.O))
+						{
+							MelonLogger.Error($"[InvSorter] merge place failed: absorbed {absorbed.identifier} @ {rp.X},{rp.Y} (looks unmoved)");
+						}
+					}
+					else
+					{
+						MelonLogger.Error($"[InvSorter] merge: no rep placement for {absorbed.identifier} (absorbed stays)");
 					}
 				}
 			}
