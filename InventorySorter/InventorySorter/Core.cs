@@ -2735,7 +2735,9 @@ public class Core : MelonMod
 					}
 				}
 			}
-			List<string> lines = new List<string>();
+			// 单 StringBuilder 拼装(免 List<string> + 每件 char[] 分配), 只在 _dumpedShapes.Add 成功后追加
+			StringBuilder body = new StringBuilder();
+			int newShapes = 0;
 			foreach (KeyValuePair<GameItem, ItemMask> pair in masks)
 			{
 				GameItem it = pair.Key;
@@ -2769,9 +2771,12 @@ public class Core : MelonMod
 				{
 					continue;
 				}
-				lines.Add("=== " + ident + " | name=" + name + " | tag=" + tag + " ===(" + m.Gw0 + "x" + m.Gh0 + ")");
+				newShapes++;
+				body.Append("=== ").Append(ident).Append(" | name=").Append(name).Append(" | tag=").Append(tag)
+					.Append(" ===").Append('(').Append(m.Gw0).Append('x').Append(m.Gh0).Append(')').Append('\n');
 				for (int y = 0; y < m.Gh0; y++)
 				{
+					// 单遍: 先置 . 再按 C0 置 #, 线性 O(w+count)
 					char[] row = new char[m.Gw0];
 					for (int x = 0; x < m.Gw0; x++)
 					{
@@ -2779,21 +2784,21 @@ public class Core : MelonMod
 					}
 					foreach ((int dx, int dy) in m.C0)
 					{
-						if (dy == y && dx >= 0 && dx < m.Gw0)
+						if (dy == y)
 						{
 							row[dx] = '#';
 						}
 					}
-					lines.Add(new string(row));
+					body.Append(row).Append('\n');
 				}
 			}
 			// 头部: 背包尺寸 + 当前占用/剩余/最大连续空矩形
 			string header = "== inv " + w + "x" + h + " == " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")
 				+ " occ=" + occupied + " free=" + free + " maxempty=" + maxA + " @" + mx + "," + my + " " + mw + "x" + mh;
 			string file = Path.Combine(Path.GetDirectoryName(typeof(Core).Assembly.Location), "inv_shape_dump.txt");
-			string text = header + "\n" + string.Join("\n", lines) + "\n";
+			string text = header + "\n" + body.ToString() + "\n";
 			File.AppendAllText(file, text, Encoding.UTF8);
-			MelonLogger.Msg($"[InvSorter] shape dump: {lines.Count / 2} new shape(s) -> {file}");
+			MelonLogger.Msg($"[InvSorter] shape dump: {newShapes} new shape(s) -> {file}");
 		}
 		catch (System.Exception ex)
 		{
