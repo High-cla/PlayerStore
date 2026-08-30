@@ -1111,33 +1111,17 @@ public class Core : MelonMod
 	private static Dictionary<GameItem, Placement> LayoutDense(List<GameItem> flat, Dictionary<GameItem, ItemMask> masks, int W, int H, List<GameItem> fixedItems)
 	{
 		// 算法组合: 并行跑多个独立布局器, 各返回完整 Placement 字典, 取"剩余最大连续空矩"最大者.
+		// 数据驱动(verify_all 胜出统计): PairGrounded/GreedyBottom 从不胜出(0/12)已删除;
+		// MinHole(胜6) + GrowTouch(胜5) + Shelf(胜5) 互补覆盖全部组, 组合零损失.
 		List<Dictionary<GameItem, Placement>> candidates = new List<Dictionary<GameItem, Placement>>();
-		// 1) 落地堆积(大仓配对 → 拆死锁 → 无配对), 实测大仓紧凑, 小仓无配对较好
+		// 配对单元(用于 MinHole 级联/堆叠叠放). 大仓才配对(配对 O(n^2) 有开销).
 		List<object> paired = (W * H >= 100) ? BuildUnits(flat, masks) : null;
-		if (paired != null)
-		{
-			paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
-			if (TryPlaceUnits(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dict))
-			{
-				candidates.Add(dict);
-			}
-			List<object> split = SplitFailedUnit(fixedItems, paired, masks, W, H);
-			if (split != null && TryPlaceUnits(fixedItems, split, masks, W, H, out Dictionary<GameItem, Placement> dictS))
-			{
-				candidates.Add(dictS);
-			}
-		}
 		List<object> singles = new List<object>(flat);
 		singles.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
-		if (TryPlaceUnits(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dict2))
-		{
-			candidates.Add(dict2);
-		}
-		// 2) MinHole: 实测大仓最优(挤出最大整块连续区), 小仓亦常最优. 两个变体: 裸单件 + 级联(配对单元进MinHole)
-		// 超大网格(假想边界, 实际背包 <= 24x10)跳过 MinHole 系列: 候选扫描 O(W*H * 候选) 会爆炸, 落地堆积已够
 		long gridCells = (long)W * H;
 		if (gridCells < 4000)
 		{
+			// MinHole: 大网格品质王者(单算法胜6; 17x10/24x10/10x10/6x8 必胜). 裸单件 + 级联(配对单元进MinHole)
 			if (TryMinHole(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictM))
 			{
 				candidates.Add(dictM);
@@ -1146,7 +1130,7 @@ public class Core : MelonMod
 			{
 				candidates.Add(dictMC);
 			}
-			// 3) 堆叠叠放: 堆叠物品允许压已占格(>=1 新格可见), 少占地面, 释放空间
+			// 堆叠叠放: 堆叠物品允许压已占格(>=1 新格可见), 少占地面, 释放空间
 			if (TryMinHoleStack(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictS2))
 			{
 				candidates.Add(dictS2);
@@ -1154,6 +1138,31 @@ public class Core : MelonMod
 			if (paired != null && TryMinHoleStack(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictPS2))
 			{
 				candidates.Add(dictPS2);
+			}
+			// GrowTouch + Shelf: 小网格胜者(8x8/11x14/14x21/7x5/5x5), 与 MinHole 互补
+			if (TryGrowTouch(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictGT))
+			{
+				candidates.Add(dictGT);
+			}
+			if (TryShelf(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictS))
+			{
+				candidates.Add(dictS);
+			}
+		}
+		else
+		{
+			// 超大网格(假想边界, 实际背包 <= 24x10 不会到这): MinHole 系列 O(W^2H^2) 会爆炸, 落地堆积兜底
+			if (paired != null)
+			{
+				paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+				if (TryPlaceUnits(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dict))
+				{
+					candidates.Add(dict);
+				}
+			}
+			if (TryPlaceUnits(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dict2))
+			{
+				candidates.Add(dict2);
 			}
 		}
 		// 择优: 剩余最大连续空矩最大者
@@ -1226,6 +1235,156 @@ public class Core : MelonMod
 			}
 		}
 		return best;
+	}
+
+	// GrowTouch: 每物品取"触摸分最大"的位(相邻已占格+贴边计分), 碎片空间利用率优于行堆积.
+	// 数据驱动: 小网格(11x14 等) GrowTouch 常胜, 与 MinHole 互补. 只处理单件(无配对).
+	private static bool TryGrowTouch(List<GameItem> fixedItems, List<GameItem> singles, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	{
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem fixedItem in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, fixedItem);
+		}
+		dictionary = new Dictionary<GameItem, Placement>();
+		List<GameItem> order = new List<GameItem>(singles);
+		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+		foreach (GameItem item in order)
+		{
+			ItemMask m = masks[item];
+			long bestTouch = -1;
+			int bestX = -1;
+			int bestY = -1;
+			int bestO = 0;
+			for (int o = 0; o < 4; o++)
+			{
+				List<(int, int)> cells = CellsOf(m, o);
+				if (cells == null || cells.Count == 0)
+				{
+					continue;
+				}
+				int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+				int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+				if (gw > W || gh > H)
+				{
+					continue;
+				}
+				for (int py = 0; py + gh <= H; py++)
+				{
+					for (int px = 0; px + gw <= W; px++)
+					{
+						if (!CellsFree(occ, px, py, cells))
+						{
+							continue;
+						}
+						// 触摸分: 每格相邻已占(4向) + 贴边计数
+						long touch = 0;
+						foreach ((int dx, int dy) in cells)
+						{
+							int cx = px + dx;
+							int cy = py + dy;
+							if (cx == 0 || cx == W - 1)
+							{
+								touch++;
+							}
+							if (cy == 0 || cy == H - 1)
+							{
+								touch++;
+							}
+							if (cx > 0 && occ[cx - 1, cy]) touch++;
+							if (cx < W - 1 && occ[cx + 1, cy]) touch++;
+							if (cy > 0 && occ[cx, cy - 1]) touch++;
+							if (cy < H - 1 && occ[cx, cy + 1]) touch++;
+						}
+						if (touch > bestTouch || (touch == bestTouch && (py < bestY || (py == bestY && px < bestX))))
+						{
+							bestTouch = touch;
+							bestX = px;
+							bestY = py;
+							bestO = o;
+						}
+					}
+				}
+			}
+			if (bestX < 0)
+			{
+				return false;
+			}
+			dictionary[item] = new Placement(bestX, bestY, bestO);
+			MarkCells(occ, W, H, bestX, bestY, CellsOf(m, bestO), val: true);
+		}
+		return true;
+	}
+
+	// Shelf: 行堆积. 按 w×h 降序, 每物品第一个可行位落在当前行基准之上. 小网格(8x8/14x21)常胜.
+	// 只处理单件(无配对).
+	private static bool TryShelf(List<GameItem> fixedItems, List<GameItem> singles, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	{
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem fixedItem in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, fixedItem);
+		}
+		dictionary = new Dictionary<GameItem, Placement>();
+		List<GameItem> order = new List<GameItem>(singles);
+		order.Sort((a, b) =>
+		{
+			var ma = masks[a];
+			var mb = masks[b];
+			int ra = Math.Max(ma.Gw0, ma.Gh0), rb = Math.Max(mb.Gw0, mb.Gh0);
+			int ha = Math.Min(ma.Gw0, ma.Gh0), hb = Math.Min(mb.Gw0, mb.Gh0);
+			int cmp = ra.CompareTo(rb) * -1; // 长边降序
+			return cmp != 0 ? cmp : ha.CompareTo(hb) * -1;
+		});
+		int curY = 0;
+		int curRowH = 0;
+		foreach (GameItem item in order)
+		{
+			ItemMask m = masks[item];
+			bool placed = false;
+			for (int o = 0; o < 4 && !placed; o++)
+			{
+				List<(int, int)> cells = CellsOf(m, o);
+				if (cells == null || cells.Count == 0)
+				{
+					continue;
+				}
+				int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+				int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+				if (gw > W || gh > H)
+				{
+					continue;
+				}
+				// 行堆积: 尝试当前行(不下移) 或下一新行
+				for (int iter = 0; iter < 2 && !placed; iter++)
+				{
+					int baseY = (iter == 0) ? curY : curY + curRowH;
+					if (baseY + gh > H)
+					{
+						continue;
+					}
+					for (int px = 0; px + gw <= W; px++)
+					{
+						if (CellsFree(occ, px, baseY, cells))
+						{
+							dictionary[item] = new Placement(px, baseY, o);
+							MarkCells(occ, W, H, px, baseY, cells, val: true);
+							if (baseY + gh > curY + curRowH)
+							{
+								curRowH = baseY + gh - curY;
+							}
+							placed = true;
+							break;
+						}
+					}
+				}
+			}
+			if (!placed)
+			{
+				return false;
+			}
+		}
+		return true;
 	}
 
 	// MinHole(级联版): 输入可以是已配对的单元(接力: 先用 BuildUnits 配对, 再对单元跑 MinHole)

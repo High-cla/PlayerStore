@@ -13,7 +13,8 @@
 数据: parse_dump 全部会话组(容量不足组跳过)。指标: 最大连续空矩 + 是否成功。
 """
 import sys
-sys.path.insert(0, "/d/git/invsort/tscripts")
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from analyze2 import largest_empty_rect_fast
 from parse_dump import parse_dump
 import verify_real_dump as v
