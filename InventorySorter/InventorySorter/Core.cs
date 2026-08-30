@@ -1413,14 +1413,18 @@ public class Core : MelonMod
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
 		List<(int x, int y, int w, int h)> freerects = new List<(int x, int y, int w, int h)> { (0, 0, W, H) };
 		// 全局最小物品包围盒: 碎片放不下任何物品(旋转后) 即死洞, 死洞面积计入评分
-		int minW = int.MaxValue, minH = int.MaxValue;
+		// 碎片 (frw,frh) 能放物品 (gw,gh) 旋转 ⟺ min(gw,gh)<=min(frw,frh) && max(gw,gh)<=max(frw,frh)
+		// 故取全局 minSide = min over items min(gw,gh); maxSide = min over items max(gw,gh)
+		int minSide = int.MaxValue, maxSide = int.MaxValue;
 		foreach (GameItem it in order)
 		{
 			ItemMask mm = masks[it];
-			minW = Math.Min(minW, Math.Min(mm.Gw0, mm.Gh0));
-			minH = Math.Min(minH, Math.Min(mm.Gw0, mm.Gh0));
+			int m1 = Math.Min(mm.Gw0, mm.Gh0);
+			int m2 = Math.Max(mm.Gw0, mm.Gh0);
+			minSide = Math.Min(minSide, m1);
+			maxSide = Math.Min(maxSide, m2);
 		}
-		if (minW == int.MaxValue) minW = minH = 1;
+		if (minSide == int.MaxValue) { minSide = 1; maxSide = 1; }
 		foreach (GameItem item in order)
 		{
 			ItemMask m = masks[item];
@@ -1439,12 +1443,20 @@ public class Core : MelonMod
 					int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
 					if (gw > frw || gh > frh) continue;
 					int waste = frw * frh - gw * gh;
-					// 死洞: 割裂产生的碎片中放不下全局最小物品的碎片面积
+					// 死洞: 割裂产生的碎片中放不下任意物品(旋转后)的碎片面积
 					long dead = 0;
 					int dRight = frw - gw;
 					int dBelow = frh - gh;
-					if (dBelow > 0 && (frw < minW || dBelow < minH)) dead += (long)frw * dBelow;
-					if (dRight > 0 && (dRight < minW || frh < minH)) dead += (long)dRight * frh;
+					if (dBelow > 0)
+					{
+						int mn = Math.Min(frw, dBelow), mx = Math.Max(frw, dBelow);
+						if (mn < minSide || mx < maxSide) dead += (long)frw * dBelow;
+					}
+					if (dRight > 0)
+					{
+						int mn = Math.Min(dRight, frh), mx = Math.Max(dRight, frh);
+						if (mn < minSide || mx < maxSide) dead += (long)dRight * frh;
+					}
 					long score = waste * 10 + dead; // 等价 waste + 0.1*dead (整型避免浮点)
 					if (score < bestScore)
 					{
