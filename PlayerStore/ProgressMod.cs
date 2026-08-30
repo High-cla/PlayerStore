@@ -482,11 +482,11 @@ namespace ProgressMod
         }
         [HarmonyPatch(typeof(ScavHelper), "GetMinorWoundChance")] public static class PatchGetMinorWoundChance
         {
-            public static void Postfix(ref float __result, ref int __1) { try { if (NeverWounded) __result = 0f; } catch { } }
+            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetMajorWoundChance")] public static class PatchGetMajorWoundChance
         {
-            public static void Postfix(ref float __result, ref int __1) { try { if (NeverWounded) __result = 0f; } catch { } }
+            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { } }
         }
         [HarmonyPatch(typeof(HealthData), "ReceiveMinorWound")] public static class PatchReceiveMinorWound
         {

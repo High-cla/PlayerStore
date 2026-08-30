@@ -180,7 +180,7 @@ def pack_minhole(items, W, H):
                         if best is None or a < best[0]:
                             best = (a, px, py, list(key))
         if best:
-            occ = mark(occ, best[3], best[2], best[1])
+            occ = mark(occ, best[3], best[1], best[2])
         else:
             return None
     return occ
