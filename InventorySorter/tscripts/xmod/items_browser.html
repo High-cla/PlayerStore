@@ -91,6 +91,54 @@ const detail = document.getElementById('detail');
 let curCat = 'ALL';
 let curSearch = '';
 
+// 分类英文->中文映射
+const CAT_ZH = {
+  'ALL': '全部',
+  'ACCESS_CARDS': '门禁卡',
+  'AMMUNITION_EXPLOSIVES': '弹药与爆炸物',
+  'ARMOR': '护甲',
+  'CHEMICALS': '化学品',
+  'CONTAINERS': '容器',
+  'CURRENCY': '货币',
+  'DOCUMENTS': '文件',
+  'ENERGY_CELLS': '能量电池',
+  'EQUIPMENT': '装备',
+  'FARMING': '农业',
+  'FOOD_DRINK': '食物与饮料',
+  'GOODS': '商品',
+  'HUSBANDRY': '畜牧',
+  'LOTTERY': '抽奖',
+  'MACHINES_STORAGE': '机器与仓储',
+  'MATERIALS': '材料',
+  'MEDICAL': '医疗',
+  'MEDICAL_CHEMICAL': '医疗化学',
+  'MISC': '杂项',
+  'MODULES': '模块',
+  'SUPPLIES': '补给品',
+  'TOOLS': '工具',
+  'WEAPONS': '武器',
+  'WEAPON_MODS': '武器配件'
+};
+function zCat(c){ return CAT_ZH[c] || c; }
+
+// 物品类型 英文->中文映射
+const TYPE_ZH = {
+  'ACCESS_CARD': '门禁卡', 'ALARM_MODULE': '报警模块', 'ALCOHOL': '酒精', 'AMMUNITION': '弹药',
+  'ARMOR': '护甲', 'ART': '艺术品', 'BASIC_MATERIAL': '基础材料', 'BREVAGE': '饮品',
+  'CHEMICAL_SUPPLIES': '化学用品', 'CONTRABAND': '违禁品', 'DOCUMENT': '文件', 'ENERGY_CELL': '能量电池',
+  'EVAPORATOR_MODULE': '蒸发器模块', 'FARMING_SUPPLIES': '农牧用品', 'FILTER': '过滤器', 'FIREARM': '枪械',
+  'FOOD': '食物', 'GUN_MOD': '枪械配件', 'HOUSEHOLD_GOOD': '日用品', 'HYDROPONIC_MODULE': '水培模块',
+  'JUNK': '废料', 'LOTTERY': '抽奖券', 'LOWTECH': '低科技', 'LUXURY_ITEM': '奢侈品',
+  'MACHINE': '机器', 'MAKESHIFT': '简易制品', 'MATERIAL': '材料', 'MEDICAL': '医疗',
+  'MEDICAL_TOOL': '医疗工具', 'MELEE_WEAPON': '近战武器', 'MIDLINE': '中档', 'MODDABLE': '可改装',
+  'MODULE': '模块', 'MUNITION': '弹药', 'NARCOTIC': '麻醉品', 'NODE': '节点',
+  'PLAYER_CURRENCY': '货币', 'PLAYER_UPGRADE_CURRENCY': '升级货币', 'POISON': '毒物', 'PRINTER_MODULE': '打印模块',
+  'PROCESSED_FOOD': '加工食品', 'SEED': '种子', 'STORAGE': '储物', 'SUBSTANCE': '物质',
+  'SUPPLY_CRATE': '补给箱', 'TOOL': '工具', 'TREAT': '零食', 'WATER': '水',
+  'WATER_PURIFICATION_SUPPLY': '净水用品', 'WATER_RATION': '配给水', 'WEAPON': '武器'
+};
+function zType(t){ return TYPE_ZH[t] || t; }
+
 function categoryCounts(){
   const c = {};
   ITEMS.forEach(i => (i.categories || []).forEach(x => c[x] = (c[x]||0)+1));
@@ -100,7 +148,7 @@ function renderCats(){
   const c = categoryCounts();
   const keys = ['ALL', ...Object.keys(c).sort()];
   catList.innerHTML = keys.map(k => {
-    const label = k==='ALL' ? '全部' : k;
+    const label = zCat(k);
     const n = k==='ALL' ? ITEMS.length : c[k];
     return `<button class="cat-btn ${curCat===k?'active':''}" data-cat="${k}">
       <span>${label}</span><span class="n">${n}</span></button>`;
@@ -126,7 +174,7 @@ function renderGrid(){
     <div class="card" data-id="${i.stableId}">
       <div class="nm">${esc(i.nameZh||'')}</div>
       <div class="nm-en">${esc(i.nameEn||'')}</div>
-      <div class="cat">${(i.categories||[]).slice(0,4).map(c=>`<span class="tag">${c}</span>`).join('')}</div>
+      <div class="cat">${(i.categories||[]).slice(0,4).map(c=>`<span class="tag">${zCat(c)}</span>`).join('')}</div>
       <div class="id">${esc(i.stableId||'')}</div>
       <div class="desc">${esc(i.descriptionZh||'')}</div>
       <div style="margin-top:10px"><button class="spawn-btn" data-spawn="${esc(i.stableId||'')}">生成 ×1</button></div>
@@ -142,8 +190,8 @@ function showDetail(id){
   dDesc.textContent = i.descriptionZh || i.descriptionEn || '';
   dMeta.innerHTML = `
     <div><b>stableId</b> ${i.stableId}</div>
-    <div><b>分类</b> ${(i.categories||[]).join(', ')}</div>
-    <div><b>itemTypes</b> ${(i.itemTypes||[]).join(', ')}</div>
+    <div><b>分类</b> ${(i.categories||[]).map(zCat).join(', ')}</div>
+    <div><b>itemTypes</b> ${(i.itemTypes||[]).map(zType).join(', ')}</div>
     <div><b>kind</b> ${i.kind}</div>
     <div><b>directory</b> ${i.directory}</div>
     <div><b>addPolicy</b> ${i.addPolicy}</div>`;
