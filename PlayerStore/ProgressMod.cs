@@ -42,19 +42,102 @@ namespace ProgressMod
         public override void OnInitializeMelon()
         {
             LoggerInstance.Msg("ProgressMod v1.12.1 init");
+            StartSpawnServer();
         }
 
-        // ============ 生成物品: 热键 F9 ============
+        // ============ 生成物品: HTTP 本地服务器 (网页点击生成) ============
         // 复刻 xmod 生成逻辑: DirectoryMaster.Item(stableId, true) → MayHaveValidInventorySlot → UncheckedAccept
         // 主背包 = EmporiumEntry.Instance.invElement (GameGridInventory, 转 GameInventory)
+        // HTTP 线程只入队, 主线程 OnUpdate 消费 (避免 Il2Cpp 跨线程操作)
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<(string, int)> PendingSpawns =
+            new System.Collections.Concurrent.ConcurrentQueue<(string, int)>();
+        private static System.Net.HttpListener _listener;
+
         public override void OnUpdate()
         {
             try
             {
-                if (!CfgSpawnId.Value.Equals("") && ((UnityEngine.Input.GetKeyDown((UnityEngine.KeyCode)288))))
+                while (PendingSpawns.TryDequeue(out var job))
                 {
-                    SpawnItem(CfgSpawnId.Value, CfgSpawnCount.Value);
+                    SpawnItem(job.Item1, job.Item2);
                 }
+            }
+            catch { }
+        }
+
+        private static void StartSpawnServer()
+        {
+            try
+            {
+                _listener = new System.Net.HttpListener();
+                _listener.Prefixes.Add("http://localhost:26880/");
+                _listener.Start();
+                var t = new System.Threading.Thread(ServerLoop) { IsBackground = true };
+                t.Start();
+                MelonLogger.Msg("[Spawn] HTTP server on http://localhost:26880/");
+            }
+            catch (Exception e) { MelonLogger.Error($"[Spawn] server start ex: {e.Message}"); }
+        }
+
+        private static void ServerLoop()
+        {
+            while (_listener != null)
+            {
+                try
+                {
+                    var ctx = _listener.GetContext();
+                    HandleRequest(ctx);
+                }
+                catch { /* 监听器停止时跳出 */ }
+            }
+        }
+
+        private static void HandleRequest(System.Net.HttpListenerContext ctx)
+        {
+            try
+            {
+                var req = ctx.Request;
+                var res = ctx.Response;
+                string body = "{\"ok\":false,\"err\":\"bad\"}";
+                int code = 400;
+                try
+                {
+                    if (req.Url.AbsolutePath == "/api/spawn")
+                    {
+                        var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                        string id = q["itemId"] ?? "";
+                        int n = 1;
+                        int.TryParse(q["count"], out n);
+                        if (n < 1) n = 1;
+                        if (id == "")
+                        {
+                            body = "{\"ok\":false,\"err\":\"no itemId\"}";
+                        }
+                        else
+                        {
+                            PendingSpawns.Enqueue((id, n));
+                            body = $"{{\"ok\":true,\"queued\":\"{id} x{n}\"}}";
+                            code = 200;
+                        }
+                    }
+                    else if (req.Url.AbsolutePath == "/api/health")
+                    {
+                        body = "{\"ok\":true}";
+                        code = 200;
+                    }
+                }
+                catch (Exception e)
+                {
+                    body = $"{{\"ok\":false,\"err\":\"{e.Message}\"}}";
+                    code = 500;
+                }
+                byte[] buf = System.Text.Encoding.UTF8.GetBytes(body);
+                res.StatusCode = code;
+                res.ContentType = "application/json; charset=utf-8";
+                res.Headers["Access-Control-Allow-Origin"] = "*";
+                res.ContentLength64 = buf.Length;
+                res.OutputStream.Write(buf, 0, buf.Length);
+                res.OutputStream.Close();
             }
             catch { }
         }
