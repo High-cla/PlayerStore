@@ -91,6 +91,13 @@ public class Core : MelonMod
 	private static readonly List<string> _guiLabels = new List<string>();
 	private static int _guiCount = -1;
 
+	// TryMinHoleStack 候选搜索的原地标记缓冲区(新格清单), 每候选 Clear 复用, 免每候选 List 分配
+	private static readonly List<(int, int)> _freshCells = new List<(int, int)>();
+
+	// LargestEmptyArea 复用缓冲区: 每次候选计算分配 int[W]+int[W+1] 是 GC 热点, 改为按需扩容复用(布局器串行调用, 不用锁)
+	private static int[] _histBuf = new int[0];
+	private static int[] _stackBuf = new int[0];
+
 	internal static string LastAction = "";
 
 	private static float _lastActionAt = -999f;
@@ -1120,22 +1127,27 @@ public class Core : MelonMod
 			candidates.Add(dict2);
 		}
 		// 2) MinHole: 实测大仓最优(挤出最大整块连续区), 小仓亦常最优. 两个变体: 裸单件 + 级联(配对单元进MinHole)
-		if (TryMinHole(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictM))
+		// 超大网格(假想边界, 实际背包 <= 24x10)跳过 MinHole 系列: 候选扫描 O(W*H * 候选) 会爆炸, 落地堆积已够
+		long gridCells = (long)W * H;
+		if (gridCells < 4000)
 		{
-			candidates.Add(dictM);
-		}
-		if (paired != null && TryMinHole(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictMC))
-		{
-			candidates.Add(dictMC);
-		}
-		// 3) 堆叠叠放: 堆叠物品允许压已占格(>=1 新格可见), 少占地面, 释放空间
-		if (TryMinHoleStack(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictS2))
-		{
-			candidates.Add(dictS2);
-		}
-		if (paired != null && TryMinHoleStack(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictPS2))
-		{
-			candidates.Add(dictPS2);
+			if (TryMinHole(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictM))
+			{
+				candidates.Add(dictM);
+			}
+			if (paired != null && TryMinHole(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictMC))
+			{
+				candidates.Add(dictMC);
+			}
+			// 3) 堆叠叠放: 堆叠物品允许压已占格(>=1 新格可见), 少占地面, 释放空间
+			if (TryMinHoleStack(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictS2))
+			{
+				candidates.Add(dictS2);
+			}
+			if (paired != null && TryMinHoleStack(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictPS2))
+			{
+				candidates.Add(dictPS2);
+			}
 		}
 		// 择优: 剩余最大连续空矩最大者
 		Dictionary<GameItem, Placement> best = null;
@@ -1253,13 +1265,16 @@ public class Core : MelonMod
 						{
 							continue;
 						}
-						// 放置后最大空矩(直接计算, 不打临时数组)
-						bool[,] next = (bool[,])occ.Clone();
+						// 放置后最大空矩(原地标记 -> 计算 -> 撤销, 免 O(W*H) Clone; LargestEmptyArea 只读网格)
 						foreach ((int dx, int dy) in cells)
 						{
-							next[px + dx, py + dy] = true;
+							occ[px + dx, py + dy] = true;
 						}
-						long area = LargestEmptyArea(next, W, H);
+						long area = LargestEmptyArea(occ, W, H);
+						foreach ((int dx, int dy) in cells)
+						{
+							occ[px + dx, py + dy] = false;
+						}
 						if (area < bestScore || (area == bestScore && (py < bestY || (py == bestY && px < bestX))))
 						{
 							bestScore = area;
@@ -1362,12 +1377,21 @@ public class Core : MelonMod
 							continue;
 						}
 						// 评分: 1) 新格数小 2) 放置后最大空矩小(取候选) 3) tie 左上
-						bool[,] next = (bool[,])occ.Clone();
+						// 原地标记(仅新格) -> 计算 -> 撤销新格. 已占格(stackable 压上去)保持原状, 不可误清.
+						_freshCells.Clear();
 						foreach ((int dx, int dy) in cells)
 						{
-							next[px + dx, py + dy] = true;
+							if (!occ[px + dx, py + dy])
+							{
+								occ[px + dx, py + dy] = true;
+								_freshCells.Add((px + dx, py + dy));
+							}
 						}
-						long la = LargestEmptyArea(next, W, H);
+						long la = LargestEmptyArea(occ, W, H);
+						foreach ((int cx, int cy) in _freshCells)
+						{
+							occ[cx, cy] = false;
+						}
 						long score = stackable ? ((long)fresh << 32) | la : la;
 						if (score < bestScore)
 						{
@@ -1433,8 +1457,16 @@ public class Core : MelonMod
 	private static long LargestEmptyArea(bool[,] occ, int W, int H)
 	{
 		long best = 0;
-		int[] heights = new int[W];
-		int[] stack = new int[W + 1];
+		if (_histBuf == null || _histBuf.Length < W)
+		{
+			_histBuf = new int[W];
+		}
+		if (_stackBuf == null || _stackBuf.Length < W + 1)
+		{
+			_stackBuf = new int[W + 1];
+		}
+		int[] heights = _histBuf;
+		int[] stack = _stackBuf;
 		for (int y = 0; y < H; y++)
 		{
 			for (int x = 0; x < W; x++)
@@ -2656,14 +2688,22 @@ public class Core : MelonMod
 				}
 			}
 			int free = w * h - occupied;
-			// 最大连续空矩形: 逐行直方图 + 单调栈 O(W*H)
+			// 最大连续空矩形: 逐行直方图 + 单调栈 O(W*H), 复用 LargestEmptyArea 的缓冲(串行调用无冲突)
 			int maxA = 0;
 			int mx = 0;
 			int my = 0;
 			int mw = 0;
 			int mh = 0;
-			int[] hist = new int[w];
-			int[] stack = new int[w + 1];
+			if (_histBuf == null || _histBuf.Length < w)
+			{
+				_histBuf = new int[w];
+			}
+			if (_stackBuf == null || _stackBuf.Length < w + 1)
+			{
+				_stackBuf = new int[w + 1];
+			}
+			int[] hist = _histBuf;
+			int[] stack = _stackBuf;
 			for (int y = 0; y < h; y++)
 			{
 				for (int x = 0; x < w; x++)
