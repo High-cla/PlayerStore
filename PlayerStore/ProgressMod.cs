@@ -17,6 +17,8 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgFreePower = Cfg.CreateEntry<bool>("FreePower", true, "免电运转");
         public static readonly MelonPreferences_Entry<bool> CfgMaxWineQuality = Cfg.CreateEntry<bool>("MaxWineQuality", true, "酒品质最高档");
         public static readonly MelonPreferences_Entry<bool> CfgAutoIdentify = Cfg.CreateEntry<bool>("AutoIdentify", true, "对质类物品(香烟/注射器/印章)自动鉴定");
+        public static readonly MelonPreferences_Entry<bool> CfgPurifyAlwaysPure = Cfg.CreateEntry<bool>("PurifyAlwaysPure", true, "净化器/过滤器: PurifyToBaseWater 永远净化100%纯水");
+        public static readonly MelonPreferences_Entry<bool> CfgTurboCooldownFree = Cfg.CreateEntry<bool>("TurboCooldownFree", true, "TurboBooster: 无视冷却/充能延时, 永远就绪");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
         public static bool ForceFinish => CfgForceFinish.Value;
         public static bool NoDurability => CfgNoDurability.Value;
@@ -24,6 +26,8 @@ namespace ProgressMod
         public static bool FreePower => CfgFreePower.Value;
         public static bool MaxWineQuality => CfgMaxWineQuality.Value;
         public static bool AutoIdentify => CfgAutoIdentify.Value;
+        public static bool PurifyAlwaysPure => CfgPurifyAlwaysPure.Value;
+        public static bool TurboCooldownFree => CfgTurboCooldownFree.Value;
 
         public override void OnInitializeMelon()
         {
@@ -279,6 +283,7 @@ namespace ProgressMod
             {
                 try
                 {
+                    if (!PurifyAlwaysPure) return true;
                     if (__0 == null) return false;
                     int vol = WaterHelper.GetTotalVolume(__0);
                     WaterHelper.EmptyContainer(__0);
@@ -335,7 +340,7 @@ namespace ProgressMod
         {
             public static void Postfix(ref bool __result)
             {
-                try { if (ForceFinish) __result = true; }
+                try { if (TurboCooldownFree) __result = true; }
                 catch { }
             }
         }
