@@ -884,6 +884,8 @@ public class Core : MelonMod
 			Dictionary<string, int> mergeRepIdx = new Dictionary<string, int>();
 			for (int mi = 0; mi < list2.Count; mi++)
 			{
+				// 容器(有内容窗口的内部格子)不参与同类合并/堆叠: 保持独立, 只移动不堆叠
+				if (HasContentWindow(list2[mi])) continue;
 				ItemMask mm2 = dictionary2[list2[mi]];
 				StringBuilder msb = new StringBuilder();
 				foreach ((int mdx, int mdy) in mm2.C0)
@@ -901,7 +903,7 @@ public class Core : MelonMod
 			HashSet<int> mergeRepSet = new HashSet<int>(mergeRepIdx.Values);
 			for (int mi = 0; mi < list2.Count; mi++)
 			{
-				if (!mergeRepSet.Contains(mi))
+				if (!mergeRepSet.Contains(mi) && !HasContentWindow(list2[mi]))
 				{
 					mergeAbsorb.Add(mi);
 				}
