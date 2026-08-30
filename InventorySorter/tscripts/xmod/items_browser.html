@@ -22,8 +22,11 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
 .cat-btn.active{background:#2b4a6b;color:#8ecff7;font-weight:600}
 .cat-btn .n{background:#2a2e3a;padding:2px 8px;border-radius:10px;font-size:11px;color:#8a92a0}
 #grid{flex:1;padding:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;align-content:start}
-.card{background:#1c2029;border:1px solid #2a2e3a;border-radius:10px;padding:14px;cursor:pointer;transition:transform .1s,border-color .1s}
+.card{background:#1c2029;border:1px solid #2a2e3a;border-radius:10px;padding:14px;cursor:pointer;transition:transform .1s,border-color .1s;position:relative}
 .card:hover{transform:translateY(-2px);border-color:#5a9fd4}
+.fav-btn{position:absolute;top:8px;right:8px;background:none;border:none;font-size:20px;cursor:pointer;color:#4a5260;line-height:1;padding:4px;z-index:2}
+.fav-btn:hover{color:#f0b840}
+.fav-btn.on{color:#f0b840;text-shadow:0 0 6px rgba(240,184,64,.5)}
 .card .nm{font-size:14px;font-weight:600;color:#eef2f8}
 .card .nm-en{font-size:12px;color:#8892a2;margin-top:2px}
 .card .cat{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
@@ -90,6 +93,12 @@ const catList = document.getElementById('catList');
 const detail = document.getElementById('detail');
 let curCat = 'ALL';
 let curSearch = '';
+let FAVORITES = new Set(JSON.parse(localStorage.getItem('itemFavs') || '[]'));
+function saveFavs(){ localStorage.setItem('itemFavs', JSON.stringify([...FAVORITES])); }
+function toggleFav(id){
+  if(FAVORITES.has(id)) FAVORITES.delete(id); else FAVORITES.add(id);
+  saveFavs(); renderCats(); renderGrid();
+}
 
 // 分类英文->中文映射
 const CAT_ZH = {
@@ -146,10 +155,10 @@ function categoryCounts(){
 }
 function renderCats(){
   const c = categoryCounts();
-  const keys = ['ALL', ...Object.keys(c).sort()];
+  const keys = ['ALL', 'FAV', ...Object.keys(c).sort()];
   catList.innerHTML = keys.map(k => {
-    const label = zCat(k);
-    const n = k==='ALL' ? ITEMS.length : c[k];
+    const label = k==='FAV' ? '★收藏' : zCat(k);
+    const n = k==='ALL' ? ITEMS.length : (k==='FAV' ? FAVORITES.size : c[k]);
     return `<button class="cat-btn ${curCat===k?'active':''}" data-cat="${k}">
       <span>${label}</span><span class="n">${n}</span></button>`;
   }).join('');
@@ -158,7 +167,8 @@ function renderCats(){
   });
 }
 function matches(i){
-  if(curCat!=='ALL' && !(i.categories||[]).includes(curCat)) return false;
+  if(curCat==='FAV' && !FAVORITES.has(i.stableId)) return false;
+  if(curCat!=='ALL' && curCat!=='FAV' && !(i.categories||[]).includes(curCat)) return false;
   if(!curSearch) return true;
   const q = curSearch.toLowerCase();
   return (i.nameZh||'').toLowerCase().includes(q) ||
@@ -168,10 +178,12 @@ function matches(i){
          (i.descriptionEn||'').toLowerCase().includes(q);
 }
 function renderGrid(){
-  const list = ITEMS.filter(matches);
+  let list = ITEMS.filter(matches);
+  list.sort((a,b) => (FAVORITES.has(b.stableId)?1:0) - (FAVORITES.has(a.stableId)?1:0));
   document.getElementById('count').textContent = list.length + ' 项';
   grid.innerHTML = list.length ? list.map(i => `
     <div class="card" data-id="${i.stableId}">
+      <button class="fav-btn ${FAVORITES.has(i.stableId)?'on':''}" data-fav="${esc(i.stableId||'')}">${FAVORITES.has(i.stableId)?'★':'☆'}</button>
       <div class="nm">${esc(i.nameZh||'')}</div>
       <div class="nm-en">${esc(i.nameEn||'')}</div>
       <div class="cat">${(i.categories||[]).slice(0,4).map(c=>`<span class="tag">${zCat(c)}</span>`).join('')}</div>
@@ -180,6 +192,7 @@ function renderGrid(){
       <div style="margin-top:10px"><button class="spawn-btn" data-spawn="${esc(i.stableId||'')}">生成 ×1</button></div>
     </div>`).join('') : '<div class="empty">无匹配物品</div>';
   grid.querySelectorAll('.card').forEach(c => c.onclick = () => showDetail(c.dataset.id));
+  grid.querySelectorAll('.fav-btn').forEach(b => b.onclick = (e) => { e.stopPropagation(); toggleFav(b.dataset.fav); });
 }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function showDetail(id){
