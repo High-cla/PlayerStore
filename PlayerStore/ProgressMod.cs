@@ -34,23 +34,11 @@ namespace ProgressMod
                     bool isMachine = false;
                     try { isMachine = machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { }
                     if (!isMachine) return true;
-                    MelonLogger.Msg($"[Continue] machine={Describe(machine)}");
-                    DumpTags(machine, "[Continue]");
-                    string state = "?";
-                    try { state = MachineProgressHelper.GetMachineState(machine); } catch (Exception e) { state = "EX:" + e.GetType().Name; }
-                    MelonLogger.Msg($"[Continue] state={state}");
 
                     var curTag = machine.GetTagReadonly("MACHINE_PROGRESS_CURRENT_TAG");
                     var tgtTag = machine.GetTagReadonly("MACHINE_PROGRESS_TARGET_TAG");
                     int cur = curTag != null ? curTag.GetInt() : -1;
                     int tgt = tgtTag != null ? tgtTag.GetInt() : -1;
-                    var spd = machine.GetTagReadonly("CURRENT_PROCESSING_SPEED_TAG");
-                    int speed = spd != null ? spd.GetInt() : -1;
-                    MelonLogger.Msg($"[Continue] state={state} progress=({cur}/{tgt}) speed={speed}");
-
-                    var fin = false;
-                    try { fin = MachineProgressHelper.IsProgressTypeMachineFinished(machine); } catch (Exception e) { MelonLogger.Error($"[Continue] IsFinished ex: {e}"); }
-                    MelonLogger.Msg($"[Continue] finished={fin}");
 
                     if (ForceFinish && machine != null && tgtTag != null)
                     {
@@ -83,17 +71,10 @@ namespace ProgressMod
                     if (machine == null) return true;
                     // 只对真机器 (MACHINE_STATE_TAG 或 PROGRESS_TYPE_MACHINE_TAG 真实存在)
                     if (!(machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"))) return true;
-                    MelonLogger.Msg($"[Update] machine={Describe(machine)}");
-                    DumpTags(machine, "[Update]");
                     var curTag = machine.GetTagReadonly("MACHINE_PROGRESS_CURRENT_TAG");
                     var tgtTag = machine.GetTagReadonly("MACHINE_PROGRESS_TARGET_TAG");
                     int cur = curTag != null ? curTag.GetInt() : -1;
                     int tgt = tgtTag != null ? tgtTag.GetInt() : -1;
-                    bool canOut = false;
-                    try { canOut = MachineryHelper.CanMachineOutput(machine); } catch { }
-                    string state = "?";
-                    try { state = MachineProgressHelper.GetMachineState(machine); } catch (Exception e) { state = "EX:" + e.GetType().Name; }
-                    MelonLogger.Msg($"[Update] state={state} progress=({cur}/{tgt}) canOutput={canOut}");
 
                     if (ForceFinish && machine != null && tgtTag != null && cur < tgt)
                     {
@@ -211,16 +192,6 @@ namespace ProgressMod
                     bool isMachine = false;
                     try { isMachine = machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { }
                     if (!isMachine) return true;
-                    MelonLogger.Msg($"[Finish] machine={Describe(machine)}");
-                    DumpTags(machine, "[Finish]");
-                    string state = "?";
-                    try { state = MachineProgressHelper.GetMachineState(machine); } catch (Exception e) { state = "EX:" + e.GetType().Name; }
-                    MelonLogger.Msg($"[Finish] state={state}");
-                    var curTag = machine.GetTagReadonly("MACHINE_PROGRESS_CURRENT_TAG");
-                    var tgtTag = machine.GetTagReadonly("MACHINE_PROGRESS_TARGET_TAG");
-                    int cur = curTag != null ? curTag.GetInt() : -1;
-                    int tgt = tgtTag != null ? tgtTag.GetInt() : -1;
-                    MelonLogger.Msg($"[Finish] progress=({cur}/{tgt})");
                 }
                 catch (Exception e)
                 {
@@ -438,46 +409,6 @@ namespace ProgressMod
             }
         }
 
-        // ============ 全面日志: 枚举机器全部 tag ============
-        private static void DumpTags(GameItem it, string prefix)
-        {
-            if (it == null) { MelonLogger.Msg($"{prefix} DumpTags: null item"); return; }
-            try
-            {
-                var sys = it.state; // TagSystem
-                if (sys == null) { MelonLogger.Msg($"{prefix} DumpTags: state(TagSystem) is null"); return; }
-                // TagSystem.dict = Dictionary<string, TagState>
-                var dict = sys.dict;
-                if (dict == null) { MelonLogger.Msg($"{prefix} DumpTags: dict is null"); return; }
-                MelonLogger.Msg($"{prefix} DumpTags: total tags = {dict.Count}");
-                foreach (var kv in dict)
-                {
-                    try
-                    {
-                        var name = kv.Key;
-                        var ts = kv.Value;
-                        if (ts == null) { MelonLogger.Msg($"{prefix}   {name} = NULL"); continue; }
-                        // 打全部字段: enabled/int/float/long/double/bool/string
-                        bool en = false; int iv = 0; float fv = 0f; long lv = 0; double dv = 0; bool bv = false; string sv = "";
-                        try { en = ts.valueEnabled; } catch { }
-                        try { iv = ts.valueInt; } catch { }
-                        try { fv = ts.valueFloat; } catch { }
-                        try { lv = ts.valueLong; } catch { }
-                        try { dv = ts.valueDouble; } catch { }
-                        try { bv = ts.valueBool; } catch { }
-                        try { sv = ts.valueString; } catch { }
-                        MelonLogger.Msg($"{prefix}   [{name}] en={en} int={iv} float={fv} long={lv} double={dv} bool={bv} str={sv}");
-                    }
-                    catch (Exception e)
-                    {
-                        MelonLogger.Msg($"{prefix}   (tag read ex: {e.GetType().Name})");
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                MelonLogger.Error($"{prefix} DumpTags ex: {e}");
-            }
-        }
+        // ============ 全面日志(已删除: 高频诊断, 不再调用) ============
     }
 }
