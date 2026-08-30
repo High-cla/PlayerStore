@@ -53,13 +53,6 @@ namespace ProgressMod
             new System.Collections.Concurrent.ConcurrentQueue<(string, int)>();
         private static System.Net.HttpListener _listener;
 
-        // ===== item dir cache: collect on main thread only, HTTP thread reads (prevent Il2Cpp cross-thread crash) =====
-        private static readonly object IdCacheLock = new object();
-        private static System.Collections.Generic.List<string> _allIds = new System.Collections.Generic.List<string>();
-        private static volatile bool _idsReady = false;
-        private static volatile bool _idsRequested = false;
-        private static int _dirCount = 0;
-
         public override void OnUpdate()
         {
             try
@@ -67,11 +60,6 @@ namespace ProgressMod
                 while (PendingSpawns.TryDequeue(out var job))
                 {
                     SpawnItem(job.Item1, job.Item2);
-                }
-                if (!_idsReady && !_idsRequested)
-                {
-                    _idsRequested = true;
-                    CollectDirectories();
                 }
             }
             catch { }
@@ -140,26 +128,7 @@ namespace ProgressMod
                             code = 200;
                         }
                     }
-                                        else if (req.Url.AbsolutePath == "/api/list")
-                    {
-                        // 读主线程收集的缓存; 未收集则触发 (HTTP 线程不碰 Il2Cpp, 防崩溃)
-                        if (!_idsReady)
-                        {
-                            _idsRequested = false;  // 让 OnUpdate 重新触发收集
-                        }
-                        lock (IdCacheLock)
-                        {
-                            var sb = new System.Text.StringBuilder();
-                            for (int i = 0; i < _allIds.Count; i++)
-                            {
-                                if (i > 0) sb.Append(',');
-                                sb.Append('"').Append(_allIds[i].Replace("\\", "\\\\").Replace("\"", "\\\"")).Append('"');
-                            }
-                            body = "{\"ok\":true,\"dirCount\":" + (int)_dirCount + ",\"count\":" + _allIds.Count + ",\"ids\":[" + sb.ToString() + "],\"errs\":[]}";
-                        }
-                        code = 200;
-                    }
-else if (req.Url.AbsolutePath == "/api/health")
+                    else if (req.Url.AbsolutePath == "/api/health")
                     {
                         body = "{\"ok\":true}";
                         code = 200;
@@ -199,94 +168,6 @@ else if (req.Url.AbsolutePath == "/api/health")
                 MelonLogger.Msg($"[Spawn] {ok}/{count} x {stableId}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
-        }
-
-        private static void CollectDirectories()
-        {
-            // 主线程调用 (OnUpdate), 收集全部目录物品 ID 到缓存; HTTP 线程只读
-            try
-            {
-                var all = new System.Collections.Generic.List<string>();
-                var seen = new System.Collections.Generic.HashSet<string>();
-                int dirs = 0;
-                void Collect<X>() where X : Directory<GameItem>
-                {
-                    try
-                    {
-                        var ids = GetDirectorKeys<X>();
-                        if (ids == null) return;
-                        dirs++;
-                        foreach (var id in ids)
-                            if (seen.Add(id)) all.Add(id);
-                    }
-                    catch (Exception e) { MelonLogger.Warning($"[List] {typeof(X).Name} ex: {e.Message}"); }
-                }
-                Collect<AmenitiesItemDirectory>();
-                Collect<ArmorItemDirectory>();
-                Collect<ConstructionItemDirectory>();
-                Collect<ContainerItemDirectory>();
-                Collect<EquipmentDirectory>();
-                Collect<ExplosiveItemDirectory>();
-                Collect<FoodItemDirectory>();
-                Collect<FurnitureItemDirectory>();
-                Collect<GunModDirectory>();
-                Collect<GunsItemDirectory>();
-                Collect<HusbandryDirectory>();
-                Collect<HydroponicDirectory>();
-                Collect<KeyItemDirectory>();
-                Collect<MaterialDirectory>();
-                Collect<MedsItemDirectory>();
-                Collect<MeleeWeaponItemDirectory>();
-                Collect<MiscItemDirectory>();
-                Collect<ModItemDirectory>();
-                Collect<ModuleDirectory>();
-                Collect<OrganDirectory>();
-                Collect<RuinedMachineDirectory>();
-                Collect<ShipItemDirectory>();
-                Collect<ShipSystemDirectory>();
-                Collect<TechnicianBackpackDirectory>();
-                Collect<ToolDirectory>();
-                Collect<UnusedDirectory>();
-                Collect<WineDirectory>();
-                lock (IdCacheLock)
-                {
-                    _allIds = all;
-                    _dirCount = dirs;
-                    _idsReady = true;
-                }
-                MelonLogger.Msg($"[List] collected {all.Count} ids from {dirs} dirs");
-            }
-            catch (Exception e)
-            {
-                MelonLogger.Error($"[List] CollectDirectories ex: {e.Message}");
-                _idsReady = true;  // 防止反复尝试
-            }
-        }
-
-        private static System.Collections.Generic.List<string> GetDirectorKeys<X>() where X : Directory<GameItem>
-        {
-            try
-            {
-                var t = Il2CppSystem.Type.GetType(typeof(X).FullName);
-                if (t == null) return null;
-                if (DirectoryMaster.directories.TryGetValue(t, out var insts) && insts != null && insts.Count > 0)
-                {
-                    var inst = insts[0] as Directory<GameItem>;
-                    if (inst != null)
-                    {
-                        var fd = inst.factoryDictionary;
-                        if (fd != null)
-                        {
-                            var outList = new System.Collections.Generic.List<string>();
-                            foreach (var kv in fd)
-                                outList.Add(kv.Key);
-                            return outList;
-                        }
-                    }
-                }
-            }
-            catch (Exception e) { MelonLogger.Warning($"[List] {typeof(X).Name} getter ex: {e.Message}"); }
-            return null;
         }
 
         // ============ 机器进度强制满 ============
