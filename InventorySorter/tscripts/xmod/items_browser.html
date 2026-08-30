@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Probably Stolen 物品浏览器</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#12141a;color:#e8eaf0;min-height:100vh}
+header{padding:20px 24px;background:#1a1d26;border-bottom:1px solid #2a2e3a;position:sticky;top:0;z-index:10}
+header h1{font-size:20px;color:#8ecff7}
+header p{font-size:13px;color:#7a8290;margin-top:4px}
+.search-bar{display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.search-bar input[type=text]{flex:1;min-width:260px;padding:10px 14px;border-radius:8px;border:1px solid #333a48;background:#212530;color:#e8eaf0;font-size:14px}
+.search-bar input:focus{outline:none;border-color:#5a9fd4}
+.count-badge{background:#2a2e3a;padding:8px 14px;border-radius:8px;font-size:13px;color:#aeb6c4}
+main{display:flex;min-height:calc(100vh - 140px)}
+aside{width:240px;padding:16px;border-right:1px solid #2a2e3a;background:#181b23;flex-shrink:0}
+aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
+.cat-list{display:flex;flex-direction:column;gap:2px}
+.cat-btn{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:6px;color:#b8c0cc;cursor:pointer;font-size:13px;border:none;background:none;text-align:left;width:100%}
+.cat-btn:hover{background:#232834;color:#fff}
+.cat-btn.active{background:#2b4a6b;color:#8ecff7;font-weight:600}
+.cat-btn .n{background:#2a2e3a;padding:2px 8px;border-radius:10px;font-size:11px;color:#8a92a0}
+#grid{flex:1;padding:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;align-content:start}
+.card{background:#1c2029;border:1px solid #2a2e3a;border-radius:10px;padding:14px;cursor:pointer;transition:transform .1s,border-color .1s}
+.card:hover{transform:translateY(-2px);border-color:#5a9fd4}
+.card .nm{font-size:14px;font-weight:600;color:#eef2f8}
+.card .nm-en{font-size:12px;color:#8892a2;margin-top:2px}
+.card .cat{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.card .tag{font-size:10px;padding:2px 8px;border-radius:10px;background:#2a2e3a;color:#9aa4b4}
+.card .id{font-size:11px;color:#5c93c2;margin-top:8px;font-family:monospace}
+.card .desc{font-size:12px;color:#7a8290;margin-top:6px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.detail{position:fixed;right:20px;bottom:20px;max-width:420px;background:#212530;border:1px solid #5a9fd4;border-radius:12px;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,.5);display:none;z-index:20}
+.detail.show{display:block}
+.detail h2{font-size:16px;color:#fff}
+.detail .en{color:#8892a2;font-size:13px;margin:4px 0 10px}
+.detail .desc-full{font-size:13px;line-height:1.6;color:#b8c0cc;margin-bottom:12px;white-space:pre-wrap}
+.detail .meta{font-size:12px;color:#8a92a0;display:grid;gap:4px}
+.detail .meta b{color:#8ecff7;font-weight:500}
+#copyId{background:#2b4a6b;border:none;color:#8ecff7;padding:8px 16px;border-radius:8px;cursor:pointer;margin-top:12px;font-size:13px}
+#copyId:hover{background:#345d85}
+#closeDetail{position:absolute;top:10px;right:14px;background:none;border:none;color:#7a8290;font-size:18px;cursor:pointer}
+.empty{grid-column:1/-1;text-align:center;color:#6a7280;padding:60px;font-size:15px}
+.server-status{display:flex;align-items:center;gap:8px;font-size:12px;color:#8a92a0;margin-top:8px}
+.dot{width:9px;height:9px;border-radius:50%;background:#555;display:inline-block}
+.dot.on{background:#4caf50}.dot.off{background:#f44336}
+.spawn-btn{background:#2b7a4b;border:none;color:#d9ffe8;padding:6px 14px;border-radius:7px;cursor:pointer;font-size:12px;font-weight:600}
+.spawn-btn:hover{background:#33915c}
+.spawn-btn.done{background:#4caf50}
+.spawn-btn.err{background:#c62828}
+.toast{position:fixed;top:20px;right:20px;background:#212530;border:1px solid #5a9fd4;color:#e8eaf0;padding:12px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.ok{border-color:#4caf50}.toast.bad{border-color:#f44336}
+</style>
+</head>
+<body>
+<header>
+  <h1>Probably Stolen — 物品浏览器</h1>
+  <p>数据源: xmod/ProbablyStolenPlaytest.dll 内嵌 item-catalog.json (397 项)</p>
+  <div class="search-bar">
+    <input type="text" id="search" placeholder="搜索名称 / ID / 描述...（支持中英）">
+    <span class="count-badge" id="count">0 项</span>
+  </div>
+  <div class="server-status">
+    <span class="dot" id="svDot"></span>
+    <span id="svText">检查生成服务器...</span>
+  </div>
+</header>
+<div class="toast" id="toast"></div>
+<main>
+  <aside>
+    <h3>分类</h3>
+    <div class="cat-list" id="catList"></div>
+  </aside>
+  <div id="grid"></div>
+</main>
+<div class="detail" id="detail">
+  <button id="closeDetail">×</button>
+  <h2 id="dName"></h2>
+  <div class="en" id="dEn"></div>
+  <div class="desc-full" id="dDesc"></div>
+  <div class="meta" id="dMeta"></div>
+  <button id="copyId">复制 stableId</button>
+</div>
+<script src="items_data.js"></script>
+<script>
+const grid = document.getElementById('grid');
+const search = document.getElementById('search');
+const catList = document.getElementById('catList');
+const detail = document.getElementById('detail');
+let curCat = 'ALL';
+let curSearch = '';
+
+function categoryCounts(){
+  const c = {};
+  ITEMS.forEach(i => (i.categories || []).forEach(x => c[x] = (c[x]||0)+1));
+  return c;
+}
+function renderCats(){
+  const c = categoryCounts();
+  const keys = ['ALL', ...Object.keys(c).sort()];
+  catList.innerHTML = keys.map(k => {
+    const label = k==='ALL' ? '全部' : k;
+    const n = k==='ALL' ? ITEMS.length : c[k];
+    return `<button class="cat-btn ${curCat===k?'active':''}" data-cat="${k}">
+      <span>${label}</span><span class="n">${n}</span></button>`;
+  }).join('');
+  catList.querySelectorAll('.cat-btn').forEach(b => b.onclick = () => {
+    curCat = b.dataset.cat; renderCats(); renderGrid();
+  });
+}
+function matches(i){
+  if(curCat!=='ALL' && !(i.categories||[]).includes(curCat)) return false;
+  if(!curSearch) return true;
+  const q = curSearch.toLowerCase();
+  return (i.nameZh||'').toLowerCase().includes(q) ||
+         (i.nameEn||'').toLowerCase().includes(q) ||
+         (i.stableId||'').toLowerCase().includes(q) ||
+         (i.descriptionZh||'').toLowerCase().includes(q) ||
+         (i.descriptionEn||'').toLowerCase().includes(q);
+}
+function renderGrid(){
+  const list = ITEMS.filter(matches);
+  document.getElementById('count').textContent = list.length + ' 项';
+  grid.innerHTML = list.length ? list.map(i => `
+    <div class="card" data-id="${i.stableId}">
+      <div class="nm">${esc(i.nameZh||'')}</div>
+      <div class="nm-en">${esc(i.nameEn||'')}</div>
+      <div class="cat">${(i.categories||[]).slice(0,4).map(c=>`<span class="tag">${c}</span>`).join('')}</div>
+      <div class="id">${esc(i.stableId||'')}</div>
+      <div class="desc">${esc(i.descriptionZh||'')}</div>
+      <div style="margin-top:10px"><button class="spawn-btn" data-spawn="${esc(i.stableId||'')}">生成 ×1</button></div>
+    </div>`).join('') : '<div class="empty">无匹配物品</div>';
+  grid.querySelectorAll('.card').forEach(c => c.onclick = () => showDetail(c.dataset.id));
+}
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function showDetail(id){
+  const i = ITEMS.find(x => x.stableId===id);
+  if(!i) return;
+  dName.textContent = i.nameZh || id;
+  dEn.textContent = i.nameEn || '';
+  dDesc.textContent = i.descriptionZh || i.descriptionEn || '';
+  dMeta.innerHTML = `
+    <div><b>stableId</b> ${i.stableId}</div>
+    <div><b>分类</b> ${(i.categories||[]).join(', ')}</div>
+    <div><b>itemTypes</b> ${(i.itemTypes||[]).join(', ')}</div>
+    <div><b>kind</b> ${i.kind}</div>
+    <div><b>directory</b> ${i.directory}</div>
+    <div><b>addPolicy</b> ${i.addPolicy}</div>`;
+  detail.classList.add('show');
+}
+document.getElementById('closeDetail').onclick = () => detail.classList.remove('show');
+document.getElementById('copyId').onclick = () => {
+  const id = dMeta.querySelector('b').nextSibling.textContent.trim();
+  navigator.clipboard.writeText(id); 
+  document.getElementById('copyId').textContent = '已复制 ✓';
+  setTimeout(()=>document.getElementById('copyId').textContent='复制 stableId',1300);
+};
+search.oninput = () => { curSearch = search.value.trim(); renderGrid(); };
+
+const API = 'http://localhost:26880';
+function toast(msg, cls){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show ' + cls;
+  setTimeout(()=>t.className='toast', 2200);
+}
+async function checkServer(){
+  const dot = document.getElementById('svDot');
+  const txt = document.getElementById('svText');
+  try{
+    const r = await fetch(API + '/api/health');
+    if(r.ok){ dot.className='dot on'; txt.textContent='生成服务器已连接 (ProgressMod)'; return true; }
+    throw 0;
+  }catch(e){
+    dot.className='dot off'; txt.textContent='生成服务器离线 — 启动游戏(ProgressMod)后自动重连';
+    return false;
+  }
+}
+async function spawnItem(id, btn){
+  if(!(await checkServer())){ toast('服务器离线, 请先打开游戏', 'bad'); return; }
+  btn.classList.add('done'); btn.disabled = true;
+  btn.textContent = '生成中...';
+  try{
+    const r = await fetch(API + '/api/spawn?itemId=' + encodeURIComponent(id) + '&count=1');
+    const j = await r.json();
+    if(j.ok){ btn.className='spawn-btn done'; btn.textContent='已生成 ✓'; toast('已生成: ' + id + ' ×1', 'ok'); }
+    else { btn.className='spawn-btn err'; btn.textContent='失败'; toast('生成失败: ' + (j.err||''), 'bad'); }
+  }catch(e){
+    btn.className='spawn-btn err'; btn.textContent='失败';
+    toast('请求失败: ' + e, 'bad');
+  }
+  setTimeout(()=>{ btn.className='spawn-btn'; btn.textContent='生成 ×1'; btn.disabled=false; }, 2500);
+}
+document.body.addEventListener('click', e => {
+  const b = e.target.closest('[data-spawn]');
+  if(b) spawnItem(b.dataset.spawn, b);
+});
+setInterval(()=>{ const d = document.querySelector('.dot'); checkServer(); }, 5000);
+checkServer();
+
+renderCats(); renderGrid();
+</script>
+</body>
+</html>

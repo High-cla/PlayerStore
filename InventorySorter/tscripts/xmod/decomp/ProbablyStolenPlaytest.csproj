@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ProbablyStolenPlaytest</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>net6.0</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>15.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <RootNamespace />
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="70lUd4dj1Veq7STcxZ.FGpZrAD482wFMAEPMe" />
+    <None Remove="ProbablyStolenPlaytest.Resources.item-catalog.json" />
+    <None Remove="ProbablyStolenPlaytest.Resources.localization-overrides.json" />
+    <None Remove="ProbablyStolenPlaytest.Resources.description-overrides.json" />
+    <None Remove="ProbablyStolenPlaytest.Resources.item-catalog.audit.json" />
+    <EmbeddedResource Include="70lUd4dj1Veq7STcxZ.FGpZrAD482wFMAEPMe" LogicalName="70lUd4dj1Veq7STcxZ.FGpZrAD482wFMAEPMe" />
+    <EmbeddedResource Include="ProbablyStolenPlaytest.Resources.item-catalog.json" LogicalName="ProbablyStolenPlaytest.Resources.item-catalog.json" />
+    <EmbeddedResource Include="ProbablyStolenPlaytest.Resources.localization-overrides.json" LogicalName="ProbablyStolenPlaytest.Resources.localization-overrides.json" />
+    <EmbeddedResource Include="ProbablyStolenPlaytest.Resources.description-overrides.json" LogicalName="ProbablyStolenPlaytest.Resources.description-overrides.json" />
+    <EmbeddedResource Include="ProbablyStolenPlaytest.Resources.item-catalog.audit.json" LogicalName="ProbablyStolenPlaytest.Resources.item-catalog.audit.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="ModFramework">
+      <HintPath>D:\steam\steamapps\common\Probably Stolen Playtest\BepInEx\plugins\xmod\ModFramework.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule" />
+    <Reference Include="BepInEx.Core" />
+    <Reference Include="BepInEx.Unity.IL2CPP" />
+    <Reference Include="0Harmony" />
+    <Reference Include="Il2CppInterop.Runtime" />
+    <Reference Include="Assembly-CSharp" />
+    <Reference Include="UnityEngine.AnimationModule" />
+    <Reference Include="UnityEngine.UIModule" />
+    <Reference Include="UnityEngine.UI" />
+    <Reference Include="Il2Cppmscorlib" />
+    <Reference Include="Unity.Localization" />
+  </ItemGroup>
+</Project>
