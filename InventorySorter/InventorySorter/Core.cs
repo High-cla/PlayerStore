@@ -1148,6 +1148,16 @@ public class Core : MelonMod
 			{
 				candidates.Add(dictS);
 			}
+			// LeftBottom: 大背包左下锚定(17x10/11x14 漏网胜), 聚左下块留右上
+			if (TryLeftBottom(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictLB))
+			{
+				candidates.Add(dictLB);
+			}
+			// BestFitMFR: MFR 池最小 waste, 高密度(10x10 total=67)胜
+			if (TryPlaceMFR(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictMFR))
+			{
+				candidates.Add(dictMFR);
+			}
 		}
 		else
 		{
@@ -1383,6 +1393,93 @@ public class Core : MelonMod
 			{
 				return false;
 			}
+		}
+		return true;
+	}
+
+	// LeftBottom: 左下角锚定. 物品偏好放最左下(px 最小优先, py 最大优先), 聚成左下紧块, 留右上整块.
+	// 大背包(17x10/11x14)常胜: 左下凝聚使剩余集中在右上, 好放更大物品. 只处理单件(无配对).
+	private static bool TryLeftBottom(List<GameItem> fixedItems, List<GameItem> singles, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	{
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem fixedItem in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, fixedItem);
+		}
+		dictionary = new Dictionary<GameItem, Placement>();
+		List<GameItem> order = new List<GameItem>(singles);
+		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+		foreach (GameItem item in order)
+		{
+			ItemMask m = masks[item];
+			int bestX = -1;
+			int bestY = -1;
+			int bestO = 0;
+			for (int o = 0; o < 4; o++)
+			{
+				List<(int, int)> cells = CellsOf(m, o);
+				if (cells == null || cells.Count == 0)
+				{
+					continue;
+				}
+				int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+				int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+				if (gw > W || gh > H)
+				{
+					continue;
+				}
+				for (int py = 0; py + gh <= H; py++)
+				{
+					for (int px = 0; px + gw <= W; px++)
+					{
+						if (!CellsFree(occ, px, py, cells))
+						{
+							continue;
+						}
+						// 左下优先: px 最小优先, 并列时 py 最大(更靠底)
+						if (bestX < 0 || px < bestX || (px == bestX && py > bestY))
+						{
+							bestX = px;
+							bestY = py;
+							bestO = o;
+						}
+					}
+				}
+			}
+			if (bestX < 0)
+			{
+				return false;
+			}
+			dictionary[item] = new Placement(bestX, bestY, bestO);
+			MarkCells(occ, W, H, bestX, bestY, CellsOf(m, bestO), val: true);
+		}
+		return true;
+	}
+
+	// BestFitMFR: MFR 池最小 waste 选位. 物品落在空闲矩形最小浪费处, 高密度(10x10 total=67)常胜.
+	// 用 FindFreeRects 算空闲矩形池, 每放一件 ShrinkRects 增量切块(免逐件全扫). 只处理单件(无配对).
+	private static bool TryPlaceMFR(List<GameItem> fixedItems, List<GameItem> singles, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	{
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem fixedItem in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, fixedItem);
+		}
+		dictionary = new Dictionary<GameItem, Placement>();
+		List<GameItem> order = new List<GameItem>(singles);
+		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+		List<(int x, int y, int w, int h)> rects = FindFreeRects(occ, W, H);
+		foreach (GameItem item in order)
+		{
+			if (!PlaceInto(occ, W, H, masks[item], 0, out var bx, out var by, out var bo, out var bottom, rects))
+			{
+				return false;
+			}
+			dictionary[item] = new Placement(bx, by, bo);
+			ItemMask mm = masks[item];
+			int pw = (bo == 1 || bo == 3) ? mm.Gh0 : mm.Gw0;
+			int ph = (bo == 1 || bo == 3) ? mm.Gw0 : mm.Gh0;
+			ShrinkRects(rects, bx, by, pw, ph);
 		}
 		return true;
 	}
