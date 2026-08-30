@@ -1123,25 +1123,8 @@ public class Core : MelonMod
 		long gridCells = (long)W * H;
 		if (gridCells < 4000)
 		{
-			// MinHole: 大网格品质王者(单算法胜6; 17x10/24x10/10x10/6x8 必胜). 裸单件 + 级联(配对单元进MinHole)
-			if (TryMinHole(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictM))
-			{
-				candidates.Add(dictM);
-			}
-			if (paired != null && TryMinHole(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictMC))
-			{
-				candidates.Add(dictMC);
-			}
-			// 堆叠叠放: 堆叠物品允许压已占格(>=1 新格可见), 少占地面, 释放空间
-			if (TryMinHoleStack(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dictS2))
-			{
-				candidates.Add(dictS2);
-			}
-			if (paired != null && TryMinHoleStack(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictPS2))
-			{
-				candidates.Add(dictPS2);
-			}
-			// GrowTouch + Guillotine: 小网格胜者(8x8/11x14/14x21/7x5/5x5), 与 MinHole 互补. Guillotine 碎片池复用比 Shelf 质量高(实测 +62%).
+			// 数据驱动(修复MinHole模拟bug后重扫描): MinHole 单算法胜0/空矩3239 已被包围, 删除(省算力 O(W^2H^2) 最贵).
+			// GrowTouch + Guillotine(死洞惩罚) + LeftBottom + MFR: 组合 120/120 全胜 空矩9964.
 			if (TryGrowTouch(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictGT))
 			{
 				candidates.Add(dictGT);
