@@ -5,8 +5,9 @@
 """
 import sys, os, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from parse_dump import parse_dump
+from parse_dump import parse_dump, parse_dump_merged
 import verify_all as va
+import guillotine_test
 
 # 候选算法的通用适配器 (统一 items, W, H 签名)
 def pack_left_bottom(items, W, H):
@@ -97,18 +98,26 @@ ALGOS = {
         combo2(combo2(va.ALGOS["GrowTouch"], va.ALGOS["Shelf"]),
                combo2(pack_left_bottom, va.ALGOS["BestFitMFR"])),
     ),
+    # V2: Shelf→Guillotine 替换后组合
+    "CurComboV2": combo2(
+        va.ALGOS["MinHole"],
+        combo2(combo2(va.ALGOS["GrowTouch"], guillotine_test.guillotine_pack),
+               combo2(pack_left_bottom, va.ALGOS["BestFitMFR"])),
+    ),
 }
 
 def run():
-    sessions = parse_dump()
+    # 用同类合并后的数据: 模拟 C# 端"先合并后布局"(mergeRepIdx 剔除吸收件, 只布局代表格)
+    sessions = parse_dump_merged()
     # 全部逐组(已去重, 无重复), 跳过容量不足
     groups = []
-    for w, h, items in sessions:
+    for w, h, merged in sessions:
+        items = [rep for rep, _ in merged]
         total = sum(len(i["cells"]) for i in items)
         if total == 0 or total > w * h:
             continue
         groups.append((w, h, items, total))
-    print(f"参与验证组: {len(groups)} (已去重, 跳过容量不足)")
+    print(f"参与验证组: {len(groups)} (已去重+同类合并, 跳过容量不足)")
     wins = {k: 0 for k in ALGOS}
     total_best = {k: 0 for k in ALGOS}
     # 逐组跑

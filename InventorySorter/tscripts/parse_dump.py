@@ -41,6 +41,29 @@ def parse_dump(path="D:/steam/steamapps/common/Probably Stolen Playtest/Mods/inv
         i += 1
     return sessions
 
+def merge_same_type(items):
+    """同类合并: 相同 ident + 相同形状(cells 归一化) 的多件合并为 1 代表格(代表格 unitCount=总数),
+    其余剔除. 模拟 C# 端 mergeRepIdx 行为(布局器跑之前先执行同类合并).
+    返回 [(it, unit_count), ...] 代表格列表(unit_count>=1). 不可堆叠的同类独立件也合并(与 C# 无差别合并一致)."""
+    groups = {}
+    for it in items:
+        # 形状归一化键: ident + 尺寸 + sorted cells(形状相同即归一化一致)
+        key = (it["name"], it["w"], it["h"], tuple(sorted(it["cells"])))
+        groups.setdefault(key, []).append(it)
+    merged = []
+    for key, group in groups.items():
+        # 代表格取第一件, unitCount = 组内件数
+        rep = {"name": key[0], "cells": key[3], "w": key[1], "h": key[2]}
+        merged.append((rep, len(group)))
+    return merged
+
+def parse_dump_merged(path="D:/steam/steamapps/common/Probably Stolen Playtest/Mods/inv_shape_dump.txt"):
+    """parse_dump + 每组同类合并. 返回 List[(W,H,[(rep,unit_count)])]."""
+    sessions = parse_dump(path)
+    out = []
+    for w, h, items in sessions:
+        out.append((w, h, merge_same_type(items)))
+    return out
 if __name__ == "__main__":
     g = parse_dump()
     for key in sorted(g):
