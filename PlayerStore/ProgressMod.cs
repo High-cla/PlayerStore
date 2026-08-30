@@ -19,6 +19,10 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgAutoIdentify = Cfg.CreateEntry<bool>("AutoIdentify", true, "对质类物品(香烟/注射器/印章)自动鉴定");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyAlwaysPure = Cfg.CreateEntry<bool>("PurifyAlwaysPure", true, "净化器/过滤器: PurifyToBaseWater 永远净化100%纯水");
         public static readonly MelonPreferences_Entry<bool> CfgTurboCooldownFree = Cfg.CreateEntry<bool>("TurboCooldownFree", true, "TurboBooster: 无视冷却/充能延时, 永远就绪");
+        public static readonly MelonPreferences_Entry<int> CfgOutputMult = Cfg.CreateEntry<int>("OutputMult", 3, "机器产出量倍率: 每个加工周期产出的物品数量乘以该倍率");
+        public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
+        public static readonly MelonPreferences_Entry<bool> CfgNoAddiction = Cfg.CreateEntry<bool>("NoAddiction", true, "永不中毒: 酒精/尼古丁/麻醉剂/赌博永不产生成瘾, 无成瘾惩罚");
+        public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
         public static bool ForceFinish => CfgForceFinish.Value;
         public static bool NoDurability => CfgNoDurability.Value;
@@ -28,6 +32,10 @@ namespace ProgressMod
         public static bool AutoIdentify => CfgAutoIdentify.Value;
         public static bool PurifyAlwaysPure => CfgPurifyAlwaysPure.Value;
         public static bool TurboCooldownFree => CfgTurboCooldownFree.Value;
+        public static int OutputMult => CfgOutputMult.Value;
+        public static bool NeverWounded => CfgNeverWounded.Value;
+        public static bool NoAddiction => CfgNoAddiction.Value;
+        public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
 
         public override void OnInitializeMelon()
         {
@@ -334,6 +342,24 @@ namespace ProgressMod
             }
         }
 
+        // ============ 机器产出量乘倍 ============
+        // Hook 机器加工进度初始化(带 targetItemCount 的重载): 每个加工周期产出的物品数量 × OutputMult.
+        // 需显式 Type[] 消歧(InitProgressSourceItem 有 2 个重载).
+        [HarmonyPatch(typeof(MachineProgressHelper), "InitProgressSourceItem", new Type[] { typeof(GameItem), typeof(int), typeof(string), typeof(bool), typeof(int), typeof(string) })]
+        public static class PatchOutputMult
+        {
+            public static void Prefix(GameItem sourceItem, int targetAmount, string targetItemID, bool useDefaultTooltip, ref int targetItemCount, string requiredMachineTag)
+            {
+                try
+                {
+                    if (OutputMult <= 1 || targetItemCount <= 0) return;
+                    MelonLogger.Msg($"[Output] {targetItemID}: count {targetItemCount} -> {targetItemCount * OutputMult}");
+                    targetItemCount *= OutputMult;
+                }
+                catch (Exception e) { MelonLogger.Error($"[Output] InitProgressSourceItem patch err: {e.Message}"); }
+            }
+        }
+
         // ============ TurboBooster 永远就绪 ============
         [HarmonyPatch(typeof(MachineTurboBoosterAdv), "IsTurboReady")]
         public static class PatchTurboReady
@@ -442,5 +468,83 @@ namespace ProgressMod
         }
 
         // ============ 全面日志(已删除: 高频诊断, 不再调用) ============
+
+        // ============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============
+        // ScavHelper 负责拾荒受伤掷骰; HealthData 负责伤口结算与恶化.
+        // 统一策略: bool 返回 Postfix 强制 false/0, void 结算 Prefix 跳过.
+        [HarmonyPatch(typeof(ScavHelper), "RollMinorWound")] public static class PatchRollMinorWound
+        {
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "RollMajorWound")] public static class PatchRollMajorWound
+        {
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "GetMinorWoundChance")] public static class PatchGetMinorWoundChance
+        {
+            public static void Postfix(ref float __result, ref int __1) { try { if (NeverWounded) __result = 0f; } catch { } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "GetMajorWoundChance")] public static class PatchGetMajorWoundChance
+        {
+            public static void Postfix(ref float __result, ref int __1) { try { if (NeverWounded) __result = 0f; } catch { } }
+        }
+        [HarmonyPatch(typeof(HealthData), "ReceiveMinorWound")] public static class PatchReceiveMinorWound
+        {
+            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
+        }
+        [HarmonyPatch(typeof(HealthData), "ReceiveMajorWound")] public static class PatchReceiveMajorWound
+        {
+            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
+        }
+        [HarmonyPatch(typeof(HealthData), "IsSeriouslyWounded")] public static class PatchIsSeriouslyWounded
+        {
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
+        }
+        [HarmonyPatch(typeof(HealthData), "HandleNightlyWound")] public static class PatchHandleNightlyWound
+        {
+            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
+        }
+
+        // ============ 永不中毒: 酒精/尼古丁/麻醉剂/赌博无成瘾 ============
+        // HealthData 成瘾检测与惩罚. bool 检测 Postfix 强制 false, int/void 结算跳过置零.
+        [HarmonyPatch(typeof(HealthData), "HasAnyAddiction")] public static class PatchHasAnyAddiction
+        {
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+        }
+        [HarmonyPatch(typeof(HealthData), "IsAlcoholAddicted")] public static class PatchIsAlcoholAddicted
+        {
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+        }
+        [HarmonyPatch(typeof(HealthData), "IsNicotineAddicted")] public static class PatchIsNicotineAddicted
+        {
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+        }
+        [HarmonyPatch(typeof(HealthData), "IsNarcoticAddicted")] public static class PatchIsNarcoticAddicted
+        {
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+        }
+        [HarmonyPatch(typeof(HealthData), "IsGamblingAddicted")] public static class PatchIsGamblingAddicted
+        {
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+        }
+        [HarmonyPatch(typeof(HealthData), "GetTotalAddictionPenalty")] public static class PatchGetTotalAddictionPenalty
+        {
+            public static void Postfix(ref int __result) { try { if (NoAddiction) __result = 0; } catch { } }
+        }
+        [HarmonyPatch(typeof(HealthData), "RemoveOneRandomAddiction")] public static class PatchRemoveOneRandomAddiction
+        {
+            public static bool Prefix() { try { return !NoAddiction; } catch { return true; } }
+        }
+
+        // ============ 无限拾荒: 次数与冷却不受限 ============
+        [HarmonyPatch(typeof(ScavHelper), "GetMaxScavAttempts")] public static class PatchGetMaxScavAttempts
+        {
+            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "GetScavTimeLeft")] public static class PatchGetScavTimeLeft
+        {
+            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
+        }
+
     }
 }
