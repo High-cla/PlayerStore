@@ -461,6 +461,14 @@ namespace ProgressMod
                 {
                     if (!AutoIdentify || gameItem == null) return;
                     InspectableHelper.OnConfrontSuccess(gameItem);
+                    // 游戏手动鉴定路径会经由 InspectionUIManager 的 HandleXxx/OnInspectItem 刷新 UI 标签;
+                    // 自动鉴定只调 Helper 设状态, 不刷 UI => 物品标签不更新. 补一次 UI 刷新.
+                    try
+                    {
+                        var mgr = InspectionUIManager.Instance;
+                        if (mgr != null) mgr.OnInspectItem(gameItem);
+                    }
+                    catch (Exception uie) { MelonLogger.Msg($"[Identify] ui refresh skipped: {uie.Message}"); }
                     MelonLogger.Msg($"[Identify] auto-identified {Describe(gameItem)}");
                 }
                 catch (Exception e) { MelonLogger.Error($"[Identify] ex: {e.Message}"); }

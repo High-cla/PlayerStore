@@ -148,6 +148,8 @@ public class Core : MelonMod
 			GroupByTagDefaulted.Value = true;
 			MelonPreferences.Save();
 		}
+		// 配置在游戏启动时即落盘生成 (不再等首次触发/退出), 玩家可提前看到并修改
+		MelonPreferences.Save();
 		((MelonBase)this).LoggerInstance.Msg("Inventory Sorter v1.0.1 loaded. A Sort window appears while a storage is open. F6 hides/shows it.");
 	}
 
