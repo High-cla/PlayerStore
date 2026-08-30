@@ -1776,16 +1776,6 @@ public class Core : MelonMod
 		};
 	}
 
-	private static int AreaOf(object unit, Dictionary<GameItem, ItemMask> masks)
-	{
-		if (unit is PairUnit pu)
-		{
-			return pu.M.Gw0 * pu.M.Gh0;
-		}
-		ItemMask m = masks[(GameItem)unit];
-		return m.Gw0 * m.Gh0;
-	}
-
 	// 增量 MFR: 放置后把被占矩形从空闲池切掉
 	private static void ShrinkRects(List<(int x, int y, int w, int h)> rects, int px, int py, int pw, int ph)
 	{
