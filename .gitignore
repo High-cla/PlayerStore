@@ -1,4 +1,4 @@
 bin/
 obj/
 *.dll
-*.user
+*.userinv_shape_dump.bak_*.txt
