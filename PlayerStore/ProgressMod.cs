@@ -75,6 +75,14 @@ namespace ProgressMod
                 var t = new System.Threading.Thread(ServerLoop) { IsBackground = true };
                 t.Start();
                 MelonLogger.Msg("[Spawn] HTTP server on http://localhost:26880/");
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                        "https://high-cla.github.io/PlayerStore/items_browser.html")
+                    { UseShellExecute = true });
+                    MelonLogger.Msg("[Spawn] opened items browser");
+                }
+                catch (Exception e2) { MelonLogger.Warning($"[Spawn] open browser ex: {e2.Message}"); }
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] server start ex: {e.Message}"); }
         }
