@@ -223,6 +223,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		if (!ButtonsVisible || !Enabled.Value)
 		{
@@ -274,6 +275,7 @@ public class Core : MelonMod
 							}
 							catch
 							{
+								// ponytail: IL2CPP native probe, silent fallback
 							}
 						});
 			_rootedActions.Add(val2);
@@ -305,6 +307,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 	}
 
@@ -460,6 +463,7 @@ public class Core : MelonMod
 				}
 				catch
 				{
+					// ponytail: IL2CPP native probe, silent fallback
 				}
 				if (val2 == null)
 				{
@@ -477,6 +481,7 @@ public class Core : MelonMod
 				}
 				catch
 				{
+					// ponytail: IL2CPP native probe, silent fallback
 				}
 				if (flag)
 				{
@@ -489,6 +494,7 @@ public class Core : MelonMod
 				}
 				catch
 				{
+					// ponytail: IL2CPP native probe, silent fallback
 				}
 				InvInfo(val3, out var _, out var cells);
 				string item;
@@ -509,6 +515,7 @@ public class Core : MelonMod
 					}
 					catch
 					{
+						// ponytail: IL2CPP native probe, silent fallback
 					}
 					if (flag2)
 					{
@@ -537,6 +544,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return result;
 	}
@@ -553,6 +561,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		try
 		{
@@ -564,6 +573,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		try
 		{
@@ -583,6 +593,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		try
 		{
@@ -602,6 +613,7 @@ public class Core : MelonMod
 						}
 						catch
 						{
+							// ponytail: IL2CPP native probe, silent fallback
 						}
 						if (val5 != null)
 						{
@@ -613,6 +625,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return null;
 	}
@@ -652,6 +665,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		try
 		{
@@ -671,10 +685,12 @@ public class Core : MelonMod
 			}
 			catch
 			{
+				// ponytail: IL2CPP native probe, silent fallback
 			}
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 	}
 
@@ -695,6 +711,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return false;
 	}
@@ -765,6 +782,7 @@ public class Core : MelonMod
 				}
 				catch
 				{
+					// ponytail: IL2CPP native probe (minX/minY/orientation), silent fallback to coordinates below
 				}
 				try
 				{
@@ -776,6 +794,7 @@ public class Core : MelonMod
 				}
 				catch
 				{
+					// ponytail: IL2CPP native probe (flipped), silent fallback
 				}
 			}
 			list4.Add((item6, item, item2, item3, item4));
@@ -941,8 +960,9 @@ public class Core : MelonMod
 			{
 				inv.Validate();
 			}
-			catch
+			catch (System.Exception exV)
 			{
+				MelonLogger.Error("[InvSorter] post-layout Validate failed: " + exV.Message);
 			}
 			Toast($"{value2} {dictionary3.Count}/{list2.Count} item(s)" + ((num > 0) ? $", {num} rotated" : "") + ((list3.Count > 0) ? $"  ({list3.Count} kept)" : ""));
 		}
@@ -952,8 +972,9 @@ public class Core : MelonMod
 			{
 				RestoreOriginal(inv, list4);
 			}
-			catch
+			catch (System.Exception exR)
 			{
+				MelonLogger.Error("[InvSorter] restore failed after sort error: " + exR.Message);
 			}
 			Toast("sort error: " + ex2.Message);
 		}
@@ -972,16 +993,18 @@ public class Core : MelonMod
 					val2.SetTransform(item.x, item.y, item.f, item.o);
 				}
 			}
-			catch
+			catch (System.Exception exR)
 			{
+				MelonLogger.Error("[InvSorter] restore SetTransform failed: " + exR.Message);
 			}
 		}
 		try
 		{
 			inv.Validate();
 		}
-		catch
+		catch (System.Exception exV)
 		{
+			MelonLogger.Error("[InvSorter] restore Validate failed: " + exV.Message);
 		}
 	}
 
@@ -1970,6 +1993,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		if (val2 != null)
 		{
@@ -1982,6 +2006,7 @@ public class Core : MelonMod
 				}
 				catch
 				{
+					// ponytail: IL2CPP native probe, silent fallback
 				}
 				val2.SetTransform(0, 0, flag, 0);
 				int num = Math.Max(1, val.width);
@@ -2002,6 +2027,7 @@ public class Core : MelonMod
 						}
 						catch
 						{
+							// ponytail: IL2CPP native probe, silent fallback
 						}
 						if (b != 0)
 						{
@@ -2217,6 +2243,7 @@ public class Core : MelonMod
 			}
 			catch
 			{
+				// ponytail: IL2CPP native probe, silent fallback
 			}
 			if (val == null)
 			{
@@ -2226,6 +2253,7 @@ public class Core : MelonMod
 				}
 				catch
 				{
+					// ponytail: IL2CPP native probe, silent fallback
 				}
 			}
 			if (val == null)
@@ -2244,6 +2272,7 @@ public class Core : MelonMod
 			}
 			catch
 			{
+				// ponytail: IL2CPP native probe, silent fallback
 			}
 			val2.SetTransform(x, y, flag, orient);
 			return true;
@@ -2304,6 +2333,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return "";
 	}
@@ -2338,6 +2368,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		try
 		{
@@ -2351,6 +2382,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return false;
 	}
@@ -2364,6 +2396,7 @@ public class Core : MelonMod
 		}
 		catch
 		{
+			// ponytail: IL2CPP native probe, silent fallback
 		}
 		if (val == null)
 		{
@@ -2373,6 +2406,7 @@ public class Core : MelonMod
 			}
 			catch
 			{
+				// ponytail: IL2CPP native probe, silent fallback
 			}
 		}
 		return val;

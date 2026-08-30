@@ -1,0 +1,16 @@
+id: empty-catch
+language: csharp
+rule:
+  kind: catch_clause
+  has:
+    kind: block
+    stopBy: end
+  any:
+    # block 无子节点 = 真正的空 catch
+    - has:
+        kind: block
+        stopBy: end
+        not:
+          has:
+            pattern: $$$
+            stopBy: end
