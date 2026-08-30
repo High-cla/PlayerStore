@@ -2812,11 +2812,33 @@ public class Core : MelonMod
 
 	// 诊断: dump 背包尺寸 + 每件散件形状(缓存: 每唯一形状仅首见 dump)到 Mods/inv_shape_dump.txt. 编译后自动调用, 无需开关.
 	private static readonly HashSet<string> _dumpedShapes = new HashSet<string>();
+	// 快照级去重: 上次 dump 的布局输入指纹(WxH + 物品形状签名集合). 同一背包状态(相同物品集)反复排序时跳过重复快照.
+	private static string _lastSnapshotFingerprint;
 
 	private static void DumpShapes(int w, int h, Dictionary<GameItem, ItemMask> masks, List<(GameItem, int, int, int, bool)> placed)
 	{
 		try
 		{
+			// 快照指纹: WxH + 所有物品 ident|尺寸|C0格序列 排序后哈希. 基于布局输入(排除时间戳/occ/free等输出),
+			// 同一背包状态反复排序时指纹相同, 跳过重复快照写入. 消除玩家重复点按钮产生的冗余采集.
+			var fpList = new List<string>(masks.Count);
+			foreach (KeyValuePair<GameItem, ItemMask> kv in masks)
+			{
+				ItemMask m = kv.Value;
+				StringBuilder fsb = new StringBuilder();
+				foreach ((int fdx, int fdy) in m.C0)
+				{
+					fsb.Append(fdx).Append(':').Append(fdy).Append(',');
+				}
+				fpList.Add(m.Gw0 + "x" + m.Gh0 + "|" + fsb.ToString());
+			}
+			fpList.Sort(StringComparer.Ordinal);
+			string fingerprint = w + "x" + h + "|" + string.Concat(fpList);
+			if (fingerprint == _lastSnapshotFingerprint)
+			{
+				return; // 同一背包状态, 跳过重复快照
+			}
+			_lastSnapshotFingerprint = fingerprint;
 			// per-session: 每次排序会话内去重(相同形状只打印一次), 跨会话不缓存 — 保证每会话完整物品集可重建
 			_dumpedShapes.Clear();
 			// 当前占用统计: 用每件物品当前位置(minX/minY/orientation) + mask cells 重建占用网格
