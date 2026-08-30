@@ -1,4 +1,0 @@
-id: catch-clauses
-language: csharp
-rule:
-  kind: catch_clause

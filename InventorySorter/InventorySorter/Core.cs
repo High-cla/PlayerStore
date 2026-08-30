@@ -716,7 +716,74 @@ public class Core : MelonMod
 		return false;
 	}
 
-	internal static void SortInventory(GameInventory inv)
+	// 排序前位置快照(供失败恢复), 拆出 SortInventory 第二段: 复杂度 -5
+	private static List<(GameItem, int, int, int, bool)> SnapshotOriginals(List<GameItem> items)
+	{
+		List<(GameItem, int, int, int, bool)> snapped = new List<(GameItem, int, int, int, bool)>();
+		foreach (GameItem it in items)
+		{
+			GridShape val = ShapeOf(it);
+			int x = 0;
+			int y = 0;
+			int o = 0;
+			bool flip = false;
+			if (val != null)
+			{
+				try
+				{
+					x = val.minX;
+					y = val.minY;
+					o = val.orientation;
+				}
+				catch
+				{
+					// ponytail: IL2CPP native probe (minX/minY/orientation), silent fallback to coordinates below
+				}
+				try
+				{
+					GridShapeBuilder gb = ((Il2CppObjectBase)val).TryCast<GridShapeBuilder>();
+					if (gb != null)
+					{
+						flip = gb.flipped;
+					}
+				}
+				catch
+				{
+					// ponytail: IL2CPP native probe (flipped), silent fallback
+				}
+			}
+			snapped.Add((it, x, y, o, flip));
+		}
+		return snapped;
+	}
+
+	// 按 TagKey 分组(排序池内的格子), 组内按 SizeCompare 排序; 拆出 SortInventory 第三段
+	private static Dictionary<string, List<GameItem>> BuildTagGroups(List<GameItem> items, List<string> tagOrder)
+	{
+		Dictionary<string, List<GameItem>> groups = new Dictionary<string, List<GameItem>>();
+		foreach (GameItem item in items)
+		{
+			string tag = (GroupByTag.Value ? TagKey(item) : "");
+			if (!groups.TryGetValue(tag, out var bucket))
+			{
+				bucket = (groups[tag] = new List<GameItem>());
+				tagOrder.Add(tag);
+			}
+			bucket.Add(item);
+		}
+		if (GroupByTag.Value)
+		{
+			tagOrder.Sort((string a, string b) => string.Compare(a, b, StringComparison.OrdinalIgnoreCase));
+		}
+		foreach (string tag in tagOrder)
+		{
+			groups[tag].Sort(SizeCompare);
+		}
+		return groups;
+	}
+
+	// 读取背包子项(去空), 拆出 SortInventory 第一段: 复杂度 -4
+	private static List<GameItem> CollectChildItems(GameInventory inv)
 	{
 		List<GameItem> list = new List<GameItem>();
 		try
@@ -724,7 +791,7 @@ public class Core : MelonMod
 			Il2CppSystem.Collections.Generic.List<GameItem> childItems = inv.childItems;
 			if (childItems == null)
 			{
-				return;
+				return list;
 			}
 			int count = childItems.Count;
 			for (int i = 0; i < count; i++)
@@ -739,13 +806,20 @@ public class Core : MelonMod
 		catch (System.Exception ex)
 		{
 			Toast("read failed: " + ex.Message);
-			return;
+			return list;
 		}
+		return list;
+	}
+
+	internal static void SortInventory(GameInventory inv)
+	{
+		List<GameItem> list = CollectChildItems(inv);
 		if (list.Count <= 1)
 		{
 			Toast("nothing to sort");
 			return;
 		}
+		// 按 KeepContainers 分流: 容器件留在原位, 其余进排序池
 		List<GameItem> list2 = new List<GameItem>();
 		List<GameItem> list3 = new List<GameItem>();
 		foreach (GameItem item5 in list)
@@ -764,61 +838,11 @@ public class Core : MelonMod
 			Toast("only containers here, left in place");
 			return;
 		}
-		List<(GameItem, int, int, int, bool)> list4 = new List<(GameItem, int, int, int, bool)>();
-		foreach (GameItem item6 in list2)
-		{
-			GridShape val2 = ShapeOf(item6);
-			int item = 0;
-			int item2 = 0;
-			int item3 = 0;
-			bool item4 = false;
-			if (val2 != null)
-			{
-				try
-				{
-					item = val2.minX;
-					item2 = val2.minY;
-					item3 = val2.orientation;
-				}
-				catch
-				{
-					// ponytail: IL2CPP native probe (minX/minY/orientation), silent fallback to coordinates below
-				}
-				try
-				{
-					GridShapeBuilder val3 = ((Il2CppObjectBase)val2).TryCast<GridShapeBuilder>();
-					if (val3 != null)
-					{
-						item4 = val3.flipped;
-					}
-				}
-				catch
-				{
-					// ponytail: IL2CPP native probe (flipped), silent fallback
-				}
-			}
-			list4.Add((item6, item, item2, item3, item4));
-		}
+		// 位置快照(供失败恢复): 记录排序前每个物品的 minX/minY/orientation/flipped
+		List<(GameItem, int, int, int, bool)> list4 = SnapshotOriginals(list2);
+		// 按 TagKey 分组(排序池内的格子), 组内按 SizeCompare 排序; 拆出 SortInventory 第三段: 复杂度 -5
 		List<string> list5 = new List<string>();
-		Dictionary<string, List<GameItem>> dictionary = new Dictionary<string, List<GameItem>>();
-		foreach (GameItem item7 in list2)
-		{
-			string text = (GroupByTag.Value ? TagKey(item7) : "");
-			if (!dictionary.TryGetValue(text, out var value))
-			{
-				value = (dictionary[text] = new List<GameItem>());
-				list5.Add(text);
-			}
-			value.Add(item7);
-		}
-		if (GroupByTag.Value)
-		{
-			list5.Sort((string a, string b) => string.Compare(a, b, StringComparison.OrdinalIgnoreCase));
-		}
-		foreach (string item8 in list5)
-		{
-			dictionary[item8].Sort(SizeCompare);
-		}
+		Dictionary<string, List<GameItem>> dictionary = BuildTagGroups(list2, list5);
 		try
 		{
 			if (!GetGridDims(inv, out var w, out var h) || w <= 0 || h <= 0)
