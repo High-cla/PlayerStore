@@ -62,7 +62,7 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
 <body>
 <header>
   <h1>Probably Stolen — 物品浏览器</h1>
-  <p>数据源: item-catalog.json (397 项)</p>
+  <p>数据源: item-catalog.json (397 项) + metadata 提取 (30 新增) = 427 项</p>
   <div class="search-bar">
     <input type="text" id="search" placeholder="搜索名称 / ID / 描述...（支持中英）">
     <span class="count-badge" id="count">0 项</span>
@@ -89,7 +89,7 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
   <div class="meta" id="dMeta"></div>
   <button id="copyId">复制 stableId</button>
 </div>
-<script src="items_data.js?v=2"></script>
+<script src="items_data_full.js?v=3"></script>
 <script>
 const grid = document.getElementById('grid');
 const search = document.getElementById('search');
@@ -192,7 +192,7 @@ function renderGrid(){
       <div class="nm-en">${esc(i.nameEn||'')}</div>
       <div class="cat">${(i.categories||[]).slice(0,4).map(c=>`<span class="tag">${zCat(c)}</span>`).join('')}</div>
       <div class="id">${esc(i.stableId||'')}</div>
-      <div class="desc">${esc(i.descriptionZh||'')}</div>
+      <div class="desc">${esc(i.descriptionZh||i.descriptionEn||'')}</div>
       <div style="margin-top:10px"><button class="spawn-btn" data-spawn="${esc(i.stableId||'')}">生成 ×1</button></div>
     </div>`).join('') : '<div class="empty">无匹配物品</div>';
   grid.querySelectorAll('.card').forEach(c => c.onclick = () => showDetail(c.dataset.id));

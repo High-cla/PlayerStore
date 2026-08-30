@@ -53,6 +53,13 @@ namespace ProgressMod
             new System.Collections.Concurrent.ConcurrentQueue<(string, int)>();
         private static System.Net.HttpListener _listener;
 
+        // ===== item dir cache: collect on main thread only, HTTP thread reads (prevent Il2Cpp cross-thread crash) =====
+        private static readonly object IdCacheLock = new object();
+        private static System.Collections.Generic.List<string> _allIds = new System.Collections.Generic.List<string>();
+        private static volatile bool _idsReady = false;
+        private static volatile bool _idsRequested = false;
+        private static int _dirCount = 0;
+
         public override void OnUpdate()
         {
             try
@@ -60,6 +67,11 @@ namespace ProgressMod
                 while (PendingSpawns.TryDequeue(out var job))
                 {
                     SpawnItem(job.Item1, job.Item2);
+                }
+                if (!_idsReady && !_idsRequested)
+                {
+                    _idsRequested = true;
+                    CollectDirectories();
                 }
             }
             catch { }
@@ -130,37 +142,21 @@ namespace ProgressMod
                     }
                                         else if (req.Url.AbsolutePath == "/api/list")
                     {
-                        var sb = new System.Text.StringBuilder();
-                        var errSb = new System.Text.StringBuilder();
-                        int dirCount = 0, itemCount = 0;
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "AmenitiesItemDirectory", () => GetDirectorKeys<AmenitiesItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ArmorItemDirectory", () => GetDirectorKeys<ArmorItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ConstructionItemDirectory", () => GetDirectorKeys<ConstructionItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ContainerItemDirectory", () => GetDirectorKeys<ContainerItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "EquipmentDirectory", () => GetDirectorKeys<EquipmentDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ExplosiveItemDirectory", () => GetDirectorKeys<ExplosiveItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "FoodItemDirectory", () => GetDirectorKeys<FoodItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "FurnitureItemDirectory", () => GetDirectorKeys<FurnitureItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "GunModDirectory", () => GetDirectorKeys<GunModDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "GunsItemDirectory", () => GetDirectorKeys<GunsItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "HusbandryDirectory", () => GetDirectorKeys<HusbandryDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "HydroponicDirectory", () => GetDirectorKeys<HydroponicDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "KeyItemDirectory", () => GetDirectorKeys<KeyItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MaterialDirectory", () => GetDirectorKeys<MaterialDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MedsItemDirectory", () => GetDirectorKeys<MedsItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MeleeWeaponItemDirectory", () => GetDirectorKeys<MeleeWeaponItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "MiscItemDirectory", () => GetDirectorKeys<MiscItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ModItemDirectory", () => GetDirectorKeys<ModItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ModuleDirectory", () => GetDirectorKeys<ModuleDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "OrganDirectory", () => GetDirectorKeys<OrganDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "RuinedMachineDirectory", () => GetDirectorKeys<RuinedMachineDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ShipItemDirectory", () => GetDirectorKeys<ShipItemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ShipSystemDirectory", () => GetDirectorKeys<ShipSystemDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "TechnicianBackpackDirectory", () => GetDirectorKeys<TechnicianBackpackDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "ToolDirectory", () => GetDirectorKeys<ToolDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "UnusedDirectory", () => GetDirectorKeys<UnusedDirectory>());
-                        AppendIds(ref sb, ref dirCount, ref itemCount, ref errSb, "WineDirectory", () => GetDirectorKeys<WineDirectory>());
-                        body = "{\"ok\":true,\"dirCount\":" + dirCount + ",\"count\":" + itemCount + ",\"ids\":[" + sb.ToString() + "],\"errs\":[" + errSb.ToString() + "]}";
+                        // 读主线程收集的缓存; 未收集则触发 (HTTP 线程不碰 Il2Cpp, 防崩溃)
+                        if (!_idsReady)
+                        {
+                            _idsRequested = false;  // 让 OnUpdate 重新触发收集
+                        }
+                        lock (IdCacheLock)
+                        {
+                            var sb = new System.Text.StringBuilder();
+                            for (int i = 0; i < _allIds.Count; i++)
+                            {
+                                if (i > 0) sb.Append(',');
+                                sb.Append('"').Append(_allIds[i].Replace("\\", "\\\\").Replace("\"", "\\\"")).Append('"');
+                            }
+                            body = "{\"ok\":true,\"dirCount\":" + (int)_dirCount + ",\"count\":" + _allIds.Count + ",\"ids\":[" + sb.ToString() + "],\"errs\":[]}";
+                        }
                         code = 200;
                     }
 else if (req.Url.AbsolutePath == "/api/health")
@@ -205,20 +201,66 @@ else if (req.Url.AbsolutePath == "/api/health")
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
         }
 
-        private static void AppendIds(ref System.Text.StringBuilder sb, ref int dirCount, ref int itemCount, ref System.Text.StringBuilder errSb, string dirName, Func<System.Collections.Generic.List<string>> getter)
+        private static void CollectDirectories()
         {
+            // 主线程调用 (OnUpdate), 收集全部目录物品 ID 到缓存; HTTP 线程只读
             try
             {
-                var ids = getter();
-                if (ids == null) { errSb.Append(dirName).Append(":null;"); return; }
-                dirCount++;
-                foreach (var id in ids)
+                var all = new System.Collections.Generic.List<string>();
+                var seen = new System.Collections.Generic.HashSet<string>();
+                int dirs = 0;
+                void Collect<X>() where X : Directory<GameItem>
                 {
-                    sb.Append(id).Append("\n");
-                    itemCount++;
+                    try
+                    {
+                        var ids = GetDirectorKeys<X>();
+                        if (ids == null) return;
+                        dirs++;
+                        foreach (var id in ids)
+                            if (seen.Add(id)) all.Add(id);
+                    }
+                    catch (Exception e) { MelonLogger.Warning($"[List] {typeof(X).Name} ex: {e.Message}"); }
                 }
+                Collect<AmenitiesItemDirectory>();
+                Collect<ArmorItemDirectory>();
+                Collect<ConstructionItemDirectory>();
+                Collect<ContainerItemDirectory>();
+                Collect<EquipmentDirectory>();
+                Collect<ExplosiveItemDirectory>();
+                Collect<FoodItemDirectory>();
+                Collect<FurnitureItemDirectory>();
+                Collect<GunModDirectory>();
+                Collect<GunsItemDirectory>();
+                Collect<HusbandryDirectory>();
+                Collect<HydroponicDirectory>();
+                Collect<KeyItemDirectory>();
+                Collect<MaterialDirectory>();
+                Collect<MedsItemDirectory>();
+                Collect<MeleeWeaponItemDirectory>();
+                Collect<MiscItemDirectory>();
+                Collect<ModItemDirectory>();
+                Collect<ModuleDirectory>();
+                Collect<OrganDirectory>();
+                Collect<RuinedMachineDirectory>();
+                Collect<ShipItemDirectory>();
+                Collect<ShipSystemDirectory>();
+                Collect<TechnicianBackpackDirectory>();
+                Collect<ToolDirectory>();
+                Collect<UnusedDirectory>();
+                Collect<WineDirectory>();
+                lock (IdCacheLock)
+                {
+                    _allIds = all;
+                    _dirCount = dirs;
+                    _idsReady = true;
+                }
+                MelonLogger.Msg($"[List] collected {all.Count} ids from {dirs} dirs");
             }
-            catch (Exception e) { errSb.Append(dirName).Append(":ex;"); MelonLogger.Warning($"[List] {dirName} ex: {e.Message}"); }
+            catch (Exception e)
+            {
+                MelonLogger.Error($"[List] CollectDirectories ex: {e.Message}");
+                _idsReady = true;  // 防止反复尝试
+            }
         }
 
         private static System.Collections.Generic.List<string> GetDirectorKeys<X>() where X : Directory<GameItem>
@@ -226,15 +268,20 @@ else if (req.Url.AbsolutePath == "/api/health")
             try
             {
                 var t = Il2CppSystem.Type.GetType(typeof(X).FullName);
+                if (t == null) return null;
                 if (DirectoryMaster.directories.TryGetValue(t, out var insts) && insts != null && insts.Count > 0)
                 {
                     var inst = insts[0] as Directory<GameItem>;
-                    if (inst != null && inst.factoryDictionary != null)
+                    if (inst != null)
                     {
-                        var outList = new System.Collections.Generic.List<string>();
-                        foreach (var kv in inst.factoryDictionary)
-                            outList.Add(kv.Key);
-                        return outList;
+                        var fd = inst.factoryDictionary;
+                        if (fd != null)
+                        {
+                            var outList = new System.Collections.Generic.List<string>();
+                            foreach (var kv in fd)
+                                outList.Add(kv.Key);
+                            return outList;
+                        }
                     }
                 }
             }
