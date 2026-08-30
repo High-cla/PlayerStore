@@ -23,6 +23,8 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgNoAddiction = Cfg.CreateEntry<bool>("NoAddiction", true, "永不中毒: 酒精/尼古丁/麻醉剂/赌博永不产生成瘾, 无成瘾惩罚");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
+        public static readonly MelonPreferences_Entry<string> CfgSpawnId = Cfg.CreateEntry<string>("SpawnItemId", "", "生成物品: 填物品 stableId (如 box_tampon), F9 生成到主背包. 空=禁用");
+        public static readonly MelonPreferences_Entry<int> CfgSpawnCount = Cfg.CreateEntry<int>("SpawnItemCount", 1, "生成物品数量 (不填默认1)");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
         public static bool ForceFinish => CfgForceFinish.Value;
         public static bool NoDurability => CfgNoDurability.Value;
@@ -40,6 +42,41 @@ namespace ProgressMod
         public override void OnInitializeMelon()
         {
             LoggerInstance.Msg("ProgressMod v1.12.1 init");
+        }
+
+        // ============ 生成物品: 热键 F9 ============
+        // 复刻 xmod 生成逻辑: DirectoryMaster.Item(stableId, true) → MayHaveValidInventorySlot → UncheckedAccept
+        // 主背包 = EmporiumEntry.Instance.invElement (GameGridInventory, 转 GameInventory)
+        public override void OnUpdate()
+        {
+            try
+            {
+                if (!CfgSpawnId.Value.Equals("") && ((UnityEngine.Input.GetKeyDown((UnityEngine.KeyCode)288))))
+                {
+                    SpawnItem(CfgSpawnId.Value, CfgSpawnCount.Value);
+                }
+            }
+            catch { }
+        }
+
+        private void SpawnItem(string stableId, int count)
+        {
+            try
+            {
+                var inv = EmporiumEntry.Instance.invElement;
+                if (inv == null) { MelonLogger.Warning("[Spawn] main inventory unavailable"); return; }
+                int ok = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    GameItem item = DirectoryMaster.Item(stableId, true);
+                    if (item == null) { MelonLogger.Warning($"[Spawn] DirectoryMaster rejected {stableId}"); break; }
+                    if (!((GameInventory)inv).MayHaveValidInventorySlot(item)) { MelonLogger.Warning($"[Spawn] no valid slot after {ok}/{count}"); break; }
+                    if (!((GameInventory)inv).UncheckedAccept(item)) { MelonLogger.Warning($"[Spawn] native rejected after {ok}/{count}"); break; }
+                    ok++;
+                }
+                MelonLogger.Msg($"[Spawn] {ok}/{count} x {stableId}");
+            }
+            catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
         }
 
         // ============ 机器进度强制满 ============
