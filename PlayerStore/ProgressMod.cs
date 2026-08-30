@@ -128,6 +128,32 @@ namespace ProgressMod
                             code = 200;
                         }
                     }
+                    else if (req.Url.AbsolutePath == "/api/list")
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        int dirCount = 0, itemCount = 0;
+                        foreach (var dirType in GetItemDirectoryTypes())
+                        {
+                            try
+                            {
+                                var method = HarmonyLib.AccessTools.Method(typeof(DirectoryMaster), "GetIdentifierList")
+                                    .MakeGenericMethod(dirType);
+                                if (method == null) continue;
+                                var list = method.Invoke(null, new object[] { null }) as System.Collections.Generic.List<string>;
+                                if (list == null) continue;
+                                dirCount++;
+                                foreach (var id in list)
+                                {
+                                    if (sb.Length > 0) sb.Append(',');
+                                    sb.Append(System.Text.Json.JsonSerializer.Serialize(id));
+                                    itemCount++;
+                                }
+                            }
+                            catch (Exception einner) { MelonLogger.Warning($"[List] dir {dirType} ex: {einner.Message}"); }
+                        }
+                        body = "{\"ok\":true,\"dirCount\":" + dirCount + ",\"count\":" + itemCount + ",\"ids\":[" + sb.ToString() + "]}";
+                        code = 200;
+                    }
                     else if (req.Url.AbsolutePath == "/api/health")
                     {
                         body = "{\"ok\":true}";
@@ -168,6 +194,24 @@ namespace ProgressMod
                 MelonLogger.Msg($"[Spawn] {ok}/{count} x {stableId}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
+        }
+
+        // ============ 物品目录导出: 全部 GameItem 目录类型 ============
+        // 从游戏主程序集反编译列出; GetIdentifierList<T> 返回该目录全部物品 ID.
+        private static System.Type[] GetItemDirectoryTypes()
+        {
+            return new System.Type[]
+            {
+                typeof(AmenitiesItemDirectory), typeof(ArmorItemDirectory), typeof(ConstructionItemDirectory),
+                typeof(ContainerItemDirectory), typeof(EquipmentDirectory), typeof(ExplosiveItemDirectory),
+                typeof(FoodItemDirectory), typeof(FurnitureItemDirectory), typeof(GunModDirectory),
+                typeof(GunsItemDirectory), typeof(HusbandryDirectory), typeof(HydroponicDirectory),
+                typeof(KeyItemDirectory), typeof(MaterialDirectory), typeof(MedsItemDirectory),
+                typeof(MeleeWeaponItemDirectory), typeof(MiscItemDirectory), typeof(ModItemDirectory),
+                typeof(ModuleDirectory), typeof(OrganDirectory), typeof(RuinedMachineDirectory),
+                typeof(ShipItemDirectory), typeof(ShipSystemDirectory), typeof(TechnicianBackpackDirectory),
+                typeof(ToolDirectory), typeof(UnusedDirectory), typeof(WineDirectory),
+            };
         }
 
         // ============ 机器进度强制满 ============
