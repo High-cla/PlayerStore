@@ -164,17 +164,49 @@ namespace ProgressMod
                     return;
                 }
                 int ok = 0;
+                GameItem lastItem = null;
                 for (int i = 0; i < count; i++)
                 {
                     GameItem item = DirectoryMaster.Item(stableId, true);
                     if (item == null) { MelonLogger.Warning($"[Spawn] DirectoryMaster rejected {stableId}"); break; }
+                    lastItem = item;
                     if (!((GameInventory)inv).MayHaveValidInventorySlot(item)) { MelonLogger.Warning($"[Spawn] no valid slot after {ok}/{count}"); break; }
                     if (!((GameInventory)inv).UncheckedAccept(item)) { MelonLogger.Warning($"[Spawn] native rejected after {ok}/{count}"); break; }
                     ok++;
                 }
                 MelonLogger.Msg($"[Spawn] {ok}/{count} x {stableId}");
+                if (ok > 0 && stableId == "printer") DumpPrinterState("<spawned>", lastItem);
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
+        }
+
+        // 打印机诊断: dump 机器关键 tags + 工序状态
+        private static void DumpPrinterState(string ctx, GameItem machine)
+        {
+            try
+            {
+                if (machine == null) { MelonLogger.Msg($"[Printer] {ctx}: machine null"); return; }
+                var sb = new System.Text.StringBuilder($"[Printer] {ctx}: ");
+                foreach (var k in new[] { "MACHINE_STATE_TAG", "PROGRESS_TYPE_MACHINE_TAG", "PRINTER_CHIP_TAG", "MACHINE_PROGRESS_CURRENT_TAG", "MACHINE_PROGRESS_TARGET_TAG", "IS_POWERED_TAG", "MACHINE_ON_TAG", "OPERATION_BLUEPRINT_TAG" })
+                {
+                    try
+                    {
+                        var ts = machine.GetTagReadonly(k);
+                        if (ts == null || !ts.IsEnabled()) continue;
+                        sb.Append(k).Append("=");
+                        try { sb.Append(ts.GetInt()); } catch { try { sb.Append(ts.GetBool()); } catch { sb.Append("?"); } }
+                        sb.Append(' ');
+                    }
+                    catch { }
+                }
+                sb.Append("| id=").Append(Describe(machine));
+                MelonLogger.Msg(sb.ToString());
+                // 工序是否激活
+                try { MelonLogger.Msg($"[Printer] {ctx}: IsProcessingActive={MachineryHelper.IsProcessingActive(machine)}"); } catch (Exception e) { MelonLogger.Msg($"[Printer] IsProcessingActive ex: {e.Message}"); }
+                // 功耗/电量
+                try { MelonLogger.Msg($"[Printer] {ctx}: PowerUsage={MachineryHelper.GetMachinePowerUsage(machine)} IsMachineryToggleOn={MachineryHelper.IsMachineryToggleOn(machine)}"); } catch (Exception e) { MelonLogger.Msg($"[Printer] power ex: {e.Message}"); }
+            }
+            catch (Exception e) { MelonLogger.Error($"[Printer] dump ex: {e.Message}"); }
         }
 
         // 图纸 -> 实物物品 映射 (布局目录里的机器/家具)
