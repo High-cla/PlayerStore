@@ -734,6 +734,21 @@ namespace ProgressMod
                         }
                         catch (Exception ce) { MelonLogger.Msg($"[Identify] cond({cond}) ex: {ce.Message}"); break; }
                     }
+                    // 探针8: 带 ISSUE 后缀检查点 tag 值 (SetConterfeit 掷骰写这里)
+                    foreach (var k in new[] { "CIGARETTE_LOGO_ISSUE", "CIGARETTE_LETTERING_ISSUE", "CIGARETTE_COLOR_ISSUE", "CIGARETTE_SEAL_ISSUE", "CIGARETTE_BOX_ISSUE" })
+                    {
+                        try
+                        {
+                            var ts = gameItem.GetTagReadonly(k);
+                            if (ts == null || !ts.IsEnabled()) { MelonLogger.Msg($"[Identify] issue {k} => not-enabled"); continue; }
+                            string extra = "";
+                            try { extra = " str=" + ts.GetString(); } catch { }
+                            try { extra += " int=" + ts.GetInt(); } catch { }
+                            try { extra += " bool=" + ts.GetBool(); } catch { }
+                            MelonLogger.Msg($"[Identify] issue {k} => enabled{extra}");
+                        }
+                        catch { }
+                    }
                     // 探针4: 调 InsCigaretteHelper.IsConfrontCorrect 试验各 reason (原生真伪判定)
                     foreach (var reason in ProbeReasons)
                     {
