@@ -59,7 +59,7 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
 <body>
 <header>
   <h1>Probably Stolen — 物品浏览器</h1>
-  <p>数据源: item-catalog.json (397 项)</p>
+  <p>数据源: item-catalog.json (397 项) + metadata 提取 (30 新增) = 427 项</p>
   <div class="search-bar">
     <input type="text" id="search" placeholder="搜索名称 / ID / 描述...（支持中英）">
     <span class="count-badge" id="count">0 项</span>
@@ -188,8 +188,8 @@ function renderGrid(){
       <div class="nm-en">${esc(i.nameEn||'')}</div>
       <div class="cat">${(i.categories||[]).slice(0,4).map(c=>`<span class="tag">${zCat(c)}</span>`).join('')}</div>
       <div class="id">${esc(i.stableId||'')}</div>
-      <div class="desc">${esc(i.descriptionZh||'')}</div>
-      <div style="margin-top:10px"><button class="spawn-btn" data-spawn="${esc(i.stableId||'')}">生成 ×1</button></div>
+      <div class="desc">${esc(i.descriptionZh||i.descriptionEn||'')}</div>
+      <div style="margin-top:10px">${(i.stableId||'').endsWith('_instruction') ? '<span class="tag" style="background:#8a6d3b">📄 图纸(不能直接生成)</span>' : `<button class="spawn-btn" data-spawn="${esc(i.stableId||'')}">生成 ×1</button>`}</div>
     </div>`).join('') : '<div class="empty">无匹配物品</div>';
   grid.querySelectorAll('.card').forEach(c => c.onclick = () => showDetail(c.dataset.id));
   grid.querySelectorAll('.fav-btn').forEach(b => b.onclick = (e) => { e.stopPropagation(); toggleFav(b.dataset.fav); });
@@ -258,7 +258,6 @@ document.body.addEventListener('click', e => {
 });
 setInterval(()=>{ const d = document.querySelector('.dot'); checkServer(); }, 5000);
 checkServer();
-
 
 renderCats(); renderGrid();
 </script>
