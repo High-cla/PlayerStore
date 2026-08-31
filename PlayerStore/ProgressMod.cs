@@ -673,6 +673,22 @@ namespace ProgressMod
                     }
                     catch (Exception de) { MelonLogger.Msg($"[Identify] probe3 enum fail: {de.Message}"); }
 
+                    // 探针5: dump 4 个检查点 tag 完整值 (CIGARETTE_SEAL/LOGO/LETTERING/BOX = 真伪存储)
+                    foreach (var k in new[] { "CIGARETTE_SEAL", "CIGARETTE_LOGO", "CIGARETTE_LETTERING", "CIGARETTE_BOX" })
+                    {
+                        try
+                        {
+                            var ts = gameItem.GetTagReadonly(k);
+                            if (ts == null) { MelonLogger.Msg($"[Identify] pt {k} => NULL"); continue; }
+                            var parts = new System.Text.StringBuilder($"[Identify] pt {k} enabled={ts.IsEnabled()}");
+                            try { parts.Append(" str=\"").Append(ts.GetString()).Append('"'); } catch (Exception e1) { parts.Append(" str=EX:").Append(e1.Message); }
+                            try { parts.Append(" int=").Append(ts.GetInt()); } catch (Exception e2) { parts.Append(" int=EX:").Append(e2.Message); }
+                            try { parts.Append(" bool=").Append(ts.GetBool()); } catch (Exception e3) { parts.Append(" bool=EX:").Append(e3.Message); }
+                            MelonLogger.Msg(parts.ToString());
+                        }
+                        catch (Exception pe) { MelonLogger.Msg($"[Identify] pt {k} ex: {pe.Message}"); }
+                    }
+
                     // 探针4: 调 InsCigaretteHelper.IsConfrontCorrect 试验各 reason (原生真伪判定)
                     foreach (var reason in ProbeReasons)
                     {
