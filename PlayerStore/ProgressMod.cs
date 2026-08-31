@@ -600,7 +600,8 @@ namespace ProgressMod
             private static readonly string[] ProbeReasons = {
                 "CIGARETTE_BOX_ISSUE","CIGARETTE_COLOR_ISSUE","CIGARETTE_LETTERING_ISSUE","CIGARETTE_LOGO_ISSUE","CIGARETTE_SEAL_ISSUE",
                 "IsGenuineCigarette","IsFraudCigarette","genuineCigarette","fakeCigarette",
-                "CIGARETTE_TAG","INSPECTABLE_TAG","genuine","fake","counterfeit"
+                "CIGARETTE_TAG","INSPECTABLE_TAG","genuine","fake","counterfeit",
+                "CIGARETTE_SEAL","CIGARETTE_LOGO","CIGARETTE_LETTERING","CIGARETTE_BOX"
             };
 
             // 真伪判定: 物品带任何 *_ISSUE tag -> 赝品
@@ -689,6 +690,35 @@ namespace ProgressMod
                         catch (Exception pe) { MelonLogger.Msg($"[Identify] pt {k} ex: {pe.Message}"); }
                     }
 
+                    // 探针6: 生成赝品样本 dump 检查点 tag 值 (确认真伪存储格式)
+                    try
+                    {
+                        // InsCigaretteHelper 无 Create 工厂; 用 InsInjectorHelper.CreateCounterfeit 生成任意赝品物品
+                        var fakeSample = InsInjectorHelper.CreateCounterfeit();
+                        if (fakeSample != null)
+                        {
+                            MelonLogger.Msg("[Identify] === FAKE SAMPLE (CreateCounterfeit) ===");
+                            var fsb = new System.Text.StringBuilder();
+                            foreach (var k in new[] { "CIGARETTE_SEAL", "CIGARETTE_LOGO", "CIGARETTE_LETTERING", "CIGARETTE_BOX" })
+                            {
+                                try
+                                {
+                                    var ts = fakeSample.GetTagReadonly(k);
+                                    if (ts == null) { fsb.Append(k).Append("=NULL "); continue; }
+                                    fsb.Append(k);
+                                    try { fsb.Append("(str=").Append(ts.GetString()).Append(')'); } catch { }
+                                    try { fsb.Append("(int=").Append(ts.GetInt()).Append(')'); } catch { }
+                                    try { fsb.Append("(bool=").Append(ts.GetBool()).Append(')'); } catch { }
+                                    fsb.Append(" ");
+                                }
+                                catch { }
+                            }
+                            MelonLogger.Msg($"[Identify] FAKE pt values: {fsb}");
+                            MelonLogger.Msg("[Identify] === END FAKE SAMPLE ===");
+                        }
+                        else MelonLogger.Msg("[Identify] CreateCounterfeit => null");
+                    }
+                    catch (Exception fce) { MelonLogger.Msg($"[Identify] CreateCounterfeit ex: {fce.Message}"); }
                     // 探针4: 调 InsCigaretteHelper.IsConfrontCorrect 试验各 reason (原生真伪判定)
                     foreach (var reason in ProbeReasons)
                     {
@@ -720,6 +750,23 @@ namespace ProgressMod
         }
 
         // ============ 全面日志(已删除: 高频诊断, 不再调用) ============
+
+        // ============ 探针: ModifyTag 观察 OnConfrontSuccess 内部写哪些 tag ============
+        // 自动鉴定调 OnConfrontSuccess 后, 游戏原生会 ModifyTag 设置状态标签.
+        // 记录写入了哪些 tagName, 确认真伪标识的存档键.
+        [HarmonyPatch(typeof(GameItem), "ModifyTag")]
+        public static class PatchProbeModifyTag
+        {
+            public static void Postfix(GameItem __instance, string tagName)
+            {
+                try
+                {
+                    if (!AutoIdentify) return;
+                    MelonLogger.Msg($"[Identify] ModifyTag: {tagName}");
+                }
+                catch { }
+            }
+        }
 
         // ============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============
         // ScavHelper 负责拾荒受伤掷骰; HealthData 负责伤口结算与恶化.
