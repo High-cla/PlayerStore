@@ -620,6 +620,26 @@ namespace ProgressMod
                 }
                 return false;
             }
+            private static readonly string[] CheckpointTags = { "CIGARETTE_SEAL", "CIGARETTE_LOGO", "CIGARETTE_LETTERING", "CIGARETTE_BOX", "CIGARETTE_COLOR" };
+            // 真伪判定: 有 _ISSUE tag 启用即赝品
+            private static string FindIssue(GameItem it)
+            {
+                foreach (var k in CheckpointTags)
+                {
+                    try
+                    {
+                        var ts = it.GetTagReadonly(k + "_ISSUE");
+                        if (ts != null && ts.IsEnabled()) return k + "_ISSUE";
+                    }
+                    catch { }
+                }
+                return null;
+            }
+            private static int SafeTagInt(GameItem it, string tag)
+            {
+                try { var ts = it.GetTagReadonly(tag); if (ts != null && ts.IsEnabled()) return ts.GetInt(); } catch { }
+                return 0;
+            }
             private static bool SafeCond(GameItem it, string cond)
             {
                 try { return it.IsConditionActive(cond); }
@@ -749,25 +769,20 @@ namespace ProgressMod
                         }
                         catch { }
                     }
-                    // 探针4: 调 InsCigaretteHelper.IsConfrontCorrect 试验各 reason (原生真伪判定)
-                    foreach (var reason in ProbeReasons)
+                    // 真伪判定: 检查点 tag int 值 (SetConterfeit 掷骰写检查点, 非0=有缺陷)
+                    string issueKey = FindIssue(gameItem);
+                    bool fake = issueKey != null;
+                    if (!fake)
                     {
-                        try
+                        // 验证: 检查点 int 值 (也许存别处)
+                        foreach (var k in CheckpointTags)
                         {
-                            bool r = InsCigaretteHelper.IsConfrontCorrect(reason, gameItem);
-                            MelonLogger.Msg($"[Identify] IsConfrontCorrect({reason}) => {r}");
+                            int v = SafeTagInt(gameItem, k);
+                            if (v != 0) { fake = true; issueKey = k + "(int=" + v + ")"; break; }
                         }
-                        catch (Exception ce) { MelonLogger.Msg($"[Identify] ICC({reason}) ex: {ce.Message}"); break; }
                     }
-
-                    // 真伪判定: condition 系统 (genuine/counterfeit/expired/unusable)
-                    bool condGenuine = SafeCond(gameItem, "genuine");
-                    bool condFake    = SafeCond(gameItem, "counterfeit");
-                    bool condExpired = SafeCond(gameItem, "expired");
-                    bool condUnusable= SafeCond(gameItem, "unusable");
-                    bool fake = condFake || condExpired || condUnusable;
-                    MelonLogger.Msg($"[Identify] cond => genuine={condGenuine} fake={condFake} expired={condExpired} unusable={condUnusable} => {(fake ? "FAKE" : "genuine")} {Describe(gameItem)}");
-                    // 正品: OnConfrontSuccess; 赝品/过期/不可用: 不调用(保留物品状态, OnConfrontSuccess 会无脑正品化)
+                    MelonLogger.Msg($"[Identify] issue => {(fake ? "FAKE:" + issueKey : "genuine")} {Describe(gameItem)}");
+                    // 正品: OnConfrontSuccess; 赝品: 不调用(保留赝品状态, OnConfrontSuccess 无脑正品化)
                     if (!fake) InspectableHelper.OnConfrontSuccess(gameItem);
                     else MelonLogger.Msg("[Identify] FAKE => skipped OnConfrontSuccess (keep counterfeit state)");
                     MelonLogger.Msg($"[Identify] auto-identified {Describe(gameItem)}");
