@@ -620,6 +620,11 @@ namespace ProgressMod
                 }
                 return false;
             }
+            private static bool SafeCond(GameItem it, string cond)
+            {
+                try { return it.IsConditionActive(cond); }
+                catch { return false; }
+            }
             public static void Postfix(GameItem gameItem)
             {
                 try
@@ -719,6 +724,16 @@ namespace ProgressMod
                         else MelonLogger.Msg("[Identify] CreateCounterfeit => null");
                     }
                     catch (Exception fce) { MelonLogger.Msg($"[Identify] CreateCounterfeit ex: {fce.Message}"); }
+                    // 探针7: IsConditionActive 判定真伪 (condition 系统才是真伪存储, 非 tag)
+                    foreach (var cond in new[] { "genuine", "counterfeit", "expired", "unusable", "non_expired", "normal", "hidden", "replica", "factory_sealed" })
+                    {
+                        try
+                        {
+                            bool c = gameItem.IsConditionActive(cond);
+                            MelonLogger.Msg($"[Identify] IsConditionActive({cond}) => {c}");
+                        }
+                        catch (Exception ce) { MelonLogger.Msg($"[Identify] cond({cond}) ex: {ce.Message}"); break; }
+                    }
                     // 探针4: 调 InsCigaretteHelper.IsConfrontCorrect 试验各 reason (原生真伪判定)
                     foreach (var reason in ProbeReasons)
                     {
@@ -730,11 +745,16 @@ namespace ProgressMod
                         catch (Exception ce) { MelonLogger.Msg($"[Identify] ICC({reason}) ex: {ce.Message}"); break; }
                     }
 
-                    // 真伪分支: 先探针确认 ISSUE tag 语义, 暂统一走原路径(OnConfrontSuccess)
-                    // 若 probe 确认 ISSUE tag 即赝品, 下一步改为按真伪分派.
-                    bool fake = HasIssueTag(gameItem);
-                    MelonLogger.Msg($"[Identify] issue-tag heuristic => {(fake ? "FAKE" : "genuine")} {Describe(gameItem)}");
-                    InspectableHelper.OnConfrontSuccess(gameItem);
+                    // 真伪判定: condition 系统 (genuine/counterfeit/expired/unusable)
+                    bool condGenuine = SafeCond(gameItem, "genuine");
+                    bool condFake    = SafeCond(gameItem, "counterfeit");
+                    bool condExpired = SafeCond(gameItem, "expired");
+                    bool condUnusable= SafeCond(gameItem, "unusable");
+                    bool fake = condFake || condExpired || condUnusable;
+                    MelonLogger.Msg($"[Identify] cond => genuine={condGenuine} fake={condFake} expired={condExpired} unusable={condUnusable} => {(fake ? "FAKE" : "genuine")} {Describe(gameItem)}");
+                    // 正品: OnConfrontSuccess; 赝品/过期/不可用: 不调用(保留物品状态, OnConfrontSuccess 会无脑正品化)
+                    if (!fake) InspectableHelper.OnConfrontSuccess(gameItem);
+                    else MelonLogger.Msg("[Identify] FAKE => skipped OnConfrontSuccess (keep counterfeit state)");
                     MelonLogger.Msg($"[Identify] auto-identified {Describe(gameItem)}");
                     // 游戏手动鉴定路径会经由 InspectionUIManager 的 HandleXxx/OnInspectItem 刷新 UI 标签;
                     // 自动鉴定只调 Helper 设状态, 不刷 UI => 物品标签不更新. 补一次 UI 刷新.
@@ -750,7 +770,6 @@ namespace ProgressMod
         }
 
         // ============ 全面日志(已删除: 高频诊断, 不再调用) ============
-
         // ============ 探针: ModifyTag 观察 OnConfrontSuccess 内部写哪些 tag ============
         // 自动鉴定调 OnConfrontSuccess 后, 游戏原生会 ModifyTag 设置状态标签.
         // 记录写入了哪些 tagName, 确认真伪标识的存档键.
