@@ -596,6 +596,13 @@ namespace ProgressMod
                 "scavInspectable","on_inspected","confrontSucessDiscount","confront_type"
             };
 
+            // 原生判定 reason 候选 (IsConfrontCorrect 第一参数, 玩家对质理由)
+            private static readonly string[] ProbeReasons = {
+                "CIGARETTE_BOX_ISSUE","CIGARETTE_COLOR_ISSUE","CIGARETTE_LETTERING_ISSUE","CIGARETTE_LOGO_ISSUE","CIGARETTE_SEAL_ISSUE",
+                "IsGenuineCigarette","IsFraudCigarette","genuineCigarette","fakeCigarette",
+                "CIGARETTE_TAG","INSPECTABLE_TAG","genuine","fake","counterfeit"
+            };
+
             // 真伪判定: 物品带任何 *_ISSUE tag -> 赝品
             // GetTagReadonly 缺失也返回非 null (真凶!), 必须 IsEnabled() 判存在
             private static bool HasIssueTag(GameItem it)
@@ -638,16 +645,43 @@ namespace ProgressMod
                         {
                             var ts = gameItem.GetTagReadonly(k);
                             if (ts == null || !ts.IsEnabled()) continue;
-                            string s = null; int i = 0; float f = 0; double d = 0; bool b = false;
-                            string val = "?";
-                            try { s = ts.GetString(); val = "str=" + s; } catch { }
-                            try { i = ts.GetInt(); val = "int=" + i; } catch { }
-                            try { f = ts.GetFloat(); val = "f=" + f; } catch { }
-                            try { d = ts.GetDouble(); val = "dbl=" + d; } catch { }
-                            try { b = ts.GetBool(); val = "bool=" + b; } catch { }
-                            MelonLogger.Msg($"[Identify] tag {k} => {val}");
+                            // 每类型独立检测 (val 覆盖 bug: 之前只显示末次类型)
+                            try { MelonLogger.Msg($"[Identify] tag {k} str={ts.GetString()}"); } catch { }
+                            try { MelonLogger.Msg($"[Identify] tag {k} int={ts.GetInt()}"); } catch { }
+                            try { MelonLogger.Msg($"[Identify] tag {k} float={ts.GetFloat()}"); } catch { }
+                            try { MelonLogger.Msg($"[Identify] tag {k} dbl={ts.GetDouble()}"); } catch { }
+                            try { MelonLogger.Msg($"[Identify] tag {k} bool={ts.GetBool()}"); } catch { }
                         }
                         catch { }
+                    }
+
+                    // 探针3: 枚举 state 字典全部 tag keys (终极探针——真伪必在某 key)
+                    try
+                    {
+                        var dict = gameItem.state.dict; // TagSystem.字典
+                        if (dict != null)
+                        {
+                            var sb = new System.Text.StringBuilder("dict keys:");
+                            foreach (var kv in dict)
+                            {
+                                if (kv.Key != null) sb.Append(' ').Append(kv.Key);
+                                if (sb.Length > 512) break;
+                            }
+                            MelonLogger.Msg($"[Identify] {sb}");
+                        }
+                        else { MelonLogger.Msg("[Identify] probe3: state.dict null"); }
+                    }
+                    catch (Exception de) { MelonLogger.Msg($"[Identify] probe3 enum fail: {de.Message}"); }
+
+                    // 探针4: 调 InsCigaretteHelper.IsConfrontCorrect 试验各 reason (原生真伪判定)
+                    foreach (var reason in ProbeReasons)
+                    {
+                        try
+                        {
+                            bool r = InsCigaretteHelper.IsConfrontCorrect(reason, gameItem);
+                            MelonLogger.Msg($"[Identify] IsConfrontCorrect({reason}) => {r}");
+                        }
+                        catch (Exception ce) { MelonLogger.Msg($"[Identify] ICC({reason}) ex: {ce.Message}"); break; }
                     }
 
                     // 真伪分支: 先探针确认 ISSUE tag 语义, 暂统一走原路径(OnConfrontSuccess)
