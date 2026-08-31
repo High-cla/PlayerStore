@@ -620,7 +620,13 @@ namespace ProgressMod
                 }
                 return false;
             }
-            private static readonly string[] CheckpointTags = { "CIGARETTE_SEAL", "CIGARETTE_LOGO", "CIGARETTE_LETTERING", "CIGARETTE_BOX", "CIGARETTE_COLOR" };
+            // 三类比鉴定物品的检查点 (SetConterfeit 掷骰写这些 key, 非0 int/启用 _ISSUE = 赝品)
+            // 香烟: SEAL/LOGO/LETTERING/BOX/COLOR; 注射器: BODY/COLOR/INDICATOR/LABEL/SERIAL; 印章: LOGO/CHIP/LETTERING/SEAL/AMOUNT
+            private static readonly string[] CheckpointTags = {
+                "CIGARETTE_SEAL", "CIGARETTE_LOGO", "CIGARETTE_LETTERING", "CIGARETTE_BOX", "CIGARETTE_COLOR",
+                "INJECTOR_BODY", "INJECTOR_COLOR", "INJECTOR_INDICATOR", "INJECTOR_LABEL", "INJECTOR_SERIAL",
+                "STAMP_LOGO", "STAMP_CHIP", "STAMP_LETTERING", "STAMP_SEAL", "STAMP_AMOUNT"
+            };
             // 真伪判定: 有 _ISSUE tag 启用即赝品
             private static string FindIssue(GameItem it)
             {
@@ -651,130 +657,11 @@ namespace ProgressMod
                 {
                     if (!AutoIdentify || gameItem == null) return;
 
-                    // 探针: 打印实际启用的 tag keys (IsEnabled, 缺失的 GetTagReadonly 也非 null)
-                    var present = new System.Text.StringBuilder();
-                    foreach (var k in ProbeKeys)
-                    {
-                        try
-                        {
-                            var ts = gameItem.GetTagReadonly(k);
-                            if (ts != null && ts.IsEnabled()) present.Append(k).Append(' ');
-                        }
-                        catch { }
-                    }
-                    if (present.Length > 0) MelonLogger.Msg($"[Identify] probe enabled tags: {present}");
-
-                    // 探针2: dump 各已启用 tag 的值, 看真伪/ISSUE 存哪
-                    foreach (var k in ProbeKeys)
-                    {
-                        try
-                        {
-                            var ts = gameItem.GetTagReadonly(k);
-                            if (ts == null || !ts.IsEnabled()) continue;
-                            // 每类型独立检测 (val 覆盖 bug: 之前只显示末次类型)
-                            try { MelonLogger.Msg($"[Identify] tag {k} str={ts.GetString()}"); } catch { }
-                            try { MelonLogger.Msg($"[Identify] tag {k} int={ts.GetInt()}"); } catch { }
-                            try { MelonLogger.Msg($"[Identify] tag {k} float={ts.GetFloat()}"); } catch { }
-                            try { MelonLogger.Msg($"[Identify] tag {k} dbl={ts.GetDouble()}"); } catch { }
-                            try { MelonLogger.Msg($"[Identify] tag {k} bool={ts.GetBool()}"); } catch { }
-                        }
-                        catch { }
-                    }
-
-                    // 探针3: 枚举 state 字典全部 tag keys (终极探针——真伪必在某 key)
-                    try
-                    {
-                        var dict = gameItem.state.dict; // TagSystem.字典
-                        if (dict != null)
-                        {
-                            var sb = new System.Text.StringBuilder("dict keys:");
-                            foreach (var kv in dict)
-                            {
-                                if (kv.Key != null) sb.Append(' ').Append(kv.Key);
-                                if (sb.Length > 512) break;
-                            }
-                            MelonLogger.Msg($"[Identify] {sb}");
-                        }
-                        else { MelonLogger.Msg("[Identify] probe3: state.dict null"); }
-                    }
-                    catch (Exception de) { MelonLogger.Msg($"[Identify] probe3 enum fail: {de.Message}"); }
-
-                    // 探针5: dump 4 个检查点 tag 完整值 (CIGARETTE_SEAL/LOGO/LETTERING/BOX = 真伪存储)
-                    foreach (var k in new[] { "CIGARETTE_SEAL", "CIGARETTE_LOGO", "CIGARETTE_LETTERING", "CIGARETTE_BOX" })
-                    {
-                        try
-                        {
-                            var ts = gameItem.GetTagReadonly(k);
-                            if (ts == null) { MelonLogger.Msg($"[Identify] pt {k} => NULL"); continue; }
-                            var parts = new System.Text.StringBuilder($"[Identify] pt {k} enabled={ts.IsEnabled()}");
-                            try { parts.Append(" str=\"").Append(ts.GetString()).Append('"'); } catch (Exception e1) { parts.Append(" str=EX:").Append(e1.Message); }
-                            try { parts.Append(" int=").Append(ts.GetInt()); } catch (Exception e2) { parts.Append(" int=EX:").Append(e2.Message); }
-                            try { parts.Append(" bool=").Append(ts.GetBool()); } catch (Exception e3) { parts.Append(" bool=EX:").Append(e3.Message); }
-                            MelonLogger.Msg(parts.ToString());
-                        }
-                        catch (Exception pe) { MelonLogger.Msg($"[Identify] pt {k} ex: {pe.Message}"); }
-                    }
-
-                    // 探针6: 生成赝品样本 dump 检查点 tag 值 (确认真伪存储格式)
-                    try
-                    {
-                        // InsCigaretteHelper 无 Create 工厂; 用 InsInjectorHelper.CreateCounterfeit 生成任意赝品物品
-                        var fakeSample = InsInjectorHelper.CreateCounterfeit();
-                        if (fakeSample != null)
-                        {
-                            MelonLogger.Msg("[Identify] === FAKE SAMPLE (CreateCounterfeit) ===");
-                            var fsb = new System.Text.StringBuilder();
-                            foreach (var k in new[] { "CIGARETTE_SEAL", "CIGARETTE_LOGO", "CIGARETTE_LETTERING", "CIGARETTE_BOX" })
-                            {
-                                try
-                                {
-                                    var ts = fakeSample.GetTagReadonly(k);
-                                    if (ts == null) { fsb.Append(k).Append("=NULL "); continue; }
-                                    fsb.Append(k);
-                                    try { fsb.Append("(str=").Append(ts.GetString()).Append(')'); } catch { }
-                                    try { fsb.Append("(int=").Append(ts.GetInt()).Append(')'); } catch { }
-                                    try { fsb.Append("(bool=").Append(ts.GetBool()).Append(')'); } catch { }
-                                    fsb.Append(" ");
-                                }
-                                catch { }
-                            }
-                            MelonLogger.Msg($"[Identify] FAKE pt values: {fsb}");
-                            MelonLogger.Msg("[Identify] === END FAKE SAMPLE ===");
-                        }
-                        else MelonLogger.Msg("[Identify] CreateCounterfeit => null");
-                    }
-                    catch (Exception fce) { MelonLogger.Msg($"[Identify] CreateCounterfeit ex: {fce.Message}"); }
-                    // 探针7: IsConditionActive 判定真伪 (condition 系统才是真伪存储, 非 tag)
-                    foreach (var cond in new[] { "genuine", "counterfeit", "expired", "unusable", "non_expired", "normal", "hidden", "replica", "factory_sealed" })
-                    {
-                        try
-                        {
-                            bool c = gameItem.IsConditionActive(cond);
-                            MelonLogger.Msg($"[Identify] IsConditionActive({cond}) => {c}");
-                        }
-                        catch (Exception ce) { MelonLogger.Msg($"[Identify] cond({cond}) ex: {ce.Message}"); break; }
-                    }
-                    // 探针8: 带 ISSUE 后缀检查点 tag 值 (SetConterfeit 掷骰写这里)
-                    foreach (var k in new[] { "CIGARETTE_LOGO_ISSUE", "CIGARETTE_LETTERING_ISSUE", "CIGARETTE_COLOR_ISSUE", "CIGARETTE_SEAL_ISSUE", "CIGARETTE_BOX_ISSUE" })
-                    {
-                        try
-                        {
-                            var ts = gameItem.GetTagReadonly(k);
-                            if (ts == null || !ts.IsEnabled()) { MelonLogger.Msg($"[Identify] issue {k} => not-enabled"); continue; }
-                            string extra = "";
-                            try { extra = " str=" + ts.GetString(); } catch { }
-                            try { extra += " int=" + ts.GetInt(); } catch { }
-                            try { extra += " bool=" + ts.GetBool(); } catch { }
-                            MelonLogger.Msg($"[Identify] issue {k} => enabled{extra}");
-                        }
-                        catch { }
-                    }
-                    // 真伪判定: 检查点 tag int 值 (SetConterfeit 掷骰写检查点, 非0=有缺陷)
+                    // 真伪判定: 检查点 ISSUE tag / 检查点 int 值 非0 => 赝品
                     string issueKey = FindIssue(gameItem);
                     bool fake = issueKey != null;
                     if (!fake)
                     {
-                        // 验证: 检查点 int 值 (也许存别处)
                         foreach (var k in CheckpointTags)
                         {
                             int v = SafeTagInt(gameItem, k);
@@ -800,18 +687,26 @@ namespace ProgressMod
         }
 
         // ============ 全面日志(已删除: 高频诊断, 不再调用) ============
-        // ============ 探针: ModifyTag 观察 OnConfrontSuccess 内部写哪些 tag ============
-        // 自动鉴定调 OnConfrontSuccess 后, 游戏原生会 ModifyTag 设置状态标签.
-        // 记录写入了哪些 tagName, 确认真伪标识的存档键.
+        // ============ 探针: ModifyTag 只显示鉴定检查点 (避免日志淹没) ============
+        // 真伪检查点: CIGARETTE_*/INJECTOR_*/STAMP_*/NICOTINE_VALUE/ALREADY_CONFRONTED_TAG
         [HarmonyPatch(typeof(GameItem), "ModifyTag")]
         public static class PatchProbeModifyTag
         {
+            private static readonly string[] Watch = {
+                "CIGARETTE_SEAL","CIGARETTE_LOGO","CIGARETTE_LETTERING","CIGARETTE_BOX","CIGARETTE_COLOR","CIGARETTE_TAG",
+                "INJECTOR_BODY","INJECTOR_COLOR","INJECTOR_INDICATOR","INJECTOR_LABEL","INJECTOR_SERIAL","INS_INJECTOR_TAG",
+                "STAMP_LOGO","STAMP_CHIP","STAMP_LETTERING","STAMP_SEAL","STAMP_AMOUNT","FOOD_STAMP_TAG",
+                "NICOTINE_VALUE","ALREADY_CONFRONTED_TAG","INSPECTABLE_TAG",
+                "CIGARETTE_SEAL_ISSUE","CIGARETTE_LOGO_ISSUE","CIGARETTE_LETTERING_ISSUE","CIGARETTE_BOX_ISSUE","CIGARETTE_COLOR_ISSUE",
+                "STAMP_LOGO_ISSUE","STAMP_CHIP_ISSUE","STAMP_LETTERING_ISSUE","STAMP_SEAL_ISSUE","STAMP_AMOUNT_ISSUE"
+            };
             public static void Postfix(GameItem __instance, string tagName)
             {
                 try
                 {
-                    if (!AutoIdentify) return;
-                    MelonLogger.Msg($"[Identify] ModifyTag: {tagName}");
+                    if (!AutoIdentify || tagName == null) return;
+                    foreach (var w in Watch)
+                        if (string.Equals(tagName, w)) { MelonLogger.Msg($"[Identify] ModifyTag: {tagName}"); return; }
                 }
                 catch { }
             }
