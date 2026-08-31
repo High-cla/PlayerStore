@@ -597,6 +597,7 @@ namespace ProgressMod
             };
 
             // 真伪判定: 物品带任何 *_ISSUE tag -> 赝品
+            // GetTagReadonly 缺失也返回非 null (真凶!), 必须 IsEnabled() 判存在
             private static bool HasIssueTag(GameItem it)
             {
                 foreach (var k in ProbeKeys)
@@ -605,7 +606,7 @@ namespace ProgressMod
                     try
                     {
                         var ts = it.GetTagReadonly(k);
-                        if (ts != null) return true;
+                        if (ts != null && ts.IsEnabled()) return true;
                     }
                     catch { }
                 }
@@ -617,18 +618,18 @@ namespace ProgressMod
                 {
                     if (!AutoIdentify || gameItem == null) return;
 
-                    // 探针: 打印候选 tag keys 现场值 (一次运行即可确认真伪判定键)
+                    // 探针: 打印实际启用的 tag keys (IsEnabled, 缺失的 GetTagReadonly 也非 null)
                     var present = new System.Text.StringBuilder();
                     foreach (var k in ProbeKeys)
                     {
                         try
                         {
                             var ts = gameItem.GetTagReadonly(k);
-                            if (ts != null) present.Append(k).Append(' ');
+                            if (ts != null && ts.IsEnabled()) present.Append(k).Append(' ');
                         }
                         catch { }
                     }
-                    if (present.Length > 0) MelonLogger.Msg($"[Identify] probe tags: {present}");
+                    if (present.Length > 0) MelonLogger.Msg($"[Identify] probe enabled tags: {present}");
 
                     // 真伪分支: 先探针确认 ISSUE tag 语义, 暂统一走原路径(OnConfrontSuccess)
                     // 若 probe 确认 ISSUE tag 即赝品, 下一步改为按真伪分派.
