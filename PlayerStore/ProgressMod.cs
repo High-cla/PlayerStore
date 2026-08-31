@@ -583,12 +583,59 @@ namespace ProgressMod
         [HarmonyPatch(typeof(InspectableHelper), "InitInspectableItem")]
         public static class PatchAutoIdentify
         {
+            // 真伪判定: 物品带 *_ISSUE tag 即赝品(有缺陷), 否则正品.
+            // 探针: 打印物品所有候选 tag keys, 一次运行确认现场真实键名.
+            private static readonly string[] ProbeKeys = {
+                "CIGARETTE_TAG","INS_INJECTOR_TAG","FOOD_STAMP_TAG",
+                "INSPECTABLE_TAG","ALREADY_CONFRONTED_TAG",
+                "CATEGORY_GENUINE_CIGARETTE","CATEGORY_GENUINE_INJECTOR","CATEGORY_GENUINE_STAMP",
+                "CIGARETTE_BOX_ISSUE","CIGARETTE_COLOR_ISSUE","CIGARETTE_LETTERING_ISSUE","CIGARETTE_LOGO_ISSUE","CIGARETTE_SEAL_ISSUE",
+                "ISSUE_BODY","ISSUE_COLOR","ISSUE_INDICATOR","ISSUE_LABEL","ISSUE_SERIAL",
+                "STAMP_AMOUNT_ISSUE","STAMP_CHIP_ISSUE","STAMP_LETTERING_ISSUE","STAMP_LOGO_ISSUE","STAMP_SEAL_ISSUE",
+                "fakeGenuine","fakeCounterfeit","realGenuine","realCounterfeit",
+                "scavInspectable","on_inspected","confrontSucessDiscount","confront_type"
+            };
+
+            // 真伪判定: 物品带任何 *_ISSUE tag -> 赝品
+            private static bool HasIssueTag(GameItem it)
+            {
+                foreach (var k in ProbeKeys)
+                {
+                    if (!k.Contains("_ISSUE") && !k.StartsWith("ISSUE_")) continue;
+                    try
+                    {
+                        var ts = it.GetTagReadonly(k);
+                        if (ts != null) return true;
+                    }
+                    catch { }
+                }
+                return false;
+            }
             public static void Postfix(GameItem gameItem)
             {
                 try
                 {
                     if (!AutoIdentify || gameItem == null) return;
+
+                    // 探针: 打印候选 tag keys 现场值 (一次运行即可确认真伪判定键)
+                    var present = new System.Text.StringBuilder();
+                    foreach (var k in ProbeKeys)
+                    {
+                        try
+                        {
+                            var ts = gameItem.GetTagReadonly(k);
+                            if (ts != null) present.Append(k).Append(' ');
+                        }
+                        catch { }
+                    }
+                    if (present.Length > 0) MelonLogger.Msg($"[Identify] probe tags: {present}");
+
+                    // 真伪分支: 先探针确认 ISSUE tag 语义, 暂统一走原路径(OnConfrontSuccess)
+                    // 若 probe 确认 ISSUE tag 即赝品, 下一步改为按真伪分派.
+                    bool fake = HasIssueTag(gameItem);
+                    MelonLogger.Msg($"[Identify] issue-tag heuristic => {(fake ? "FAKE" : "genuine")} {Describe(gameItem)}");
                     InspectableHelper.OnConfrontSuccess(gameItem);
+                    MelonLogger.Msg($"[Identify] auto-identified {Describe(gameItem)}");
                     // 游戏手动鉴定路径会经由 InspectionUIManager 的 HandleXxx/OnInspectItem 刷新 UI 标签;
                     // 自动鉴定只调 Helper 设状态, 不刷 UI => 物品标签不更新. 补一次 UI 刷新.
                     try
@@ -597,7 +644,6 @@ namespace ProgressMod
                         if (mgr != null) mgr.OnInspectItem(gameItem);
                     }
                     catch (Exception uie) { MelonLogger.Msg($"[Identify] ui refresh skipped: {uie.Message}"); }
-                    MelonLogger.Msg($"[Identify] auto-identified {Describe(gameItem)}");
                 }
                 catch (Exception e) { MelonLogger.Error($"[Identify] ex: {e.Message}"); }
             }
