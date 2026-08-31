@@ -156,6 +156,13 @@ namespace ProgressMod
             {
                 var inv = EmporiumEntry.Instance.invElement;
                 if (inv == null) { MelonLogger.Warning("[Spawn] main inventory unavailable"); return; }
+                // 图纸/蓝图类不能直接生成: 提示正确物品ID
+                if (stableId.EndsWith("_instruction"))
+                {
+                    string alt = InstructionToItem(stableId);
+                    MelonLogger.Warning($"[Spawn] {stableId} 是图纸(蓝图), 不能直接生成. 用 {alt} 生成实物");
+                    return;
+                }
                 int ok = 0;
                 for (int i = 0; i < count; i++)
                 {
@@ -168,6 +175,21 @@ namespace ProgressMod
                 MelonLogger.Msg($"[Spawn] {ok}/{count} x {stableId}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
+        }
+
+        // 图纸 -> 实物物品 映射 (布局目录里的机器/家具)
+        private static string InstructionToItem(string instruction)
+        {
+            switch (instruction)
+            {
+                case "3d_printer_instruction": return "printer";
+                case "furnace_instruction": return "furnace";
+                case "evaporator_instruction": return "evaporator";
+                case "hydroponic_instruction": return "hydroponic_bay";
+                case "age_well_instruction": return "age_well";
+                case "alarm_instruction": return "alarm_system";
+                default: return "<未知, 查目录>";
+            }
         }
 
         // ============ 机器进度强制满 ============
