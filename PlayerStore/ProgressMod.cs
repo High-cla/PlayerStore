@@ -631,6 +631,25 @@ namespace ProgressMod
                     }
                     if (present.Length > 0) MelonLogger.Msg($"[Identify] probe enabled tags: {present}");
 
+                    // 探针2: dump 各已启用 tag 的值, 看真伪/ISSUE 存哪
+                    foreach (var k in ProbeKeys)
+                    {
+                        try
+                        {
+                            var ts = gameItem.GetTagReadonly(k);
+                            if (ts == null || !ts.IsEnabled()) continue;
+                            string s = null; int i = 0; float f = 0; double d = 0; bool b = false;
+                            string val = "?";
+                            try { s = ts.GetString(); val = "str=" + s; } catch { }
+                            try { i = ts.GetInt(); val = "int=" + i; } catch { }
+                            try { f = ts.GetFloat(); val = "f=" + f; } catch { }
+                            try { d = ts.GetDouble(); val = "dbl=" + d; } catch { }
+                            try { b = ts.GetBool(); val = "bool=" + b; } catch { }
+                            MelonLogger.Msg($"[Identify] tag {k} => {val}");
+                        }
+                        catch { }
+                    }
+
                     // 真伪分支: 先探针确认 ISSUE tag 语义, 暂统一走原路径(OnConfrontSuccess)
                     // 若 probe 确认 ISSUE tag 即赝品, 下一步改为按真伪分派.
                     bool fake = HasIssueTag(gameItem);
