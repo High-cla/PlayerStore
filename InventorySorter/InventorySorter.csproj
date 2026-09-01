@@ -7,6 +7,7 @@
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>D:\steam\steamapps\common\Probably Stolen Playtest\Mods\</OutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);tscripts\xmod\decomp\**</DefaultItemExcludes>
   </PropertyGroup>
   <!-- 编译后自动本地提交: git add 全部变更并 commit. 无变更时静默跳过. -->
   <Target Name="AutoCommit" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">

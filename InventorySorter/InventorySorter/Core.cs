@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using HarmonyLib;
 using Il2Cpp;
 using Il2CppInterop.Runtime.InteropTypes;
 using MelonLoader;
@@ -84,6 +85,17 @@ public class Core : MelonMod
 	internal static MelonPreferences_Entry<int> MaxRows;
 
 	internal static bool ButtonsVisible = true;
+
+	// 拾荒进行中: ScavengeDumpingGrounds 执行期间置 true, 形状 dump 跳过 (拾荒杂物形状无参考价值)
+	internal static bool _inScavenge;
+
+	// 拾荒: ScavHelper.ScavengeDumpingGrounds 执行时标记, 供 DumpShapes 排除拾荒场景
+	[HarmonyPatch(typeof(ScavHelper), "ScavengeDumpingGrounds")]
+	internal static class PatchScavengeDump
+	{
+		internal static void Prefix() { try { _inScavenge = true; } catch { } }
+		internal static void Postfix() { try { _inScavenge = false; } catch { } }
+	}
 
 	// OnGUI 缓存: GUI 事件循环同帧多次调用 OnGUI, CollectSortables 结果同帧不变, 只算一次
 	private static float _guiCacheTimer = -999f;
@@ -3018,6 +3030,8 @@ public class Core : MelonMod
 	{
 		try
 		{
+			// 拾荒进行中跳过: 拾荒杂物形状(无参考价值)不写入缓存
+			if (_inScavenge) return;
 			// 快照指纹: WxH + 所有物品 ident|尺寸|C0格序列 排序后哈希. 基于布局输入(排除时间戳/occ/free等输出),
 			// 同一背包状态反复排序时指纹相同, 跳过重复快照写入. 消除玩家重复点按钮产生的冗余采集.
 			var fpList = new List<string>(masks.Count);
