@@ -1157,6 +1157,25 @@ public class Core : MelonMod
 			{
 				candidates.Add(dictMFR);
 			}
+			// 配对落地(PGSplit 思路): 互补配对单元整体落地, 数据驱动 9x7/10x10/14x21 胜出.
+			// paired 已在 W*H>=100 构建(1134). 配对失败→SplitFailedUnit 拆死锁单元(配对拆两单件)重试,
+			// 等价测试 pack_pg_split 的"配对失败拆单件救回"逻辑. 单件也放不下则丢弃候选, 由单件算法兜底.
+			if (paired != null)
+			{
+				paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+				if (TryPlaceUnits(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictPair))
+				{
+					candidates.Add(dictPair);
+				}
+				else
+				{
+					List<object> repair = SplitFailedUnit(fixedItems, paired, masks, W, H);
+					if (repair != null && TryPlaceUnits(fixedItems, repair, masks, W, H, out Dictionary<GameItem, Placement> dictRepair))
+					{
+						candidates.Add(dictRepair);
+					}
+				}
+			}
 		}
 		else
 		{
