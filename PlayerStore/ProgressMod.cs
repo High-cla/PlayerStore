@@ -887,6 +887,17 @@ namespace ProgressMod
         }
 
         // ============ 无限拾荒: 次数与冷却不受限 ============
+        // Cpp2IL ISIL 静态分析 (ScavHelper.txt):
+        //   CanScavenge: 内联计算 base(5/7 - IsProficientScavenger) - 折算used - PlayerStore[+536](今日计数), 剩余<=0 返回 false
+        //   GetMaxScavAttempts/GetScavTimeLeft: 同样内联计算 (不互相调用)
+        //   ResetScavenging: PlayerStore[+536] = 0
+        // 核心限制点是 CanScavenge (UI/逻辑都问它), patch 它返回 true 即可;
+        // GetMaxScavAttempts/GetScavTimeLeft 也 patch 9999 (其他调用方可能直接读).
+        [HarmonyPatch(typeof(ScavHelper), "CanScavenge")]
+        public static class PatchCanScavenge
+        {
+            public static void Postfix(ref bool __result) { try { if (InfiniteScavenging) __result = true; } catch { } }
+        }
         [HarmonyPatch(typeof(ScavHelper), "GetMaxScavAttempts")] public static class PatchGetMaxScavAttempts
         {
             public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
