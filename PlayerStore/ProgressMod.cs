@@ -766,6 +766,59 @@ namespace ProgressMod
             }
         }
 
+        // ============ 探针: SetConterfeit/SetGenuine 调用时 dump 检查点 (捕获真赝品样本) ============
+        // 游戏内顾客购买赝品/正品对质时, 游戏原生调 InsCigaretteHelper.SetConterfeit/SetGenuine 设置真伪.
+        // hook 后 dump 物品检查点 tag 值, 验证判定逻辑 (SafeTagInt≠0 = 赝品).
+        [HarmonyPatch(typeof(InsCigaretteHelper), "SetConterfeit")]
+        public static class PatchProbeSetConterfeit
+        {
+            public static void Prefix(GameItem gameItem)
+            {
+                try { if (gameItem != null) MelonLogger.Msg($"[Identify] <<SetConterfeit>> called on {Describe(gameItem)}"); } catch { }
+            }
+            public static void Postfix(GameItem gameItem)
+            {
+                try { if (gameItem != null) DumpCheckpoints("SET-COUNTERFEIT", gameItem); } catch { }
+            }
+        }
+        [HarmonyPatch(typeof(InsCigaretteHelper), "SetGenuine")]
+        public static class PatchProbeSetGenuine
+        {
+            public static void Prefix(GameItem gameItem)
+            {
+                try { if (gameItem != null) MelonLogger.Msg($"[Identify] <<SetGenuine>> called on {Describe(gameItem)}"); } catch { }
+            }
+            public static void Postfix(GameItem gameItem)
+            {
+                try { if (gameItem != null) DumpCheckpoints("SET-GENUINE", gameItem); } catch { }
+            }
+        }
+        // dump 全部检查点 tag 值 (探针专用)
+        private static void DumpCheckpoints(string ctx, GameItem it)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder($"[Identify] {ctx}: ");
+                foreach (var k in new[] {
+                    "CIGARETTE_SEAL","CIGARETTE_LOGO","CIGARETTE_LETTERING","CIGARETTE_BOX","CIGARETTE_COLOR",
+                    "INJECTOR_BODY","INJECTOR_COLOR","INJECTOR_INDICATOR","INJECTOR_LABEL","INJECTOR_SERIAL",
+                    "STAMP_LOGO","STAMP_CHIP","STAMP_LETTERING","STAMP_SEAL","STAMP_AMOUNT" })
+                {
+                    try
+                    {
+                        var ts = it.GetTagReadonly(k);
+                        if (ts == null || !ts.IsEnabled()) continue;
+                        sb.Append(k).Append('=');
+                        try { sb.Append(ts.GetInt()); } catch { try { sb.Append(ts.GetString()); } catch { sb.Append('?'); } }
+                        sb.Append(' ');
+                    }
+                    catch { }
+                }
+                MelonLogger.Msg(sb.ToString());
+            }
+            catch (Exception e) { MelonLogger.Error($"[Identify] dump ex: {e.Message}"); }
+        }
+
         // ============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============
         // ScavHelper 负责拾荒受伤掷骰; HealthData 负责伤口结算与恶化.
         // 统一策略: bool 返回 Postfix 强制 false/0, void 结算 Prefix 跳过.
