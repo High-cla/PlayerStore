@@ -39,7 +39,6 @@ namespace ProgressMod
 
         public override void OnInitializeMelon()
         {
-            LoggerInstance.Msg("ProgressMod v1.12.1 init");
             // 配置在游戏启动时即落盘生成, 玩家可提前看到并修改
             MelonPreferences.Save();
             StartSpawnServer();
@@ -74,13 +73,11 @@ namespace ProgressMod
                 _listener.Start();
                 var t = new System.Threading.Thread(ServerLoop) { IsBackground = true };
                 t.Start();
-                MelonLogger.Msg("[Spawn] HTTP server on http://localhost:26880/");
                 try
                 {
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
                         "https://high-cla.github.io/PlayerStore/items_browser.html")
                     { UseShellExecute = true });
-                    MelonLogger.Msg("[Spawn] opened items browser");
                 }
                 catch (Exception e2) { MelonLogger.Warning($"[Spawn] open browser ex: {e2.Message}"); }
             }
@@ -172,7 +169,6 @@ namespace ProgressMod
                     if (!((GameInventory)inv).UncheckedAccept(item)) { MelonLogger.Warning($"[Spawn] native rejected after {ok}/{count}"); break; }
                     ok++;
                 }
-                MelonLogger.Msg($"[Spawn] {ok}/{count} x {stableId}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
         }
@@ -215,7 +211,6 @@ namespace ProgressMod
                     {
                         // 把当前进度直接设为目标 (ModifyTag 写回, GetTagReadonly 是只读副本)
                         machine.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", SetIntAction(tgt));
-                        MelonLogger.Msg($"[Continue] force CURRENT {cur} -> {tgt} (via ModifyTag)");
                         return true; // 让原逻辑继续: 推进后 current>=target 触发完成产出
                     }
                     return true;
@@ -250,7 +245,6 @@ namespace ProgressMod
                     if (ForceFinish && machine != null && tgtTag != null && cur < tgt)
                     {
                         machine.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", SetIntAction(tgt));
-                        MelonLogger.Msg($"[Update] force CURRENT {cur} -> {tgt}");
                     }
                     return true; // 让原推进逻辑继续
                 }
@@ -272,18 +266,15 @@ namespace ProgressMod
             {
                 try
                 {
-                    if (!PlayerStore.IsInstanceExist()) { MelonLogger.Msg("[EndNight] NO PlayerStore instance"); return; }
+                    if (!PlayerStore.IsInstanceExist()) { return; }
                     var store = PlayerStore.Instance;
                     long storePtr = 0, invPtr = 0;
                     try { storePtr = (long)Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtr(store); } catch { }
-                    MelonLogger.Msg($"[EndNight] store=@{storePtr:X} machineryBought={store.machineryBoughtCount} hasMachine={store.IsPlayerHaveMachine()}");
                     var inv = store.gridInv;
                     if (inv != null) { try { invPtr = (long)Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtr(inv); } catch { } }
-                    MelonLogger.Msg($"[EndNight] gridInv=@{invPtr:X}");
                     if (inv != null)
                     {
                         var items = inv.items;
-                        MelonLogger.Msg($"[EndNight] gridInv.items={(items == null ? "NULL" : "count=" + items.Count.ToString())}");
                     }
 
                     // 用游戏自己的枚举 FindAllItem 遍历全部物品(含机器)
@@ -291,7 +282,6 @@ namespace ProgressMod
                     Il2CppSystem.Collections.Generic.List<GameItem> machines = null;
                     try { machines = store.FindAllItem(); }
                     catch (Exception e) { MelonLogger.Error($"[EndNight] FindAllItem ex: {e}"); }
-                    MelonLogger.Msg($"[EndNight] FindAllItem={(machines == null ? "NULL" : "count=" + machines.Count.ToString())}");
 
                     if (machines != null)
                     {
@@ -311,18 +301,15 @@ namespace ProgressMod
                             int tgt = tgtTag != null ? tgtTag.GetInt() : -1;
                             string state = "?";
                             try { state = MachineProgressHelper.GetMachineState(it); } catch (Exception e) { state = "EX:" + e.GetType().Name; }
-                            MelonLogger.Msg($"[EndNight] machine={Describe(it)} state={state} progress=({cur}/{tgt})");
 
                             // 只处理 STATE_WORKING: READY 未启动(主动 Finish 会把 CURRENT 重置 0 并打断状态机)
                             if (state != "STATE_WORKING")
                             {
-                                MelonLogger.Msg($"[EndNight] skip (state={state}, not working)");
                                 continue;
                             }
                             if (cur >= 0 && tgt > 0 && cur < tgt)
                             {
                                 it.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", SetIntAction(tgt));
-                                MelonLogger.Msg($"[EndNight] force CURRENT {cur} -> {tgt}");
                                 forced++;
                             }
                             if (ForceFinish)
@@ -341,7 +328,6 @@ namespace ProgressMod
                             }
                         }
                     }
-                    MelonLogger.Msg($"[EndNight] machines={machineCount} finished={doneCount} forced={forced} totalItems={machines?.Count ?? -1}");
                 }
                 catch (Exception e)
                 {
@@ -404,7 +390,6 @@ namespace ProgressMod
                 try
                 {
                     if (__0 == null) return false;
-                    MelonLogger.Msg($"[Water] AddRustWater({Describe(__0)}, +{__1}ml) -> 转为 PureWater");
                     WaterHelper.AddPureWater(__0, __1);
                     return false; // 跳过原逻辑
                 }
@@ -423,7 +408,6 @@ namespace ProgressMod
                     if (__0 == null) return true;
                     if (__1 == 4)
                     {
-                        MelonLogger.Msg($"[Water] AddWater(grade={__1}=RUST, +{__2}ml) -> 转为 grade=0(PURE)");
                         WaterHelper.AddWater(__0, 0, __2, __3, __4, __5, __6);
                         return false;
                     }
@@ -446,7 +430,6 @@ namespace ProgressMod
                     int vol = WaterHelper.GetTotalVolume(__0);
                     WaterHelper.EmptyContainer(__0);
                     WaterHelper.AddPureWater(__0, vol);
-                    MelonLogger.Msg($"[Water] PurifyToBaseWater -> 净化100%纯水 (vol={vol}ml)");
                     return false; // 跳过原逻辑
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] PurifyToBaseWater patch err: {e.Message}"); return true; }
@@ -462,7 +445,6 @@ namespace ProgressMod
                 try
                 {
                     if (__0 == null) return true;
-                    MelonLogger.Msg($"[Water] AddLiquid(liquidId={__1}, +{__2}ml, container={Describe(__0)})");
                     return true;
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] AddLiquid patch err: {e.Message}"); return true; }
@@ -480,12 +462,12 @@ namespace ProgressMod
                 try
                 {
                     if (ModuleBoostMult <= 1) return true;
-                    if (bonusPercentagePerformance > 0) { MelonLogger.Msg($"[Module] {moduleType}: perf {bonusPercentagePerformance} -> {bonusPercentagePerformance * ModuleBoostMult}"); bonusPercentagePerformance *= ModuleBoostMult; }
-                    else if (bonusPercentagePerformance < 0) { MelonLogger.Msg($"[Module] {moduleType}: perf {bonusPercentagePerformance} -> {Math.Abs(bonusPercentagePerformance) * ModuleBoostMult}"); bonusPercentagePerformance = Math.Abs(bonusPercentagePerformance) * ModuleBoostMult; }
-                    if (bonusPercentageEfficiency > 0) { MelonLogger.Msg($"[Module] {moduleType}: eff {bonusPercentageEfficiency} -> {bonusPercentageEfficiency * ModuleBoostMult}"); bonusPercentageEfficiency *= ModuleBoostMult; }
-                    else if (bonusPercentageEfficiency < 0) { MelonLogger.Msg($"[Module] {moduleType}: eff {bonusPercentageEfficiency} -> {Math.Abs(bonusPercentageEfficiency) * ModuleBoostMult}"); bonusPercentageEfficiency = Math.Abs(bonusPercentageEfficiency) * ModuleBoostMult; }
-                    if (bonusPercentageQuality > 0) { MelonLogger.Msg($"[Module] {moduleType}: qual {bonusPercentageQuality} -> {bonusPercentageQuality * ModuleBoostMult}"); bonusPercentageQuality *= ModuleBoostMult; }
-                    else if (bonusPercentageQuality < 0) { MelonLogger.Msg($"[Module] {moduleType}: qual {bonusPercentageQuality} -> {Math.Abs(bonusPercentageQuality) * ModuleBoostMult}"); bonusPercentageQuality = Math.Abs(bonusPercentageQuality) * ModuleBoostMult; }
+                    if (bonusPercentagePerformance > 0) { bonusPercentagePerformance *= ModuleBoostMult; }
+                    else if (bonusPercentagePerformance < 0) { bonusPercentagePerformance = Math.Abs(bonusPercentagePerformance) * ModuleBoostMult; }
+                    if (bonusPercentageEfficiency > 0) { bonusPercentageEfficiency *= ModuleBoostMult; }
+                    else if (bonusPercentageEfficiency < 0) { bonusPercentageEfficiency = Math.Abs(bonusPercentageEfficiency) * ModuleBoostMult; }
+                    if (bonusPercentageQuality > 0) { bonusPercentageQuality *= ModuleBoostMult; }
+                    else if (bonusPercentageQuality < 0) { bonusPercentageQuality = Math.Abs(bonusPercentageQuality) * ModuleBoostMult; }
                     return true; // 让原逻辑用放大后的值
                 }
                 catch (Exception e) { MelonLogger.Error($"[Module] InitModuleItem patch err: {e.Message}"); return true; }
@@ -503,7 +485,6 @@ namespace ProgressMod
                 try
                 {
                     if (OutputMult <= 1 || targetItemCount <= 0) return;
-                    MelonLogger.Msg($"[Output] {targetItemID}: count {targetItemCount} -> {targetItemCount * OutputMult}");
                     targetItemCount *= OutputMult;
                 }
                 catch (Exception e) { MelonLogger.Error($"[Output] InitProgressSourceItem patch err: {e.Message}"); }
@@ -580,23 +561,6 @@ namespace ProgressMod
         {
             Action<TagState> a = ts => ts?.SetInt(val);
             return a;
-        }
-
-        private static string Describe(GameItem it)
-        {
-            if (it == null) return "null";
-            try
-            {
-                var tag = it.GetTagReadonly("id");
-                var id = tag != null ? tag.GetString() : "?";
-                long p = 0;
-                try { p = (long)Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtr(it); } catch { }
-                return $"{id}@{p:X}";
-            }
-            catch
-            {
-                return "@?";
-            }
         }
 
         // ============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============
