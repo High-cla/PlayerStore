@@ -827,6 +827,7 @@ public class Core : MelonMod
 		}
 		catch (System.Exception ex)
 		{
+			MelonLogger.Error("[InvSorter] read failed: " + ex);
 			Toast("read failed: " + ex.Message);
 			return list;
 		}
@@ -842,29 +843,29 @@ public class Core : MelonMod
 			return;
 		}
 		// 按 KeepContainers 分流: 容器件留在原位, 其余进排序池
-		List<GameItem> list2 = new List<GameItem>();
-		List<GameItem> list3 = new List<GameItem>();
-		foreach (GameItem item5 in list)
+		List<GameItem> sortPool = new List<GameItem>();
+		List<GameItem> keptContainers = new List<GameItem>();
+		foreach (GameItem it in list)
 		{
-			if (KeepContainers.Value && HasContentWindow(item5))
+			if (KeepContainers.Value && HasContentWindow(it))
 			{
-				list3.Add(item5);
+				keptContainers.Add(it);
 			}
 			else
 			{
-				list2.Add(item5);
+				sortPool.Add(it);
 			}
 		}
-		if (list2.Count <= 1)
+		if (sortPool.Count <= 1)
 		{
 			Toast("only containers here, left in place");
 			return;
 		}
 		// 位置快照(供失败恢复): 记录排序前每个物品的 minX/minY/orientation/flipped
-		List<(GameItem, int, int, int, bool)> list4 = SnapshotOriginals(list2);
+		List<(GameItem, int, int, int, bool)> original = SnapshotOriginals(sortPool);
 		// 按 TagKey 分组(排序池内的格子), 组内按 SizeCompare 排序; 拆出 SortInventory 第三段: 复杂度 -5
-		List<string> list5 = new List<string>();
-		Dictionary<string, List<GameItem>> dictionary = BuildTagGroups(list2, list5);
+		List<string> tagOrder = new List<string>();
+		Dictionary<string, List<GameItem>> tagGroups = BuildTagGroups(sortPool, tagOrder);
 		try
 		{
 			if (!GetGridDims(inv, out var w, out var h) || w <= 0 || h <= 0)
@@ -874,25 +875,25 @@ public class Core : MelonMod
 			}
 			w = Math.Min(w, 128);
 			h = Math.Min(h, 8192);
-			Dictionary<GameItem, ItemMask> dictionary2 = new Dictionary<GameItem, ItemMask>();
-			foreach (GameItem item9 in list2)
+			Dictionary<GameItem, ItemMask> masks = new Dictionary<GameItem, ItemMask>();
+			foreach (GameItem it2 in sortPool)
 			{
-				dictionary2[item9] = BuildMask(item9);
+				masks[it2] = BuildMask(it2);
 			}
 			// 同类合并视图: 相同 ident + 相同形状(Gw0xGh0 + C0) 的多件只占一份布局(代表件),
 			// 其余在应用阶段调 StackItemUnchecked 并入代表件. 大幅减少地面占用, 释放连续空域(实测 BEST 从不劣化).
 			Dictionary<string, int> mergeRepIdx = new Dictionary<string, int>();
-			for (int mi = 0; mi < list2.Count; mi++)
+			for (int mi = 0; mi < sortPool.Count; mi++)
 			{
 				// 容器(有内容窗口的内部格子)不参与同类合并/堆叠: 保持独立, 只移动不堆叠
-				if (HasContentWindow(list2[mi])) continue;
-				ItemMask mm2 = dictionary2[list2[mi]];
+				if (HasContentWindow(sortPool[mi])) continue;
+				ItemMask mm2 = masks[sortPool[mi]];
 				StringBuilder msb = new StringBuilder();
 				foreach ((int mdx, int mdy) in mm2.C0)
 				{
 					msb.Append(mdx).Append(':').Append(mdy).Append(',');
 				}
-				string mkey = list2[mi].identifier + "|" + mm2.Gw0 + "x" + mm2.Gh0 + "|" + msb.ToString();
+				string mkey = sortPool[mi].identifier + "|" + mm2.Gw0 + "x" + mm2.Gh0 + "|" + msb.ToString();
 				if (!mergeRepIdx.ContainsKey(mkey))
 				{
 					mergeRepIdx[mkey] = mi;
@@ -901,15 +902,15 @@ public class Core : MelonMod
 			// 被合并件清单: 非代表件的下标
 			List<int> mergeAbsorb = new List<int>();
 			HashSet<int> mergeRepSet = new HashSet<int>(mergeRepIdx.Values);
-			for (int mi = 0; mi < list2.Count; mi++)
+			for (int mi = 0; mi < sortPool.Count; mi++)
 			{
-				if (!mergeRepSet.Contains(mi) && !HasContentWindow(list2[mi]))
+				if (!mergeRepSet.Contains(mi) && !HasContentWindow(sortPool[mi]))
 				{
 					mergeAbsorb.Add(mi);
 				}
 			}
-			Dictionary<GameItem, Placement> dictionary3 = null;
-			string value2 = null;
+			Dictionary<GameItem, Placement> layout = null;
+			string mode = null;
 			if (GroupByTag.Value)
 			{
 				// 同类合并: 从 tag 分组中剔除被合并件(代表件保留), 布局后重叠致放自动合并
@@ -918,22 +919,22 @@ public class Core : MelonMod
 					HashSet<GameItem> absorbSet2 = new HashSet<GameItem>();
 					foreach (int ai3 in mergeAbsorb)
 					{
-						absorbSet2.Add(list2[ai3]);
+						absorbSet2.Add(sortPool[ai3]);
 					}
-					foreach (List<GameItem> list8 in dictionary.Values)
+					foreach (List<GameItem> group in tagGroups.Values)
 					{
-						list8.RemoveAll(g => absorbSet2.Contains(g));
+						group.RemoveAll(g => absorbSet2.Contains(g));
 					}
 				}
-				dictionary3 = LayoutBanded(list5, dictionary, dictionary2, w, h, list3);
-				if (dictionary3 != null)
+				layout = LayoutBanded(tagOrder, tagGroups, masks, w, h, keptContainers);
+				if (layout != null)
 				{
-					value2 = "grouped";
+					mode = "grouped";
 				}
 			}
-			if (dictionary3 == null)
+			if (layout == null)
 			{
-				foreach (Comparison<GameItem> item10 in new List<Comparison<GameItem>>
+				foreach (Comparison<GameItem> cmp in new List<Comparison<GameItem>>
 				{
 					SizeCompare,
 					(GameItem a, GameItem b) => Math.Max(BaseW(b), BaseH(b)).CompareTo(Math.Max(BaseW(a), BaseH(a))),
@@ -941,51 +942,51 @@ public class Core : MelonMod
 					(GameItem a, GameItem b) => BaseW(b).CompareTo(BaseW(a))
 				})
 				{
-					List<GameItem> list7 = new List<GameItem>(list2);
+					List<GameItem> candidate = new List<GameItem>(sortPool);
 					if (mergeAbsorb.Count > 0)
 					{
 						// 同类合并: 被合并件不参与布局(代表件排一次即可), 应用阶段重叠致放自动合并
 						HashSet<GameItem> absorbSet = new HashSet<GameItem>();
 						foreach (int ai2 in mergeAbsorb)
 						{
-							absorbSet.Add(list2[ai2]);
+							absorbSet.Add(sortPool[ai2]);
 						}
-						list7.RemoveAll(g => absorbSet.Contains(g));
+						candidate.RemoveAll(g => absorbSet.Contains(g));
 					}
-					list7.Sort(item10);
-					dictionary3 = LayoutDense(list7, dictionary2, w, h, list3);
-					if (dictionary3 != null)
+					candidate.Sort(cmp);
+					layout = LayoutDense(candidate, masks, w, h, keptContainers);
+					if (layout != null)
 					{
-						value2 = "packed";
+						mode = "packed";
 						break;
 					}
 				}
 			}
-			if (dictionary3 == null)
+			if (layout == null)
 			{
-				RestoreOriginal(inv, list4);
+				RestoreOriginal(inv, original);
 				Toast("not enough room to sort cleanly, left unchanged");
 				return;
 			}
 			int num = 0;
 			// 同类合并应用: 布局成功后, 被合并件致放到代表件同一位置(重叠) — 游戏堆叠机制自动合并为一格.
-			// 代表件位置 = dictionary3[rep]; 每个被合并件找同 ident 代表, PlaceItem 到代表件的 X/Y/O.
+			// 代表件位置 = layout[rep]; 每个被合并件找同 ident 代表, PlaceItem 到代表件的 X/Y/O.
 			if (mergeAbsorb.Count > 0)
 			{
 				foreach (int ai in mergeAbsorb)
 				{
-					GameItem absorbed = list2[ai];
+					GameItem absorbed = sortPool[ai];
 					GameItem rep = null;
 					foreach (KeyValuePair<string, int> mp in mergeRepIdx)
 					{
-						GameItem r = list2[mp.Value];
+						GameItem r = sortPool[mp.Value];
 						if (r.identifier == absorbed.identifier)
 						{
 							rep = r;
 							break;
 						}
 					}
-					if (rep != null && dictionary3.TryGetValue(rep, out Placement rp))
+					if (rep != null && layout.TryGetValue(rep, out Placement rp))
 					{
 						if (!PlaceItem(absorbed, rp.X, rp.Y, rp.O))
 						{
@@ -999,12 +1000,12 @@ public class Core : MelonMod
 				}
 			}
 			// 堆叠物品(unitCount>1)最后放置: 游戏按放置顺序渲染, 后放的贴图在上层, 保证堆叠物至少一格视觉可见(否则被盖住看着取不出)
-			List<KeyValuePair<GameItem, Placement>> order11 = new List<KeyValuePair<GameItem, Placement>>(dictionary3);
+			List<KeyValuePair<GameItem, Placement>> order11 = new List<KeyValuePair<GameItem, Placement>>(layout);
 			order11.Sort((a, b) => (Stacked(a.Key) ? 1 : 0).CompareTo(Stacked(b.Key) ? 1 : 0));
-			foreach (KeyValuePair<GameItem, Placement> item11 in order11)
+			foreach (KeyValuePair<GameItem, Placement> kvp in order11)
 			{
-				Placement value3 = item11.Value;
-				PlaceItem(item11.Key, value3.X, value3.Y, value3.O);
+				Placement value3 = kvp.Value;
+				PlaceItem(kvp.Key, value3.X, value3.Y, value3.O);
 				if (value3.O == 1)
 				{
 					num++;
@@ -1018,18 +1019,19 @@ public class Core : MelonMod
 			{
 				MelonLogger.Error("[InvSorter] post-layout Validate failed: " + exV.Message);
 			}
-			Toast($"{value2} {dictionary3.Count}/{list2.Count} item(s)" + ((num > 0) ? $", {num} rotated" : "") + ((list3.Count > 0) ? $"  ({list3.Count} kept)" : ""));
+			Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
 		}
 		catch (System.Exception ex2)
 		{
 			try
 			{
-				RestoreOriginal(inv, list4);
+				RestoreOriginal(inv, original);
 			}
 			catch (System.Exception exR)
 			{
 				MelonLogger.Error("[InvSorter] restore failed after sort error: " + exR.Message);
 			}
+			MelonLogger.Error("[InvSorter] sort error: " + ex2);
 			Toast("sort error: " + ex2.Message);
 		}
 	}

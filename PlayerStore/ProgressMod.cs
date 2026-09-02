@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
@@ -61,7 +62,7 @@ namespace ProgressMod
                     SpawnItem(job.Item1, job.Item2);
                 }
             }
-            catch { }
+            catch { /* IL2CPP 异常: 保持原值 */ }
         }
 
         private static void StartSpawnServer()
@@ -103,7 +104,7 @@ namespace ProgressMod
             {
                 var req = ctx.Request;
                 var res = ctx.Response;
-                string body = "{\"ok\":false,\"err\":\"bad\"}";
+                object resp = new { ok = false, err = "bad" };
                 int code = 400;
                 try
                 {
@@ -116,27 +117,27 @@ namespace ProgressMod
                         if (n < 1) n = 1;
                         if (id == "")
                         {
-                            body = "{\"ok\":false,\"err\":\"no itemId\"}";
+                            resp = new { ok = false, err = "no itemId" };
                         }
                         else
                         {
                             PendingSpawns.Enqueue((id, n));
-                            body = $"{{\"ok\":true,\"queued\":\"{id} x{n}\"}}";
+                            resp = new { ok = true, queued = $"{id} x{n}" };
                             code = 200;
                         }
                     }
                     else if (req.Url.AbsolutePath == "/api/health")
                     {
-                        body = "{\"ok\":true}";
+                        resp = new { ok = true };
                         code = 200;
                     }
                 }
                 catch (Exception e)
                 {
-                    body = $"{{\"ok\":false,\"err\":\"{e.Message}\"}}";
+                    resp = new { ok = false, err = e.Message };
                     code = 500;
                 }
-                byte[] buf = System.Text.Encoding.UTF8.GetBytes(body);
+                byte[] buf = System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(resp));
                 res.StatusCode = code;
                 res.ContentType = "application/json; charset=utf-8";
                 res.Headers["Access-Control-Allow-Origin"] = "*";
@@ -144,7 +145,7 @@ namespace ProgressMod
                 res.OutputStream.Write(buf, 0, buf.Length);
                 res.OutputStream.Close();
             }
-            catch { }
+            catch { /* IL2CPP 异常: 保持原值 */ }
         }
 
         private void SpawnItem(string stableId, int count)
@@ -199,7 +200,7 @@ namespace ProgressMod
                 try
                 {
                     bool isMachine = false;
-                    try { isMachine = machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { }
+                    try { isMachine = machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { /* IL2CPP 异常: 保持原值 */ }
                     if (!isMachine) return true;
 
                     var curTag = machine.GetTagReadonly("MACHINE_PROGRESS_CURRENT_TAG");
@@ -268,14 +269,6 @@ namespace ProgressMod
                 {
                     if (!PlayerStore.IsInstanceExist()) { return; }
                     var store = PlayerStore.Instance;
-                    long storePtr = 0, invPtr = 0;
-                    try { storePtr = (long)Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtr(store); } catch { }
-                    var inv = store.gridInv;
-                    if (inv != null) { try { invPtr = (long)Il2CppInterop.Runtime.IL2CPP.Il2CppObjectBaseToPtr(inv); } catch { } }
-                    if (inv != null)
-                    {
-                        var items = inv.items;
-                    }
 
                     // 用游戏自己的枚举 FindAllItem 遍历全部物品(含机器)
                     int machineCount = 0, doneCount = 0, forced = 0;
@@ -292,7 +285,7 @@ namespace ProgressMod
                             // 机器判定修正: GetTagReadonly 缺失 tag 也返回非 null (真凶!),
                             // 必须用 IsTag (真存在才 true)。
                             bool isMachine = false;
-                            try { isMachine = it.IsTag("MACHINE_STATE_TAG") || it.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { }
+                            try { isMachine = it.IsTag("MACHINE_STATE_TAG") || it.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { /* IL2CPP 异常: 保持原值 */ }
                             if (!isMachine) continue;
                             machineCount++;
                             var curTag = it.GetTagReadonly("MACHINE_PROGRESS_CURRENT_TAG");
@@ -333,28 +326,6 @@ namespace ProgressMod
                 {
                     MelonLogger.Error($"[EndNight] ex: {e}");
                 }
-            }
-        }
-
-        // ============ 完成产出诊断 ============
-        [HarmonyPatch(typeof(MachineProgressHelper), "FinishProgressTypeMachine")]
-        public static class PatchFinish
-        {
-            public static bool Prefix(GameItem __0)
-            {
-                try
-                {
-                    var machine = __0;
-                    if (machine == null) return true;
-                    bool isMachine = false;
-                    try { isMachine = machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { }
-                    if (!isMachine) return true;
-                }
-                catch (Exception e)
-                {
-                    MelonLogger.Error($"[Finish] ex: {e}");
-                }
-                return true;
             }
         }
 
@@ -436,21 +407,6 @@ namespace ProgressMod
             }
         }
 
-        // 观察: AddLiquid 的 liquidId
-        [HarmonyPatch(typeof(WaterHelper), "AddLiquid")]
-        public static class PatchWaterLiquidLog
-        {
-            public static bool Prefix(GameItem __0, string __1, int __2)
-            {
-                try
-                {
-                    if (__0 == null) return true;
-                    return true;
-                }
-                catch (Exception e) { MelonLogger.Error($"[Water] AddLiquid patch err: {e.Message}"); return true; }
-            }
-        }
-
         // ============ 模块加成强化 ============
         // ModuleHelper.InitModuleItem 是所有模块(含神经模组)初始化入口,
         // 3 个加成百分比直接乘大。模块创建时调用一次。
@@ -498,7 +454,7 @@ namespace ProgressMod
             public static void Postfix(ref bool __result)
             {
                 try { if (TurboCooldownFree) __result = true; }
-                catch { }
+                catch { /* IL2CPP 异常: 保持原值 */ }
             }
         }
 
@@ -514,7 +470,7 @@ namespace ProgressMod
                     // 最高档取 6 (游戏酒品质 tier 范围约 0-5)
                     __result = Math.Max(__result, 6);
                 }
-                catch { }
+                catch { /* IL2CPP 异常: 保持原值 */ }
             }
         }
 
@@ -568,19 +524,19 @@ namespace ProgressMod
         // 统一策略: bool 返回 Postfix 强制 false/0, void 结算 Prefix 跳过.
         [HarmonyPatch(typeof(ScavHelper), "RollMinorWound")] public static class PatchRollMinorWound
         {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(ScavHelper), "RollMajorWound")] public static class PatchRollMajorWound
         {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetMinorWoundChance")] public static class PatchGetMinorWoundChance
         {
-            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { } }
+            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetMajorWoundChance")] public static class PatchGetMajorWoundChance
         {
-            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { } }
+            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(HealthData), "ReceiveMinorWound")] public static class PatchReceiveMinorWound
         {
@@ -592,7 +548,7 @@ namespace ProgressMod
         }
         [HarmonyPatch(typeof(HealthData), "IsSeriouslyWounded")] public static class PatchIsSeriouslyWounded
         {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(HealthData), "HandleNightlyWound")] public static class PatchHandleNightlyWound
         {
@@ -603,27 +559,27 @@ namespace ProgressMod
         // HealthData 成瘾检测与惩罚. bool 检测 Postfix 强制 false, int/void 结算跳过置零.
         [HarmonyPatch(typeof(HealthData), "HasAnyAddiction")] public static class PatchHasAnyAddiction
         {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(HealthData), "IsAlcoholAddicted")] public static class PatchIsAlcoholAddicted
         {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(HealthData), "IsNicotineAddicted")] public static class PatchIsNicotineAddicted
         {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(HealthData), "IsNarcoticAddicted")] public static class PatchIsNarcoticAddicted
         {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(HealthData), "IsGamblingAddicted")] public static class PatchIsGamblingAddicted
         {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(HealthData), "GetTotalAddictionPenalty")] public static class PatchGetTotalAddictionPenalty
         {
-            public static void Postfix(ref int __result) { try { if (NoAddiction) __result = 0; } catch { } }
+            public static void Postfix(ref int __result) { try { if (NoAddiction) __result = 0; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(HealthData), "RemoveOneRandomAddiction")] public static class PatchRemoveOneRandomAddiction
         {
@@ -640,15 +596,15 @@ namespace ProgressMod
         [HarmonyPatch(typeof(ScavHelper), "CanScavenge")]
         public static class PatchCanScavenge
         {
-            public static void Postfix(ref bool __result) { try { if (InfiniteScavenging) __result = true; } catch { } }
+            public static void Postfix(ref bool __result) { try { if (InfiniteScavenging) __result = true; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetMaxScavAttempts")] public static class PatchGetMaxScavAttempts
         {
-            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
+            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetScavTimeLeft")] public static class PatchGetScavTimeLeft
         {
-            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
+            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { /* IL2CPP 异常: 保持原值 */ } }
         }
 
     }
