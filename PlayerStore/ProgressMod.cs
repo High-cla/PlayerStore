@@ -16,7 +16,6 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<int> CfgModuleBoostMult = Cfg.CreateEntry<int>("ModuleBoostMult", 10, "模块加成倍率");
         public static readonly MelonPreferences_Entry<bool> CfgFreePower = Cfg.CreateEntry<bool>("FreePower", true, "免电运转");
         public static readonly MelonPreferences_Entry<bool> CfgMaxWineQuality = Cfg.CreateEntry<bool>("MaxWineQuality", true, "酒品质最高档");
-        public static readonly MelonPreferences_Entry<bool> CfgAutoIdentify = Cfg.CreateEntry<bool>("AutoIdentify", true, "对质类物品(香烟/注射器/印章)自动鉴定");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyAlwaysPure = Cfg.CreateEntry<bool>("PurifyAlwaysPure", true, "净化器/过滤器: PurifyToBaseWater 永远净化100%纯水");
         public static readonly MelonPreferences_Entry<bool> CfgTurboCooldownFree = Cfg.CreateEntry<bool>("TurboCooldownFree", true, "TurboBooster: 无视冷却/充能延时, 永远就绪");
         public static readonly MelonPreferences_Entry<int> CfgOutputMult = Cfg.CreateEntry<int>("OutputMult", 3, "机器产出量倍率: 每个加工周期产出的物品数量乘以该倍率");
@@ -31,7 +30,6 @@ namespace ProgressMod
         public static int ModuleBoostMult => CfgModuleBoostMult.Value;
         public static bool FreePower => CfgFreePower.Value;
         public static bool MaxWineQuality => CfgMaxWineQuality.Value;
-        public static bool AutoIdentify => CfgAutoIdentify.Value;
         public static bool PurifyAlwaysPure => CfgPurifyAlwaysPure.Value;
         public static bool TurboCooldownFree => CfgTurboCooldownFree.Value;
         public static int OutputMult => CfgOutputMult.Value;
@@ -42,6 +40,8 @@ namespace ProgressMod
         public override void OnInitializeMelon()
         {
             LoggerInstance.Msg("ProgressMod v1.12.1 init");
+            // 配置在游戏启动时即落盘生成, 玩家可提前看到并修改
+            MelonPreferences.Save();
             StartSpawnServer();
         }
 
@@ -596,78 +596,6 @@ namespace ProgressMod
             catch
             {
                 return "@?";
-            }
-        }
-
-        // ============ 自动鉴定: 对质类物品(香烟/注射器/印章) 进入待鉴定即完成 ============
-        // InspectableHelper.InitInspectableItem 在物品被标记为待鉴定时调用.
-        // Postfix: 直接调 OnConfrontSuccess 完成鉴定, 无需玩家手动对质.
-        [HarmonyPatch(typeof(InspectableHelper), "InitInspectableItem")]
-        public static class PatchAutoIdentify
-        {
-            // 三类比鉴定物品的检查点 (SetConterfeit 掷骰写这些 key, 非0 int/启用 _ISSUE = 赝品)
-            // 香烟: SEAL/LOGO/LETTERING/BOX/COLOR; 注射器: BODY/COLOR/INDICATOR/LABEL/SERIAL; 印章: LOGO/CHIP/LETTERING/SEAL/AMOUNT
-            private static readonly string[] CheckpointTags = {
-                "CIGARETTE_SEAL", "CIGARETTE_LOGO", "CIGARETTE_LETTERING", "CIGARETTE_BOX", "CIGARETTE_COLOR",
-                "INJECTOR_BODY", "INJECTOR_COLOR", "INJECTOR_INDICATOR", "INJECTOR_LABEL", "INJECTOR_SERIAL",
-                "STAMP_LOGO", "STAMP_CHIP", "STAMP_LETTERING", "STAMP_SEAL", "STAMP_AMOUNT"
-            };
-            // 真伪判定: 有 _ISSUE tag 启用即赝品
-            private static string FindIssue(GameItem it)
-            {
-                foreach (var k in CheckpointTags)
-                {
-                    try
-                    {
-                        var ts = it.GetTagReadonly(k + "_ISSUE");
-                        if (ts != null && ts.IsEnabled()) return k + "_ISSUE";
-                    }
-                    catch { }
-                }
-                return null;
-            }
-            private static int SafeTagInt(GameItem it, string tag)
-            {
-                try { var ts = it.GetTagReadonly(tag); if (ts != null && ts.IsEnabled()) return ts.GetInt(); } catch { }
-                return 0;
-            }
-            private static bool SafeCond(GameItem it, string cond)
-            {
-                try { return it.IsConditionActive(cond); }
-                catch { return false; }
-            }
-            public static void Postfix(GameItem gameItem)
-            {
-                try
-                {
-                    if (!AutoIdentify || gameItem == null) return;
-
-                    // 真伪判定: 检查点 ISSUE tag / 检查点 int 值 非0 => 赝品
-                    string issueKey = FindIssue(gameItem);
-                    bool fake = issueKey != null;
-                    if (!fake)
-                    {
-                        foreach (var k in CheckpointTags)
-                        {
-                            int v = SafeTagInt(gameItem, k);
-                            if (v != 0) { fake = true; issueKey = k + "(int=" + v + ")"; break; }
-                        }
-                    }
-                    MelonLogger.Msg($"[Identify] issue => {(fake ? "FAKE:" + issueKey : "genuine")} {Describe(gameItem)}");
-                    // 正品: OnConfrontSuccess; 赝品: 不调用(保留赝品状态, OnConfrontSuccess 无脑正品化)
-                    if (!fake) InspectableHelper.OnConfrontSuccess(gameItem);
-                    else MelonLogger.Msg("[Identify] FAKE => skipped OnConfrontSuccess (keep counterfeit state)");
-                    MelonLogger.Msg($"[Identify] auto-identified {Describe(gameItem)}");
-                    // 游戏手动鉴定路径会经由 InspectionUIManager 的 HandleXxx/OnInspectItem 刷新 UI 标签;
-                    // 自动鉴定只调 Helper 设状态, 不刷 UI => 物品标签不更新. 补一次 UI 刷新.
-                    try
-                    {
-                        var mgr = InspectionUIManager.Instance;
-                        if (mgr != null) mgr.OnInspectItem(gameItem);
-                    }
-                    catch (Exception uie) { MelonLogger.Msg($"[Identify] ui refresh skipped: {uie.Message}"); }
-                }
-                catch (Exception e) { MelonLogger.Error($"[Identify] ex: {e.Message}"); }
             }
         }
 
