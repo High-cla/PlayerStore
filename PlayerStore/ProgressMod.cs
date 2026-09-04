@@ -330,6 +330,8 @@ namespace ProgressMod
         }
 
         // ============ 不消耗耐久 ============
+        // 注: 不再 patch ModuleEffectHelper.Degrade —— 游戏 0.46D 热修后该类静态构造在
+        // HarmonyInit 早期初始化崩溃(Il2Cpp SEH), 且 Degrade 会走 ChangeDurability 主入口, 此处已覆盖.
         [HarmonyPatch(typeof(DurabilityHelper), "ChangeDurability")]
         public static class PatchDurability
         {
@@ -337,17 +339,6 @@ namespace ProgressMod
             {
                 if (!NoDurability) return true;
                 if (amount < 0) return false; // 负变化(消耗)直接跳过
-                return true;
-            }
-        }
-
-        [HarmonyPatch(typeof(ModuleEffectHelper), "Degrade")]
-        public static class PatchDegrade
-        {
-            public static bool Prefix(int amount)
-            {
-                if (!NoDurability) return true;
-                if (amount < 0) return false;
                 return true;
             }
         }
