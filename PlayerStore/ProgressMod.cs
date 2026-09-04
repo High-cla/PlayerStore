@@ -15,28 +15,16 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgForceFinish = Cfg.CreateEntry<bool>("ForceFinish", true, "进度满: 拦截推进并直接完成");
         public static readonly MelonPreferences_Entry<bool> CfgNoDurability = Cfg.CreateEntry<bool>("NoDurability", true, "不消耗耐久");
         public static readonly MelonPreferences_Entry<int> CfgModuleBoostMult = Cfg.CreateEntry<int>("ModuleBoostMult", 10, "模块加成倍率");
-        public static readonly MelonPreferences_Entry<bool> CfgFreePower = Cfg.CreateEntry<bool>("FreePower", true, "免电运转");
-        public static readonly MelonPreferences_Entry<bool> CfgMaxWineQuality = Cfg.CreateEntry<bool>("MaxWineQuality", true, "酒品质最高档");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyAlwaysPure = Cfg.CreateEntry<bool>("PurifyAlwaysPure", true, "净化器/过滤器: PurifyToBaseWater 永远净化100%纯水");
-        public static readonly MelonPreferences_Entry<bool> CfgTurboCooldownFree = Cfg.CreateEntry<bool>("TurboCooldownFree", true, "TurboBooster: 无视冷却/充能延时, 永远就绪");
-        public static readonly MelonPreferences_Entry<int> CfgOutputMult = Cfg.CreateEntry<int>("OutputMult", 3, "机器产出量倍率: 每个加工周期产出的物品数量乘以该倍率");
-        public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
-        public static readonly MelonPreferences_Entry<bool> CfgNoAddiction = Cfg.CreateEntry<bool>("NoAddiction", true, "永不中毒: 酒精/尼古丁/麻醉剂/赌博永不产生成瘾, 无成瘾惩罚");
-        public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
+        public static readonly MelonPreferences_Entry<int> CfgOutputMult = Cfg.CreateEntry<int>("OutputMult", 3, "机器产出倍率");
         public static readonly MelonPreferences_Entry<string> CfgSpawnId = Cfg.CreateEntry<string>("SpawnItemId", "", "生成物品: 填物品 stableId (如 box_tampon), F9 生成到主背包. 空=禁用");
         public static readonly MelonPreferences_Entry<int> CfgSpawnCount = Cfg.CreateEntry<int>("SpawnItemCount", 1, "生成物品数量 (不填默认1)");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
         public static bool ForceFinish => CfgForceFinish.Value;
         public static bool NoDurability => CfgNoDurability.Value;
         public static int ModuleBoostMult => CfgModuleBoostMult.Value;
-        public static bool FreePower => CfgFreePower.Value;
-        public static bool MaxWineQuality => CfgMaxWineQuality.Value;
         public static bool PurifyAlwaysPure => CfgPurifyAlwaysPure.Value;
-        public static bool TurboCooldownFree => CfgTurboCooldownFree.Value;
         public static int OutputMult => CfgOutputMult.Value;
-        public static bool NeverWounded => CfgNeverWounded.Value;
-        public static bool NoAddiction => CfgNoAddiction.Value;
-        public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
 
         public override void OnInitializeMelon()
         {
@@ -189,6 +177,13 @@ namespace ProgressMod
             }
         }
 
+        // Il2Cpp 的 ModifyTag 需要 Il2CppSystem.Action<TagState>, 不能直接传 C# lambda
+        private static Il2CppSystem.Action<TagState> SetIntAction(int val)
+        {
+            Action<TagState> a = ts => ts?.SetInt(val);
+            return a;
+        }
+
         // ============ 机器进度强制满 ============
         // 游戏在存档结算时对每台进行中机器调用 ContinueProgressTypeMachine 推进进度。
         // 前缀: 详细日志 + 强制完成。
@@ -257,75 +252,20 @@ namespace ProgressMod
             }
         }
 
-        // ============ 主动完成: 夜间遍历机器并完成 ============
-        // gridInv.items 结算时为空 → 改用 MachineryHelper.GetAllPoweredOnMachinery() 枚举。
-        // 设满 CURRENT 后主动调 UpdateProcessingTypeMachine + FinishProgressTypeMachine。
-        [HarmonyPatch(typeof(PlayerStore), "EndNight")]
-        public static class PatchEndNight
+
+        // ============ 机器产出倍率 ============
+        // InitProgressSourceItem 有 2 个重载 (3参/6参), 必须用 Type[] 消歧锁定 6 参完整版,
+        // 否则 Harmony 匹配首个重载导致 Prefix 参数对不上而静默失效.
+        [HarmonyPatch(typeof(MachineProgressHelper), "InitProgressSourceItem",
+            new Type[] { typeof(GameItem), typeof(int), typeof(string), typeof(bool), typeof(int), typeof(string) })]
+        public static class PatchOutputMult
         {
-            public static void Prefix()
+            // 签名: InitProgressSourceItem(GameItem sourceItem, int targetAmount, string targetItemID,
+            //        bool useDefaultTooltip, int targetItemCount, string requiredMachineTag)
+            public static void Prefix(GameItem sourceItem, int targetAmount, string targetItemID, bool useDefaultTooltip, ref int targetItemCount, string requiredMachineTag)
             {
-                try
-                {
-                    if (!PlayerStore.IsInstanceExist()) { return; }
-                    var store = PlayerStore.Instance;
-
-                    // 用游戏自己的枚举 FindAllItem 遍历全部物品(含机器)
-                    int machineCount = 0, doneCount = 0, forced = 0;
-                    Il2CppSystem.Collections.Generic.List<GameItem> machines = null;
-                    try { machines = store.FindAllItem(); }
-                    catch (Exception e) { MelonLogger.Error($"[EndNight] FindAllItem ex: {e}"); }
-
-                    if (machines != null)
-                    {
-                        for (int i = 0; i < machines.Count; i++)
-                        {
-                            var it = machines[i];
-                            if (it == null) continue;
-                            // 机器判定修正: GetTagReadonly 缺失 tag 也返回非 null (真凶!),
-                            // 必须用 IsTag (真存在才 true)。
-                            bool isMachine = false;
-                            try { isMachine = it.IsTag("MACHINE_STATE_TAG") || it.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { /* IL2CPP 异常: 保持原值 */ }
-                            if (!isMachine) continue;
-                            machineCount++;
-                            var curTag = it.GetTagReadonly("MACHINE_PROGRESS_CURRENT_TAG");
-                            var tgtTag = it.GetTagReadonly("MACHINE_PROGRESS_TARGET_TAG");
-                            int cur = curTag != null ? curTag.GetInt() : -1;
-                            int tgt = tgtTag != null ? tgtTag.GetInt() : -1;
-                            string state = "?";
-                            try { state = MachineProgressHelper.GetMachineState(it); } catch (Exception e) { state = "EX:" + e.GetType().Name; }
-
-                            // 只处理 STATE_WORKING: READY 未启动(主动 Finish 会把 CURRENT 重置 0 并打断状态机)
-                            if (state != "STATE_WORKING")
-                            {
-                                continue;
-                            }
-                            if (cur >= 0 && tgt > 0 && cur < tgt)
-                            {
-                                it.ModifyTag("MACHINE_PROGRESS_CURRENT_TAG", SetIntAction(tgt));
-                                forced++;
-                            }
-                            if (ForceFinish)
-                            {
-                                try
-                                {
-                                    // 主动推进一次让原逻辑看到 current>=target, 然后再 Finish
-                                    MachineryHelper.UpdateProcessingTypeMachine(it);
-                                    MachineProgressHelper.FinishProgressTypeMachine(it);
-                                    doneCount++;
-                                }
-                                catch (Exception e)
-                                {
-                                    MelonLogger.Error($"[EndNight] Finish ex: {e}");
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (Exception e)
-                {
-                    MelonLogger.Error($"[EndNight] ex: {e}");
-                }
+                if (OutputMult <= 1) return;
+                targetItemCount *= OutputMult; // 默认 3x: 产出件数写入 PROGRESS_ITEM_TARGET_ITEM_COUNT_TAG
             }
         }
 
@@ -340,42 +280,6 @@ namespace ProgressMod
                 if (!NoDurability) return true;
                 if (amount < 0) return false; // 负变化(消耗)直接跳过
                 return true;
-            }
-        }
-
-        // 水管/任何灌铁锈水入口: 改为灌 100% 纯水
-        [HarmonyPatch(typeof(WaterHelper), "AddRustWater")]
-        public static class PatchRustToPure
-        {
-            public static bool Prefix(GameItem __0, int __1)
-            {
-                try
-                {
-                    if (__0 == null) return false;
-                    WaterHelper.AddPureWater(__0, __1);
-                    return false; // 跳过原逻辑
-                }
-                catch (Exception e) { MelonLogger.Error($"[Water] AddRustWater patch err: {e.Message}"); return true; }
-            }
-        }
-
-        // 总入口兜底: grade==4(RUST) -> 0(PURE)
-        [HarmonyPatch(typeof(WaterHelper), "AddWater")]
-        public static class PatchWaterGrade
-        {
-            public static bool Prefix(GameItem __0, int __1, int __2, bool __3, int __4, int __5, bool __6)
-            {
-                try
-                {
-                    if (__0 == null) return true;
-                    if (__1 == 4)
-                    {
-                        WaterHelper.AddWater(__0, 0, __2, __3, __4, __5, __6);
-                        return false;
-                    }
-                    return true;
-                }
-                catch (Exception e) { MelonLogger.Error($"[Water] AddWater patch err: {e.Message}"); return true; }
             }
         }
 
@@ -421,182 +325,6 @@ namespace ProgressMod
             }
         }
 
-        // ============ 机器产出量乘倍 ============
-        // Hook 机器加工进度初始化(带 targetItemCount 的重载): 每个加工周期产出的物品数量 × OutputMult.
-        // 需显式 Type[] 消歧(InitProgressSourceItem 有 2 个重载).
-        [HarmonyPatch(typeof(MachineProgressHelper), "InitProgressSourceItem", new Type[] { typeof(GameItem), typeof(int), typeof(string), typeof(bool), typeof(int), typeof(string) })]
-        public static class PatchOutputMult
-        {
-            public static void Prefix(GameItem sourceItem, int targetAmount, string targetItemID, bool useDefaultTooltip, ref int targetItemCount, string requiredMachineTag)
-            {
-                try
-                {
-                    if (OutputMult <= 1 || targetItemCount <= 0) return;
-                    targetItemCount *= OutputMult;
-                }
-                catch (Exception e) { MelonLogger.Error($"[Output] InitProgressSourceItem patch err: {e.Message}"); }
-            }
-        }
-
-        // ============ TurboBooster 永远就绪 ============
-        [HarmonyPatch(typeof(MachineTurboBoosterAdv), "IsTurboReady")]
-        public static class PatchTurboReady
-        {
-            public static void Postfix(ref bool __result)
-            {
-                try { if (TurboCooldownFree) __result = true; }
-                catch { /* IL2CPP 异常: 保持原值 */ }
-            }
-        }
-
-        // ============ 酒品质最高档 ============
-        [HarmonyPatch(typeof(WineHelper), "GetWineQualityTier")]
-        public static class PatchWineQuality
-        {
-            public static void Postfix(GameItem __0, ref int __result)
-            {
-                try
-                {
-                    if (!MaxWineQuality || __0 == null) return;
-                    // 最高档取 6 (游戏酒品质 tier 范围约 0-5)
-                    __result = Math.Max(__result, 6);
-                }
-                catch { /* IL2CPP 异常: 保持原值 */ }
-            }
-        }
-
-        // ============ 免电运转 ============
-        // CanPower 恒真 + TryDrawCyclePower 跳过原逻辑(不扣电)
-        [HarmonyPatch(typeof(MachineHelper), "CanPower", new Type[] { typeof(GameItem), typeof(GameSlotInventory) })]
-        public static class PatchCanPower
-        {
-            public static bool Prefix(GameItem machine, ref bool __result)
-            {
-                try
-                {
-                    if (FreePower && machine != null)
-                    {
-                        __result = true;
-                        return false; // 跳过原检查
-                    }
-                    return true;
-                }
-                catch { return true; }
-            }
-        }
-
-        [HarmonyPatch(typeof(MachineHelper), "TryDrawCyclePower")]
-        public static class PatchTryDrawPower
-        {
-            public static bool Prefix(GameItem machine, GameSlotInventory batterySlot, ref bool __result)
-            {
-                try
-                {
-                    if (FreePower && machine != null)
-                    {
-                        __result = true;
-                        return false; // 不消耗电池, 视为供电成功
-                    }
-                    return true;
-                }
-                catch { return true; }
-            }
-        }
-
-        // Il2Cpp 的 ModifyTag 需要 Il2CppSystem.Action<TagState>, 不能直接传 C# lambda
-        private static Il2CppSystem.Action<TagState> SetIntAction(int val)
-        {
-            Action<TagState> a = ts => ts?.SetInt(val);
-            return a;
-        }
-
-        // ============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============
-        // ScavHelper 负责拾荒受伤掷骰; HealthData 负责伤口结算与恶化.
-        // 统一策略: bool 返回 Postfix 强制 false/0, void 结算 Prefix 跳过.
-        [HarmonyPatch(typeof(ScavHelper), "RollMinorWound")] public static class PatchRollMinorWound
-        {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(ScavHelper), "RollMajorWound")] public static class PatchRollMajorWound
-        {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(ScavHelper), "GetMinorWoundChance")] public static class PatchGetMinorWoundChance
-        {
-            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(ScavHelper), "GetMajorWoundChance")] public static class PatchGetMajorWoundChance
-        {
-            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(HealthData), "ReceiveMinorWound")] public static class PatchReceiveMinorWound
-        {
-            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
-        }
-        [HarmonyPatch(typeof(HealthData), "ReceiveMajorWound")] public static class PatchReceiveMajorWound
-        {
-            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
-        }
-        [HarmonyPatch(typeof(HealthData), "IsSeriouslyWounded")] public static class PatchIsSeriouslyWounded
-        {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(HealthData), "HandleNightlyWound")] public static class PatchHandleNightlyWound
-        {
-            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
-        }
-
-        // ============ 永不中毒: 酒精/尼古丁/麻醉剂/赌博无成瘾 ============
-        // HealthData 成瘾检测与惩罚. bool 检测 Postfix 强制 false, int/void 结算跳过置零.
-        [HarmonyPatch(typeof(HealthData), "HasAnyAddiction")] public static class PatchHasAnyAddiction
-        {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(HealthData), "IsAlcoholAddicted")] public static class PatchIsAlcoholAddicted
-        {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(HealthData), "IsNicotineAddicted")] public static class PatchIsNicotineAddicted
-        {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(HealthData), "IsNarcoticAddicted")] public static class PatchIsNarcoticAddicted
-        {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(HealthData), "IsGamblingAddicted")] public static class PatchIsGamblingAddicted
-        {
-            public static void Postfix(ref bool __result) { try { if (NoAddiction) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(HealthData), "GetTotalAddictionPenalty")] public static class PatchGetTotalAddictionPenalty
-        {
-            public static void Postfix(ref int __result) { try { if (NoAddiction) __result = 0; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(HealthData), "RemoveOneRandomAddiction")] public static class PatchRemoveOneRandomAddiction
-        {
-            public static bool Prefix() { try { return !NoAddiction; } catch { return true; } }
-        }
-
-        // ============ 无限拾荒: 次数与冷却不受限 ============
-        // Cpp2IL ISIL 静态分析 (ScavHelper.txt):
-        //   CanScavenge: 内联计算 base(5/7 - IsProficientScavenger) - 折算used - PlayerStore[+536](今日计数), 剩余<=0 返回 false
-        //   GetMaxScavAttempts/GetScavTimeLeft: 同样内联计算 (不互相调用)
-        //   ResetScavenging: PlayerStore[+536] = 0
-        // 核心限制点是 CanScavenge (UI/逻辑都问它), patch 它返回 true 即可;
-        // GetMaxScavAttempts/GetScavTimeLeft 也 patch 9999 (其他调用方可能直接读).
-        [HarmonyPatch(typeof(ScavHelper), "CanScavenge")]
-        public static class PatchCanScavenge
-        {
-            public static void Postfix(ref bool __result) { try { if (InfiniteScavenging) __result = true; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(ScavHelper), "GetMaxScavAttempts")] public static class PatchGetMaxScavAttempts
-        {
-            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
-        [HarmonyPatch(typeof(ScavHelper), "GetScavTimeLeft")] public static class PatchGetScavTimeLeft
-        {
-            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { /* IL2CPP 异常: 保持原值 */ } }
-        }
 
     }
 }
