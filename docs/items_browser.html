@@ -76,6 +76,49 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
 .edit-form input.wide{width:220px}
 .edit-form .apply{background:#2b7a4b;color:#d9ffe8;font-weight:600}
 .my-empty{color:#6a7280;font-size:13px;text-align:center;padding:20px}
+#invPanel{display:none;background:#181b23;border-bottom:1px solid #2a2e3a;padding:16px 24px;max-height:55vh;overflow:auto}
+#invPanel.show{display:block}
+#invPanel h3{color:#8ecff7;font-size:14px;margin-bottom:10px}
+.inv-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.inv-toolbar input{flex:1;max-width:320px;background:#212530;border:1px solid #333a48;color:#e8eaf0;border-radius:5px;padding:6px 10px;font-size:12px}
+.inv-row{display:flex;align-items:center;gap:10px;background:#1c2029;border:1px solid #2a2e3a;border-radius:8px;padding:8px 14px;margin-bottom:6px;cursor:pointer}
+.inv-row:hover{border-color:#5a4fae}
+.inv-row .nm{font-weight:600;color:#eef2f8;font-size:13px;flex:1;min-width:120px}
+.inv-row .sub{color:#8a92a0;font-size:12px;white-space:nowrap}
+.inv-row .loc{color:#6c5ce7;font-size:11px;background:#241f3a;padding:2px 8px;border-radius:10px}
+/* 完整检查器 modal */
+#inspector{display:none;position:fixed;inset:0;background:rgba(5,8,14,.78);z-index:50;align-items:center;justify-content:center}
+#inspector.show{display:flex}
+.insp-box{background:#171a22;border:1px solid #333a48;border-radius:14px;max-width:860px;width:92%;max-height:86vh;overflow:auto;padding:20px 24px}
+.insp-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.insp-head h2{margin:0;font-size:18px;color:#eef2f8}
+.insp-head .uid{color:#8a92a0;font-size:12px;font-family:monospace}
+.insp-tabs{display:flex;gap:4px;border-bottom:1px solid #2a2e3a;margin-bottom:14px}
+.insp-tabs button{background:none;border:none;color:#8a92a0;padding:8px 18px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent}
+.insp-tabs button.on{color:#8ecff7;border-bottom-color:#8ecff7}
+.insp-pane{display:none}
+.insp-pane.show{display:block}
+.insp-field{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.insp-field label{width:150px;color:#8a92a0;font-size:12px;text-align:right;flex-shrink:0}
+.insp-field input{flex:1;background:#212530;border:1px solid #333a48;color:#e8eaf0;border-radius:5px;padding:5px 9px;font-size:12px}
+.insp-field textarea{flex:1;background:#212530;border:1px solid #333a48;color:#e8eaf0;border-radius:5px;padding:5px 9px;font-size:12px;font-family:inherit;min-height:40px}
+.insp-section-title{color:#8ecff7;font-size:13px;margin:16px 0 8px;font-weight:600}
+.insp-row{display:flex;align-items:center;gap:8px;background:#1c2029;border:1px solid #2a2e3a;border-radius:6px;padding:5px 10px;margin-bottom:5px;flex-wrap:wrap}
+.insp-row .k{font-family:monospace;font-size:12px;color:#e8eaf0;min-width:140px}
+.insp-row .v{font-size:12px;color:#8a92a0;flex:1}
+.insp-row input{background:#212530;border:1px solid #333a48;color:#e8eaf0;border-radius:4px;padding:3px 7px;font-size:12px;width:150px}
+.insp-row select{background:#212530;border:1px solid #333a48;color:#e8eaf0;border-radius:4px;padding:3px 6px;font-size:12px}
+.mini-btn{background:#2a2e3a;border:none;color:#b8c0cc;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:11px}
+.mini-btn:hover{background:#345d85;color:#fff}
+.mini-btn.green{background:#2b7a4b;color:#d9ffe8}
+.mini-btn.red{background:#3a1f2b}
+.mini-btn.red:hover{background:#c62828;color:#fff}
+.insp-actions{margin-top:16px;display:flex;gap:8px;justify-content:flex-end}
+.big-btn{background:#5a4fae;border:none;color:#fff;padding:7px 18px;border-radius:7px;cursor:pointer;font-size:13px}
+.big-btn.red{background:#7a2432}
+.big-btn.red:hover{background:#c62828}
+.big-btn:hover{background:#6c5ce7}
+.insp-empty{color:#6a7280;font-size:12px;padding:12px;text-align:center}
 </style>
 </head>
 <body>
@@ -89,14 +132,20 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
   <div class="server-status">
     <span class="dot" id="svDot"></span>
     <span id="svText">检查生成服务器...</span>
+    <button class="mybtn" id="invBtn">📦 库存</button>
     <button class="mybtn" id="myBtn" style="margin-left:auto">🎒 我的生成 (0)</button>
   </div>
-</header>
-<div class="toast" id="toast"></div>
-<div id="myPanel">
-  <h3>🎒 我的生成 — 本次会话生成物品 (可编辑属性 / 删除)</h3>
-  <div id="myList"></div>
-</div>
+ </header>
+ <div class="toast" id="toast"></div>
+ <div id="invPanel">
+   <h3>📦 全部库存 — 点物品打开完整检查器 (任意库存物品可编辑/删除)</h3>
+   <div class="inv-toolbar"><input type="text" id="invSearch" placeholder="过滤 名称/ID..."><span class="count-badge" id="invCount">0 项</span></div>
+   <div id="invList"></div>
+ </div>
+ <div id="myPanel">
+   <h3>🎒 我的生成 — 本次会话生成物品 (可编辑属性 / 删除)</h3>
+   <div id="myList"></div>
+ </div>
 <main>
   <aside>
     <h3>分类</h3>
@@ -111,7 +160,25 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
   <div class="desc-full" id="dDesc"></div>
   <div class="meta" id="dMeta"></div>
   <button id="copyId">复制 stableId</button>
-</div>
+ </div>
+ <div id="inspector">
+   <div class="insp-box">
+     <div class="insp-head">
+       <h2 id="insName"></h2>
+       <span class="uid" id="insUid"></span>
+       <span style="margin-left:auto">
+         <button class="mini-btn red" id="insDelete">🗑 删除物品</button>
+         <button class="mini-btn" id="insClose">✕ 关闭</button>
+       </span>
+     </div>
+     <div class="insp-tabs">
+       <button data-tab="base" class="on">基础字段</button>
+       <button data-tab="tags">标签 (base / modified)</button>
+       <button data-tab="features">特性</button>
+     </div>
+     <div id="insFields"></div>
+   </div>
+ </div>
 <script src="items_data_full.js"></script>
 <script>
 // mod 生成引擎合成卡 (参照 ProbablyStolenItemManager.GeneratedEntries): 随机掉落表 + 预置变体
@@ -346,53 +413,200 @@ async function refreshMine(){
     updateMyBtn();
     if(!items.length){ listEl.innerHTML = '<div class="my-empty">还没有生成记录 — 点卡片「生成 ×1」后这里会出现。刷新页面前有效。</div>'; return; }
     listEl.innerHTML = items.map(x => `
-      <div class="my-item" data-token="${x.token}">
+      <div class="my-item" data-uid="${x.uid||0}">
         <div class="row1">
           <span class="nm">${esc(x.name||x.id||'')}</span>
           <span class="sub">${esc(x.id||'')} · 数量 ${x.count} · 价值 ${x.unitValue}</span>
           <span class="acts">
-            <button class="edit-btn">✎ 编辑</button>
+            <button class="edit-btn">✎ 完整检查器</button>
             <button class="del-btn del">🗑 删除</button>
           </span>
         </div>
-        <div class="edit-form">
-          <label>名称<input class="f-name" value="${esc(x.name||'')}"></label>
-          <label>数量<input class="f-count" type="number" value="${x.count}" min="1"></label>
-          <label>价值<input class="f-value" type="number" value="${x.unitValue}"></label>
-          <label>描述<input class="f-desc wide" value="${esc(x.shortDescription||'')}" placeholder="shortDescription"></label>
-          <button class="apply" data-apply="${x.token}">✓ 应用</button>
-        </div>
       </div>`).join('');
     listEl.querySelectorAll('.edit-btn').forEach(b => b.onclick = () => {
-      const f = b.closest('.my-item').querySelector('.edit-form');
-      f.classList.toggle('show');
+      const uid = b.closest('.my-item').dataset.uid;
+      openInspector(Number(uid));
     });
     listEl.querySelectorAll('.del-btn').forEach(b => b.onclick = async () => {
-      const t = b.closest('.my-item').dataset.token;
+      const uid = b.closest('.my-item').dataset.uid;
       if(!confirm('删除该物品? (从库存移除并销毁)')) return;
-      const rr = await fetch(API + '/api/delete?token=' + t);
+      const rr = await fetch(API + '/api/delete?uid=' + uid);
       const jj = await rr.json();
-      if(jj.ok){ toast('删除请求已发送', 'ok'); forgetToken(Number(t)); setTimeout(refreshMine, 600); }
+      if(jj.ok){ toast('删除请求已发送', 'ok'); setTimeout(()=>{ refreshMine(); }, 600); }
       else toast('删除失败: ' + (jj.err||''), 'bad');
-    });
-    listEl.querySelectorAll('.apply').forEach(b => b.onclick = async () => {
-      const item = b.closest('.my-item');
-      const t = item.dataset.token;
-      const fields = [
-        ['name', item.querySelector('.f-name').value],
-        ['unitCount', item.querySelector('.f-count').value],
-        ['unitValue', item.querySelector('.f-value').value],
-        ['shortDescription', item.querySelector('.f-desc').value]
-      ];
-      for(const [f,v] of fields){
-        const rr = await fetch(API + '/api/edit?token=' + t + '&field=' + f + '&value=' + encodeURIComponent(v));
-        const jj = await rr.json();
-        if(!jj.ok){ toast('编辑 ' + f + ' 失败: ' + (jj.err||''), 'bad'); return; }
-      }
-      toast('已应用', 'ok'); setTimeout(refreshMine, 600);
     });
   }catch(e){ listEl.innerHTML = '<div class="my-empty">加载失败: ' + esc(String(e)) + '</div>'; }
 }
+
+// ===== 📦 全部库存 (完整检查器入口) =====
+let invShowing = false;
+const invBtn = document.getElementById('invBtn');
+invBtn.onclick = () => {
+  invShowing = !invShowing;
+  document.getElementById('invPanel').classList.toggle('show', invShowing);
+  invBtn.classList.toggle('on', invShowing);
+  if(invShowing) refreshInv();
+};
+let ALL_INV = [];
+async function refreshInv(){
+  const listEl = document.getElementById('invList');
+  if(!(await checkServer())){ listEl.innerHTML = '<div class="my-empty">服务器离线 — 启动游戏后重试</div>'; return; }
+  try{
+    const r = await fetch(API + '/api/inventory');
+    const j = await r.json();
+    ALL_INV = j.items||[];
+    document.getElementById('invCount').textContent = ALL_INV.length + ' 项';
+    renderInv('');
+  }catch(e){ listEl.innerHTML = '<div class="my-empty">加载失败: ' + esc(String(e)) + '</div>'; }
+}
+document.getElementById('invSearch').oninput = e => renderInv(e.target.value);
+function renderInv(q){
+  const listEl = document.getElementById('invList');
+  q = (q||'').toLowerCase();
+  const rows = ALL_INV.filter(x => !q || (x.name||'').toLowerCase().includes(q) || (x.id||'').toLowerCase().includes(q));
+  if(!rows.length){ listEl.innerHTML = '<div class="my-empty">库存为空 — 先点卡片生成物品。</div>'; return; }
+  listEl.innerHTML = rows.map(x => `
+    <div class="inv-row" data-uid="${x.uid}">
+      <span class="nm">${esc(x.name||x.id||'')}</span>
+      <span class="sub">${esc(x.id||'')} ×${x.count}</span>
+      <span class="sub">价值 ${x.unitValue}</span>
+      <span class="loc">${esc(x.inv||'库存')}</span>
+    </div>`).join('');
+  listEl.querySelectorAll('.inv-row').forEach(row => row.onclick = () => openInspector(Number(row.dataset.uid)));
+}
+
+// ===== 🔍 完整检查器 (拉全字段 / 编辑 / 标签 / 特性 / 删除) =====
+let CUR_UID = 0;
+async function openInspector(uid){
+  if(!(await checkServer())){ toast('服务器离线', 'bad'); return; }
+  CUR_UID = uid;
+  const box = document.getElementById('inspector');
+  box.classList.add('show');
+  document.getElementById('insName').textContent = '加载中...';
+  document.getElementById('insUid').textContent = 'uid ' + uid;
+  try{
+    const r = await fetch(API + '/api/item?uid=' + uid);
+    const j = await r.json();
+    if(!j.ok || !j.item){ toast('读取失败: ' + (j.err||'item not found'), 'bad'); box.classList.remove('show'); return; }
+    renderInspector(j.item);
+  }catch(e){ toast('加载失败: ' + e, 'bad'); box.classList.remove('show'); }
+}
+let INS = null;
+function renderInspector(item){
+  INS = item;
+  document.getElementById('insName').textContent = (item.name||item.id||'') + (item.unitCount>1 ? ' ×'+item.unitCount : '');
+  document.getElementById('insUid').textContent = (item.id||'') + ' · uid ' + item.uid + ' · 价值 ' + item.unitValue;
+  // 基础 tab
+  const baseEl = document.getElementById('insFields');
+  baseEl.innerHTML = '';
+  const paneB = document.createElement('div'); paneB.className='insp-pane show'; paneB.dataset.p='base';
+  paneB.innerHTML = fieldHTML('名称','name',item.name||'') +
+    fieldHTML('数量','unitCount',item.unitCount,true) +
+    fieldHTML('价值/个','unitValue',item.unitValue,true) +
+    fieldHTML('基础价值','unitBaseValue',item.unitBaseValue,true) +
+    fieldHTML('短描述','shortDescription',item.shortDescription||'','desc') +
+    fieldHTML('长描述','longDescription',item.longDescription||'','desc') +
+    fieldHTML('风味文本','flavorText',item.flavorText||'','desc') +
+    fieldHTML('自定义文本','customText',item.customText||'','desc') +
+    fieldHTML('精度加成','bonusAccuracy',item.bonusAccuracy,true) +
+    fieldHTML('精灵路径','spritePath',item.spritePath||'') +
+    fieldHTML('精灵图集','spriteAtlasPath',item.spriteAtlasPath||'');
+  // 标签 tab
+  const paneT = document.createElement('div'); paneT.className='insp-pane'; paneT.dataset.p='tags';
+  paneT.innerHTML = '<div class="insp-section-title">base 标签 (item.state)</div><div id="tagBase"></div>' +
+    '<div class="insp-section-title">modified 标签 (item.modifiedState)</div><div id="tagMod"></div>' +
+    '<div class="insp-section-title">添加标签</div>' +
+    '<div class="insp-row"><input id="newTagKey" placeholder="新标签 key"><input id="newTagLabel" placeholder="显示名 (可选)" style="width:150px">' +
+    '<button class="mini-btn green" id="addTagBtn">+ 添加</button></div>';
+  // 特性 tab
+  const paneF = document.createElement('div'); paneF.className='insp-pane'; paneF.dataset.p='features';
+  paneF.innerHTML = '<div class="insp-section-title">已有特性</div><div id="featList"></div>' +
+    '<div class="insp-section-title">添加特性 (按 category)</div>' +
+    '<div class="insp-row"><input id="newFeatCat" placeholder="category 如 cigarette / quality / condition"><button class="mini-btn green" id="addFeatBtn">+ 添加</button></div>';
+  baseEl.append(paneB, paneT, paneF);
+  renderTags();
+  renderFeats();
+}
+function fieldHTML(label, field, val, isNum, isDesc){
+  const v = esc(String(val ?? ''));
+  if(isDesc) return `<div class="insp-field"><label>${label}</label><textarea class="f-${field}" data-field="${field}">${v}</textarea></div>`;
+  return `<div class="insp-field"><label>${label}</label><input class="f-${field}" data-field="${field}" ${isNum?'type="number"':''} value="${v}"></div>`;
+}
+function renderTags(){
+  const base = INS.tags||[], mod = INS.tagsModified||[];
+  document.getElementById('tagBase').innerHTML = base.length ? base.map(tagHTML).join('') : '<div class="insp-empty">无 base 标签</div>';
+  document.getElementById('tagMod').innerHTML = mod.length ? mod.map(t => tagHTML(t,true)).join('') : '<div class="insp-empty">无 modified 标签</div>';
+}
+function tagHTML(t, modified){
+  const m = modified ? '&mod' : '';
+  const on = t.enabled;
+  return `<div class="insp-row">
+    <span class="k">${esc(t.key)}</span>
+    <span class="v">${esc(t.label||'')} · int=${t.valueInt} · str=${esc(t.valueString||'')}</span>
+    <select class="tog" data-key="${esc(t.key)}" data-m="${m}">
+      <option value="1" ${on?'selected':''}>开</option>
+      <option value="0" ${!on?'selected':''}>关</option>
+    </select>
+    <input class="tval" data-key="${esc(t.key)}" data-m="${m}" value="${esc(t.valueString||'')}" placeholder="字符串值" style="width:120px">
+    <button class="mini-btn" data-tval="${esc(t.key)}" data-m="${m}">设值</button>
+    <button class="mini-btn red" data-rtag="${esc(t.key)}" data-m="${m}">删除</button>
+  </div>`;
+}
+function renderFeats(){
+  const fs = INS.features||[];
+  const el = document.getElementById('featList');
+  el.innerHTML = fs.length ? fs.map(f => {
+    const cond = (f.fakeCondition?('假:'+f.fakeCondition.category):'') + (f.realCondition?(' 真:'+f.realCondition.category):'');
+    return `<div class="insp-row">
+      <span class="k">${esc(f.identifier||f.category||'')}</span>
+      <span class="v">${esc(f.category||'')} · 修饰 ${f.valueModifier} · ${f.useCondition?'有假/真条件':''} ${esc(cond)} · ${f.isDisabled?'禁用':'启用'}</span>
+      <button class="mini-btn red" data-rfeat="${esc(f.identifier||'')}">删除</button>
+    </div>`;
+  }).join('') : '<div class="insp-empty">无特性 — 香烟/邮票/模块类物品通常有特性</div>';
+}
+async function insEdit(field, value){
+  const rr = await fetch(API + '/api/edit?uid=' + CUR_UID + '&field=' + field + '&value=' + encodeURIComponent(value));
+  const jj = await rr.json();
+  if(!jj.ok) toast('编辑 ' + field + ' 失败: ' + (jj.err||''), 'bad');
+  return jj.ok;
+}
+// 事件: 字段编辑 (blur 提交)
+document.getElementById('insFields').addEventListener('change', async e => {
+  const inp = e.target.closest('[data-field]');
+  if(!inp) return;
+  const field = inp.dataset.field;
+  const v = inp.tagName==='TEXTAREA' ? inp.value : inp.value;
+  if(await insEdit(field, v)) toast('已应用: ' + field, 'ok');
+});
+// 事件: tab 切换
+document.querySelectorAll('.insp-tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.insp-tabs button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  const tab = b.dataset.tab;
+  document.querySelectorAll('#insFields .insp-pane').forEach(p=>p.classList.toggle('show', p.dataset.p===tab));
+});
+// 事件: 标签开关/设值/删除 + 添加
+document.getElementById('insFields').addEventListener('click', async e => {
+  const s = e.target.closest('.tog');
+  if(s){ e.stopPropagation(); await insEdit(s.dataset.m ? 'tagModifiedEnabled':'tagEnabled', s.dataset.key+'='+s.value); toast('标签更新', 'ok'); return; }
+  const sv = e.target.closest('button[data-tval]');
+  if(sv){ e.stopPropagation(); const key=sv.dataset.tval; const m=sv.dataset.m; const inp=sv.parentElement.querySelector('input[data-key="'+key+'"][data-m="'+m+'"]'); await insEdit(m?'tagModifiedValue':'tagValue', key+'='+inp.value); toast('已设值', 'ok'); return; }
+  const rt = e.target.closest('button[data-rtag]');
+  if(rt){ e.stopPropagation(); const key=rt.dataset.rtag; const m=rt.dataset.m; await insEdit(m?'tagModifiedRemove':'tagRemove', key); toast('标签已删除', 'ok'); setTimeout(()=>refreshInspector(), 500); return; }
+  const rf = e.target.closest('button[data-rfeat]');
+  if(rf){ e.stopPropagation(); await insEdit('featureRemove', rf.dataset.rfeat); toast('特性已删除', 'ok'); setTimeout(()=>refreshInspector(), 500); return; }
+  if(e.target.id==='addTagBtn'){ const k=document.getElementById('newTagKey').value.trim(); const l=document.getElementById('newTagLabel').value.trim(); if(!k){toast('填 tag key','bad');return;} await insEdit('tagAdd', k+(l?'|'+l:'')); toast('已添加标签', 'ok'); document.getElementById('newTagKey').value=''; document.getElementById('newTagLabel').value=''; setTimeout(()=>refreshInspector(), 500); }
+  if(e.target.id==='addFeatBtn'){ const c=document.getElementById('newFeatCat').value.trim(); if(!c){toast('填 category','bad');return;} await insEdit('featureAdd', c); toast('已添加特性', 'ok'); document.getElementById('newFeatCat').value=''; setTimeout(()=>refreshInspector(), 500); }
+});
+async function refreshInspector(){ if(CUR_UID) openInspector(CUR_UID); }
+document.getElementById('insClose').onclick = () => { document.getElementById('inspector').classList.remove('show'); };
+document.getElementById('insDelete').onclick = async () => {
+  if(!confirm('确定删除该物品? 将从库存移除并销毁。')) return;
+  const rr = await fetch(API + '/api/delete?uid=' + CUR_UID);
+  const jj = await rr.json();
+  if(jj.ok){ toast('删除请求已发送', 'ok'); document.getElementById('inspector').classList.remove('show'); setTimeout(()=>{ if(invShowing) refreshInv(); refreshMine(); }, 600); }
+  else toast('删除失败: ' + (jj.err||''), 'bad');
+};
 document.body.addEventListener('click', e => {
   const b = e.target.closest('[data-spawn]');
   if(b) spawnItem(b.dataset.spawn, b);

@@ -39,7 +39,8 @@ namespace ProgressMod
         // HTTP 线程只入队, 主线程 OnUpdate 消费 (避免 Il2Cpp 跨线程操作)
         private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, string, int)> PendingSpawns =
             new System.Collections.Concurrent.ConcurrentQueue<(int, string, int)>();
-        // 属性编辑 / 删除操作: (token, 操作, 字段, 值) 走主线程 (GameItem 对象主线程访问)
+        // 属性编辑 / 删除操作: (uid, 操作, 字段, 值) 走主线程. uid=item.uniqueId 存档内稳定,
+        // 经 FindItemByUid 查全部库存定位任意物品 (不限本次生成)
         private enum ItemOpKind { Edit, Delete }
         private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)> PendingItemOps =
             new System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)>();
@@ -136,50 +137,87 @@ namespace ProgressMod
                             if (it == null) continue;
                             try
                             {
-                                list.Add(new
-                                {
-                                    token = kv.Key,
-                                    id = it.identifier ?? "",
-                                    name = it.name ?? "",
-                                    count = it.unitCount,
-                                    unitValue = it.unitValue,
-                                    shortDescription = (it.shortDescription ?? "")
-                                });
+                            list.Add(new
+                            {
+                                token = kv.Key,
+                                uid = SafeInt(() => it.uniqueId),
+                                id = it.identifier ?? "",
+                                name = it.name ?? "",
+                                count = it.unitCount,
+                                unitValue = it.unitValue,
+                                shortDescription = (it.shortDescription ?? "")
+                            });
                             }
                             catch { /* IL2CPP 异常: 跳过单条 */ }
                         }
                         resp = new { ok = true, items = list };
                         code = 200;
                     }
+                    else if (req.Url.AbsolutePath == "/api/inventory")
+                    {
+                        // 枚举玩家全部库存物品 (主背包+柜台+文档+垃圾桶)
+                        var seen = new System.Collections.Generic.HashSet<int>();
+                        var list = new System.Collections.Generic.List<object>();
+                        foreach (var inv in EnumeratePlayerInventories())
+                        {
+                            if (inv == null) continue;
+                            string invName = InvLabel(inv);
+                            foreach (var it in ReadInventoryItems(inv))
+                            {
+                                if (it == null) continue;
+                                int u = 0; try { u = it.uniqueId; } catch { }
+                                if (u == 0 || !seen.Add(u)) continue;
+                                list.Add(new
+                                {
+                                    uid = u,
+                                    id = SafeStr(() => it.identifier, ""),
+                                    name = SafeStr(() => it.name, ""),
+                                    count = SafeInt(() => it.unitCount),
+                                    unitValue = SafeLong(() => it.unitValue),
+                                    inv = invName
+                                });
+                            }
+                        }
+                        resp = new { ok = true, items = list };
+                        code = 200;
+                    }
+                    else if (req.Url.AbsolutePath == "/api/item")
+                    {
+                        var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                        int uid = 0; int.TryParse(q["uid"], out uid);
+                        var it = uid != 0 ? FindItemByUid(uid) : null;
+                        if (it == null) { resp = new { ok = false, err = "item not found" }; }
+                        else { resp = new { ok = true, item = DumpItem(it) }; code = 200; }
+                    }
                     else if (req.Url.AbsolutePath == "/api/edit")
                     {
                         var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-                        int token = 0; int.TryParse(q["token"], out token);
+                        int uid = 0; int.TryParse(q["uid"], out uid);
                         string field = q["field"] ?? "";
                         string value = q["value"] ?? "";
-                        if (token == 0 || field == "")
+                        if (uid == 0 || field == "")
                         {
-                            resp = new { ok = false, err = "need token+field" };
+                            resp = new { ok = false, err = "need uid+field" };
                         }
                         else
                         {
-                            PendingItemOps.Enqueue((token, ItemOpKind.Edit, field, value));
-                            resp = new { ok = true, queued = $"{token} {field}={value}" };
+                            PendingItemOps.Enqueue((uid, ItemOpKind.Edit, field, value));
+                            resp = new { ok = true, queued = $"uid {uid} {field}={value}" };
                             code = 200;
                         }
                     }
                     else if (req.Url.AbsolutePath == "/api/delete")
                     {
                         var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-                        int token = 0; int.TryParse(q["token"], out token);
-                        if (token == 0)
+                        int uid = 0; int.TryParse(q["uid"], out uid);
+                        if (uid == 0)
                         {
-                            resp = new { ok = false, err = "need token" };
+                            resp = new { ok = false, err = "need uid" };
                         }
                         else
                         {
-                            PendingItemOps.Enqueue((token, ItemOpKind.Delete, "", ""));
-                            resp = new { ok = true, queued = $"delete {token}" };
+                            PendingItemOps.Enqueue((uid, ItemOpKind.Delete, "", ""));
+                            resp = new { ok = true, queued = $"delete uid {uid}" };
                             code = 200;
                         }
                     }
@@ -269,44 +307,22 @@ namespace ProgressMod
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
         }
 
-        // ============ 属性编辑 / 删除: 按 token 定位本次生成物品 ============
+        // ============ 属性编辑 / 删除: 按 uid 定位任意库存物品 ============
         // 字段写回照 ProbablyStolenItemManager.ApplyBaseField, 删除照 TryExpelAndDestroy
         // (overrideLockRemove=true → inventory.Expel → item.Destroy)
-        private static void ApplyItemOp(int token, ItemOpKind kind, string field, string value)
+        private static void ApplyItemOp(int uid, ItemOpKind kind, string field, string value)
         {
             try
             {
-                if (!SpawnedItems.TryGetValue(token, out var item) || item == null)
+                GameItem item = FindItemByUid(uid);
+                if (item == null)
                 {
-                    MelonLogger.Warning($"[ItemOp] token {token} 未找到 (可能未进存档/已删除/游戏重启)");
+                    MelonLogger.Warning($"[ItemOp] uid {uid} 未找到 (可能已删除/移出库存/游戏重启)");
                     return;
                 }
                 if (kind == ItemOpKind.Delete)
                 {
-                    GameInventory inv = null;
-                    try { inv = item.parentInventory; } catch { }
-                    if (inv == null)
-                    {
-                        MelonLogger.Warning($"[ItemOp] delete {token}: 物品无 parentInventory, 跳过");
-                        return;
-                    }
-                    bool restoredLock = false;
-                    try { inv.overrideLockRemove = true; restoredLock = true; } catch { }
-                    try
-                    {
-                        if (!inv.Expel(item)) { MelonLogger.Warning($"[ItemOp] delete {token}: inventory rejected removal"); return; }
-                        try { item.Destroy(); } catch (Exception e2) { MelonLogger.Warning($"[ItemOp] delete {token}: destroy ex {e2.Message}"); }
-                        SpawnedItems.Remove(token);
-                        try { EmporiumEntry.Instance.Validate(false); } catch { }
-                        MelonLogger.Msg($"[ItemOp] deleted {token}");
-                    }
-                    finally
-                    {
-                        if (restoredLock)
-                        {
-                            try { inv.overrideLockRemove = false; } catch { }
-                        }
-                    }
+                    DeleteItem(item);
                     return;
                 }
                 // Edit
@@ -329,13 +345,319 @@ namespace ProgressMod
                     case "bonusAccuracy": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var ba)) item.bonusAccuracy = ba; break;
                     case "spritePath": item.spritePath = value; break;
                     case "spriteAtlasPath": item.spriteAtlasPath = value; break;
+                    case "tagEnabled": SetItemTagEnabled(item, value, true); break;
+                    case "tagModifiedEnabled": SetItemTagEnabled(item, value, false); break;
+                    case "tagValue": SetItemTagStringValue(item, value, false); break;
+                    case "tagModifiedValue": SetItemTagStringValue(item, value, true); break;
+                    case "tagRemove": RemoveItemTag(item, value, false); break;
+                    case "tagModifiedRemove": RemoveItemTag(item, value, true); break;
+                    case "tagAdd": AddItemTag(item, value); break;
+                    case "featureAdd": AddItemFeatureByCategory(item, value); break;
+                    case "featureRemove": if (!string.IsNullOrWhiteSpace(value)) { try { item.RemoveItemFeatureByID(value); } catch { } } break;
                     default: MelonLogger.Warning($"[ItemOp] 未知字段 {field}"); return;
                 }
                 try { item.Validate(); } catch { }
-                MelonLogger.Msg($"[ItemOp] edited {token} {field}={value}");
+                MelonLogger.Msg($"[ItemOp] edited uid={uid} {field}={value}");
             }
             catch (Exception e) { MelonLogger.Error($"[ItemOp] ex: {e.Message}"); }
         }
+
+        // ============ 库存枚举 / 定位 / 删除 (任意库存物品) ============
+        // 全部玩家库存清单 (照 mod GetKnownInventories 主库存集合). 每个返回 GameInventory
+        private static System.Collections.Generic.List<GameInventory> EnumeratePlayerInventories()
+        {
+            var list = new System.Collections.Generic.List<GameInventory>();
+            void AddInv(GameInventory inv)
+            {
+                if (inv != null) list.Add(inv);
+            }
+            try { var p = PlayerStore.Instance; if (p != null) AddInv(p.gridInv); } catch { }
+            try { var e = EmporiumEntry.Instance; if (e != null) { AddInv(e.invElement); AddInv(e.showcaseElement); AddInv(e.docInvElement); AddInv(e.trashInvElement); AddInv(e.trashcanInvElement); } } catch { }
+            return list;
+        }
+
+        // 库存类型 → 中文标签 (前端展示在哪)
+        private static string InvLabel(GameInventory inv)
+        {
+            try
+            {
+                if (inv == null) return "";
+                try { if (inv == PlayerStore.Instance?.gridInv) return "主背包"; } catch { }
+                try
+                {
+                    var e = EmporiumEntry.Instance;
+                    if (e != null)
+                    {
+                        if (inv == e.invElement) return "柜台货架";
+                        if (inv == e.showcaseElement) return "展示柜";
+                        if (inv == e.docInvElement) return "文档栏";
+                        if (inv == e.trashInvElement) return "垃圾桶";
+                        if (inv == e.trashcanInvElement) return "垃圾桶(trashcan)";
+                    }
+                }
+                catch { }
+            }
+            catch { }
+            return "";
+        }
+
+        // 按 uniqueId 在全部库存里定位物品 (递归查父容器 + 直接库存 items)
+        private static GameItem FindItemByUid(int uid)
+        {
+            try
+            {
+                foreach (var inv in EnumeratePlayerInventories())
+                {
+                    if (inv == null) continue;
+                    var found = FindInInventory(inv, uid);
+                    if (found != null) return found;
+                }
+            }
+            catch { /* IL2CPP 异常: 保持原值 */ }
+            return null;
+        }
+
+        private static GameItem FindInInventory(GameInventory inv, int uid)
+        {
+            try
+            {
+                var items = ReadInventoryItems(inv);
+                foreach (var it in items)
+                {
+                    if (it == null) continue;
+                    try { if (it.uniqueId == uid) return it; } catch { }
+                }
+            }
+            catch { /* IL2CPP 异常: 保持原值 */ }
+            return null;
+        }
+
+        // GameGridInventory 用 items; 其他 GameInventory 用 childItems (若暴露). 保守两种都试
+        private static System.Collections.Generic.List<GameItem> ReadInventoryItems(GameInventory inv)
+        {
+            var list = new System.Collections.Generic.List<GameItem>();
+            try
+            {
+                if (inv is GameGridInventory grid && grid.items != null)
+                {
+                    foreach (var it in grid.items) if (it != null) list.Add(it);
+                    return list;
+                }
+            }
+            catch { }
+            try
+            {
+                if (inv.childItems != null)
+                {
+                    foreach (var it in inv.childItems) if (it != null) list.Add(it);
+                }
+            }
+            catch { }
+            return list;
+        }
+
+        // 删除任意物品: 照 mod TryExpelAndDestroy (overrideLockRemove → Expel → Destroy)
+        private static void DeleteItem(GameItem item)
+        {
+            GameInventory inv = null;
+            try { inv = item.parentInventory; } catch { }
+            if (inv == null) { MelonLogger.Warning($"[ItemOp] delete uid={item.uniqueId}: 物品无 parentInventory, 跳过"); return; }
+            bool restoredLock = false;
+            try { inv.overrideLockRemove = true; restoredLock = true; } catch { }
+            try
+            {
+                if (!inv.Expel(item)) { MelonLogger.Warning($"[ItemOp] delete uid={item.uniqueId}: inventory rejected removal"); return; }
+                try { item.Destroy(); } catch (Exception e2) { MelonLogger.Warning($"[ItemOp] delete uid={item.uniqueId}: destroy ex {e2.Message}"); }
+                try { EmporiumEntry.Instance.Validate(false); } catch { }
+                MelonLogger.Msg($"[ItemOp] deleted uid={item.uniqueId}");
+            }
+            finally
+            {
+                if (restoredLock)
+                {
+                    try { inv.overrideLockRemove = false; } catch { }
+                }
+            }
+        }
+
+        // ============ 标签 / 特性 操作 ============
+        private static TagState FindTagState(GameItem item, string key, bool modified)
+        {
+            try
+            {
+                var ts = modified ? item.modifiedState : item.state;
+                if (ts == null || ts.dict == null || key == null) return null;
+                if (ts.dict.TryGetValue(key, out var st)) return st;
+            }
+            catch { }
+            return null;
+        }
+
+        private static void SetItemTagEnabled(GameItem item, string keyAndState, bool modified)
+        {
+            // keyAndState 形如 "key=1/0" (enable) 或 "key" (toggle 由前端算好)
+            string key = keyAndState;
+            bool enable = true;
+            int eq = keyAndState.IndexOf('=');
+            if (eq > 0) { key = keyAndState.Substring(0, eq); bool.TryParse(keyAndState.Substring(eq + 1), out enable); }
+            var st = FindTagState(item, key, modified);
+            if (st == null) { MelonLogger.Warning($"[ItemOp] tag {key} 不存在"); return; }
+            try { st.SetEnabled(enable); } catch { }
+        }
+
+        private static void SetItemTagStringValue(GameItem item, string keyValue, bool modified)
+        {
+            // keyValue 形如 "key=值" — 直写 TagState 底层 valueString
+            int eq = keyValue.IndexOf('=');
+            if (eq <= 0) { MelonLogger.Warning($"[ItemOp] tagValue 需 key=值: {keyValue}"); return; }
+            string key = keyValue.Substring(0, eq);
+            string val = keyValue.Substring(eq + 1);
+            var st = FindTagState(item, key, modified);
+            if (st == null) { MelonLogger.Warning($"[ItemOp] tag {key} 不存在"); return; }
+            try { st.valueString = val; } catch { }
+        }
+
+        private static void RemoveItemTag(GameItem item, string key, bool modified)
+        {
+            try
+            {
+                var ts = modified ? item.modifiedState : item.state;
+                if (ts == null || ts.dict == null || !ts.dict.Remove(key))
+                {
+                    var ts2 = modified ? item.state : item.modifiedState;
+                    if (ts2 != null && ts2.dict != null) ts2.dict.Remove(key);
+                }
+            }
+            catch { }
+        }
+
+        private static void AddItemTag(GameItem item, string keyLabel)
+        {
+            // keyLabel 形如 "key|label" — 新 TagState 直入 base dict (InitTagString 是 private, 用 ctor)
+            int pipe = keyLabel.IndexOf('|');
+            string key = pipe > 0 ? keyLabel.Substring(0, pipe) : keyLabel;
+            string label = pipe > 0 ? keyLabel.Substring(pipe + 1) : key;
+            try
+            {
+                var ts = item.state;
+                if (ts == null || ts.dict == null) return;
+                if (ts.dict.ContainsKey(key)) { MelonLogger.Warning($"[ItemOp] tag {key} 已存在"); return; }
+                var st = new TagState(key, label);
+                ts.dict.Add(key, st);
+            }
+            catch { }
+        }
+
+        private static void AddItemFeatureByCategory(GameItem item, string category)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(category)) return;
+                var f = new ItemFeature(category);
+                try { f.parentItemUniqueId = item.uniqueId; } catch { }
+                item.AddItemFeature(f);
+            }
+            catch { }
+        }
+
+        // 物品全字段 dump (基础 + 标签 base/modified + 特性含条件)
+        private static object DumpItem(GameItem item)
+        {
+            if (item == null) return null;
+            var tags = new System.Collections.Generic.List<object>();
+            var tagsMod = new System.Collections.Generic.List<object>();
+            void AppendTags(System.Collections.Generic.List<object> into, TagSystem ts)
+            {
+                if (ts == null || ts.dict == null) return;
+                try
+                {
+                    foreach (var kv in ts.dict)
+                    {
+                        var st = kv.Value; if (st == null) continue;
+                        into.Add(new
+                        {
+                            key = SafeStr(() => st.identifier, kv.Key ?? ""),
+                            label = SafeStr(() => st.identifierName, ""),
+                            enabled = SafeBool(() => st.valueEnabled),
+                            valueString = SafeStr(() => st.valueString, ""),
+                            valueInt = SafeInt(() => st.valueInt),
+                            valueFloat = SafeFloat(() => st.valueFloat),
+                        });
+                    }
+                }
+                catch { }
+            }
+            AppendTags(tags, item.state);
+            AppendTags(tagsMod, item.modifiedState);
+            var feats = new System.Collections.Generic.List<object>();
+            try
+            {
+                if (item.itemFeatures != null)
+                {
+                    foreach (var f in item.itemFeatures)
+                    {
+                        if (f == null) continue;
+                        object fake = null, real = null;
+                        if (f.fakeCondition != null) fake = DumpCondition(f.fakeCondition);
+                        if (f.realCondition != null) real = DumpCondition(f.realCondition);
+                        feats.Add(new
+                        {
+                            identifier = SafeStr(() => f.identifier, ""),
+                            category = SafeStr(() => f.category, ""),
+                            actualDisplay = SafeStr(() => f.GetActualDisplay(), ""),
+                            publicDisplay = SafeStr(() => f.GetPublicDisplay(), ""),
+                            valueModifier = SafeInt(() => f.GetActualValueModifier()),
+                            useCondition = SafeBool(() => f.useCondition),
+                            isDisabled = SafeBool(() => f.isDisabled),
+                            fakeCondition = fake,
+                            realCondition = real,
+                        });
+                    }
+                }
+            }
+            catch { }
+            return new
+            {
+                uid = SafeInt(() => item.uniqueId),
+                id = SafeStr(() => item.identifier, ""),
+                name = SafeStr(() => item.name, ""),
+                unitCount = SafeInt(() => item.unitCount),
+                unitValue = SafeLong(() => item.unitValue),
+                unitBaseValue = SafeLong(() => item.unitBaseValue),
+                shortDescription = SafeStr(() => item.shortDescription, ""),
+                longDescription = SafeStr(() => item.longDescription, ""),
+                flavorText = SafeStr(() => item.flavorText, ""),
+                customText = SafeStr(() => item.customText, ""),
+                bonusAccuracy = SafeInt(() => item.bonusAccuracy),
+                spritePath = SafeStr(() => item.spritePath, ""),
+                spriteAtlasPath = SafeStr(() => item.spriteAtlasPath, ""),
+                shape = SafeStr(() => item.shape?.ToString(), ""),
+                tags = tags,
+                tagsModified = tagsMod,
+                features = feats,
+            };
+        }
+
+        private static object DumpCondition(ItemCondition c)
+        {
+            return new
+            {
+                identifier = SafeStr(() => c.identifier, ""),
+                category = SafeStr(() => c.category, ""),
+                display = SafeStr(() => c.display, ""),
+                compareValue = SafeInt(() => c.compareValue),
+                customValue = SafeInt(() => c.customValue),
+                modValue = SafeInt(() => c.modValue),
+                isTransformative = SafeBool(() => c.isTransformative),
+                hiddenAsPublic = SafeBool(() => c.hiddenAsPublic),
+            };
+        }
+
+        private static string SafeStr(Func<string> get, string def = "") { try { return get() ?? def; } catch { return def; } }
+        private static bool SafeBool(Func<bool> get) { try { return get(); } catch { return false; } }
+        private static int SafeInt(Func<int> get) { try { return get(); } catch { return 0; } }
+        private static long SafeLong(Func<long> get) { try { return get(); } catch { return 0; } }
+        private static float SafeFloat(Func<float> get) { try { return get(); } catch { return 0; } }
 
         // mod 引擎: table:/prebuilt: 统一生成入口 (照抄 ProbablyStolenItemManager.TryCreateGeneratedItem)
         private static bool TryCreateGeneratedItem(string generatorKey, out GameItem item, out string detail)
