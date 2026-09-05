@@ -37,8 +37,15 @@ namespace ProgressMod
         // 复刻生成逻辑: DirectoryMaster.Item(stableId, true) → MayHaveValidInventorySlot → UncheckedAccept
         // 主背包 = EmporiumEntry.Instance.invElement (GameGridInventory, 转 GameInventory)
         // HTTP 线程只入队, 主线程 OnUpdate 消费 (避免 Il2Cpp 跨线程操作)
-        private static readonly System.Collections.Concurrent.ConcurrentQueue<(string, int)> PendingSpawns =
-            new System.Collections.Concurrent.ConcurrentQueue<(string, int)>();
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, string, int)> PendingSpawns =
+            new System.Collections.Concurrent.ConcurrentQueue<(int, string, int)>();
+        // 属性编辑 / 删除操作: (token, 操作, 字段, 值) 走主线程 (GameItem 对象主线程访问)
+        private enum ItemOpKind { Edit, Delete }
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)> PendingItemOps =
+            new System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)>();
+        // token -> 本次生成实例 (网页端 "我的生成" 追踪). 游戏重启即失效 (物品仍在库存但引用丢失, 由新生成覆盖)
+        private static readonly System.Collections.Generic.Dictionary<int, GameItem> SpawnedItems = new System.Collections.Generic.Dictionary<int, GameItem>();
+        private static int _spawnTokenSeq;
         private static System.Net.HttpListener _listener;
 
         public override void OnUpdate()
@@ -47,7 +54,11 @@ namespace ProgressMod
             {
                 while (PendingSpawns.TryDequeue(out var job))
                 {
-                    SpawnItem(job.Item1, job.Item2);
+                    SpawnItem(job.Item1, job.Item2, job.Item3);
+                }
+                while (PendingItemOps.TryDequeue(out var op))
+                {
+                    ApplyItemOp(op.Item1, op.Item2, op.Item3, op.Item4);
                 }
             }
             catch { /* IL2CPP 异常: 保持原值 */ }
@@ -109,8 +120,66 @@ namespace ProgressMod
                         }
                         else
                         {
-                            PendingSpawns.Enqueue((id, n));
-                            resp = new { ok = true, queued = $"{id} x{n}" };
+                            int token = System.Threading.Interlocked.Increment(ref _spawnTokenSeq);
+                            PendingSpawns.Enqueue((token, id, n));
+                            resp = new { ok = true, token = token, queued = $"{id} x{n}" };
+                            code = 200;
+                        }
+                    }
+                    else if (req.Url.AbsolutePath == "/api/mine")
+                    {
+                        // 列出本次会话生成且仍在跟踪的物品 (token 引用)
+                        var list = new System.Collections.Generic.List<object>();
+                        foreach (var kv in SpawnedItems)
+                        {
+                            var it = kv.Value;
+                            if (it == null) continue;
+                            try
+                            {
+                                list.Add(new
+                                {
+                                    token = kv.Key,
+                                    id = it.identifier ?? "",
+                                    name = it.name ?? "",
+                                    count = it.unitCount,
+                                    unitValue = it.unitValue,
+                                    shortDescription = (it.shortDescription ?? "")
+                                });
+                            }
+                            catch { /* IL2CPP 异常: 跳过单条 */ }
+                        }
+                        resp = new { ok = true, items = list };
+                        code = 200;
+                    }
+                    else if (req.Url.AbsolutePath == "/api/edit")
+                    {
+                        var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                        int token = 0; int.TryParse(q["token"], out token);
+                        string field = q["field"] ?? "";
+                        string value = q["value"] ?? "";
+                        if (token == 0 || field == "")
+                        {
+                            resp = new { ok = false, err = "need token+field" };
+                        }
+                        else
+                        {
+                            PendingItemOps.Enqueue((token, ItemOpKind.Edit, field, value));
+                            resp = new { ok = true, queued = $"{token} {field}={value}" };
+                            code = 200;
+                        }
+                    }
+                    else if (req.Url.AbsolutePath == "/api/delete")
+                    {
+                        var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+                        int token = 0; int.TryParse(q["token"], out token);
+                        if (token == 0)
+                        {
+                            resp = new { ok = false, err = "need token" };
+                        }
+                        else
+                        {
+                            PendingItemOps.Enqueue((token, ItemOpKind.Delete, "", ""));
+                            resp = new { ok = true, queued = $"delete {token}" };
                             code = 200;
                         }
                     }
@@ -139,7 +208,7 @@ namespace ProgressMod
         // ============ 生成物品: 玩家柜台加权表 (mod 引擎移植) ============
         // 参照 ProbablyStolenItemManager: 生成 → SetAmount → AddDirectToWeightedTable(玩家柜台)
         // → RefreshCounterItem. id 支持三种: stableId | "table:junk" 随机表 | "prebuilt:xxx" 变体
-        private void SpawnItem(string id, int count)
+        private void SpawnItem(int token, string id, int count)
         {
             try
             {
@@ -194,9 +263,78 @@ namespace ProgressMod
                 item.SetAmount(count);
                 store.AddDirectToWeightedTable(item, true);
                 try { store.RefreshCounterItem(); } catch { /* IL2CPP 异常: 保持原值 */ }
+                if (token > 0) { SpawnedItems[token] = item; }
                 MelonLogger.Msg($"[Spawn] added to counter {id} x{count}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
+        }
+
+        // ============ 属性编辑 / 删除: 按 token 定位本次生成物品 ============
+        // 字段写回照 ProbablyStolenItemManager.ApplyBaseField, 删除照 TryExpelAndDestroy
+        // (overrideLockRemove=true → inventory.Expel → item.Destroy)
+        private static void ApplyItemOp(int token, ItemOpKind kind, string field, string value)
+        {
+            try
+            {
+                if (!SpawnedItems.TryGetValue(token, out var item) || item == null)
+                {
+                    MelonLogger.Warning($"[ItemOp] token {token} 未找到 (可能未进存档/已删除/游戏重启)");
+                    return;
+                }
+                if (kind == ItemOpKind.Delete)
+                {
+                    GameInventory inv = null;
+                    try { inv = item.parentInventory; } catch { }
+                    if (inv == null)
+                    {
+                        MelonLogger.Warning($"[ItemOp] delete {token}: 物品无 parentInventory, 跳过");
+                        return;
+                    }
+                    bool restoredLock = false;
+                    try { inv.overrideLockRemove = true; restoredLock = true; } catch { }
+                    try
+                    {
+                        if (!inv.Expel(item)) { MelonLogger.Warning($"[ItemOp] delete {token}: inventory rejected removal"); return; }
+                        try { item.Destroy(); } catch (Exception e2) { MelonLogger.Warning($"[ItemOp] delete {token}: destroy ex {e2.Message}"); }
+                        SpawnedItems.Remove(token);
+                        try { EmporiumEntry.Instance.Validate(false); } catch { }
+                        MelonLogger.Msg($"[ItemOp] deleted {token}");
+                    }
+                    finally
+                    {
+                        if (restoredLock)
+                        {
+                            try { inv.overrideLockRemove = false; } catch { }
+                        }
+                    }
+                    return;
+                }
+                // Edit
+                var ci = System.Globalization.CultureInfo.InvariantCulture;
+                switch (field)
+                {
+                    case "name": item.SetName(value); break;
+                    case "shortDescription": item.shortDescription = value; break;
+                    case "longDescription": item.longDescription = value; break;
+                    case "flavorText": item.flavorText = value; break;
+                    case "customText": item.customText = value; break;
+                    case "unitCount":
+                        if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var uc) && uc >= 0 && uc <= 999999) item.SetUnitCount(uc);
+                        else { MelonLogger.Warning($"[ItemOp] edit unitCount invalid: {value}"); return; }
+                        break;
+                    case "unitBaseValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var ub)) item.unitBaseValue = ub; break;
+                    case "unitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var uv)) item.unitValue = uv; break;
+                    case "lateUnitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var lu)) item.lateUnitValue = lu; break;
+                    case "backupUnitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var bu)) item.backupUnitValue = bu; break;
+                    case "bonusAccuracy": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var ba)) item.bonusAccuracy = ba; break;
+                    case "spritePath": item.spritePath = value; break;
+                    case "spriteAtlasPath": item.spriteAtlasPath = value; break;
+                    default: MelonLogger.Warning($"[ItemOp] 未知字段 {field}"); return;
+                }
+                try { item.Validate(); } catch { }
+                MelonLogger.Msg($"[ItemOp] edited {token} {field}={value}");
+            }
+            catch (Exception e) { MelonLogger.Error($"[ItemOp] ex: {e.Message}"); }
         }
 
         // mod 引擎: table:/prebuilt: 统一生成入口 (照抄 ProbablyStolenItemManager.TryCreateGeneratedItem)

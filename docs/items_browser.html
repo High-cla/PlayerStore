@@ -54,6 +54,28 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
 .toast{position:fixed;top:20px;right:20px;background:#212530;border:1px solid #5a9fd4;color:#e8eaf0;padding:12px 18px;border-radius:10px;font-size:13px;z-index:99;opacity:0;transition:opacity .3s;pointer-events:none}
 .toast.show{opacity:1}
 .toast.ok{border-color:#4caf50}.toast.bad{border-color:#f44336}
+.mybtn{background:#4a3f8e;border:none;color:#ddd6ff;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600}
+.mybtn:hover{background:#5a4fae}
+.mybtn.on{background:#6c5ce7}
+#myPanel{display:none;background:#181b23;border-bottom:1px solid #2a2e3a;padding:16px 24px;max-height:50vh;overflow:auto}
+#myPanel.show{display:block}
+#myPanel h3{color:#8ecff7;font-size:14px;margin-bottom:10px}
+.my-item{background:#1c2029;border:1px solid #2a2e3a;border-radius:8px;padding:10px 14px;margin-bottom:8px}
+.my-item .row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.my-item .nm{font-weight:600;color:#eef2f8;font-size:13px}
+.my-item .sub{color:#8a92a0;font-size:12px}
+.my-item .acts{margin-left:auto;display:flex;gap:6px}
+.my-item button{background:#2a2e3a;border:none;color:#b8c0cc;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+.my-item button:hover{background:#345d85;color:#fff}
+.my-item button.del{background:#3a1f2b}
+.my-item button.del:hover{background:#c62828;color:#fff}
+.edit-form{display:none;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2e3a}
+.edit-form.show{display:block}
+.edit-form label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#8a92a0;margin:4px 8px 4px 0}
+.edit-form input{background:#212530;border:1px solid #333a48;color:#e8eaf0;border-radius:5px;padding:4px 8px;font-size:12px;width:110px}
+.edit-form input.wide{width:220px}
+.edit-form .apply{background:#2b7a4b;color:#d9ffe8;font-weight:600}
+.my-empty{color:#6a7280;font-size:13px;text-align:center;padding:20px}
 </style>
 </head>
 <body>
@@ -67,9 +89,14 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
   <div class="server-status">
     <span class="dot" id="svDot"></span>
     <span id="svText">检查生成服务器...</span>
+    <button class="mybtn" id="myBtn" style="margin-left:auto">🎒 我的生成 (0)</button>
   </div>
 </header>
 <div class="toast" id="toast"></div>
+<div id="myPanel">
+  <h3>🎒 我的生成 — 本次会话生成物品 (可编辑属性 / 删除)</h3>
+  <div id="myList"></div>
+</div>
 <main>
   <aside>
     <h3>分类</h3>
@@ -281,7 +308,11 @@ async function spawnItem(id, btn){
   try{
     const r = await fetch(API + '/api/spawn?itemId=' + encodeURIComponent(id) + '&count=1');
     const j = await r.json();
-    if(j.ok){ btn.className='spawn-btn done'; btn.textContent='已生成 ✓'; toast('已生成: ' + id + ' ×1', 'ok'); }
+    if(j.ok){
+      btn.className='spawn-btn done'; btn.textContent='已生成 ✓';
+      toast('已生成: ' + id + ' ×1', 'ok');
+      if(j.token) rememberToken(j.token);
+    }
     else { btn.className='spawn-btn err'; btn.textContent='失败'; toast('生成失败: ' + (j.err||''), 'bad'); }
   }catch(e){
     btn.className='spawn-btn err'; btn.textContent='失败';
@@ -289,12 +320,86 @@ async function spawnItem(id, btn){
   }
   setTimeout(()=>{ btn.className='spawn-btn'; btn.textContent='生成 ×1'; btn.disabled=false; }, 2500);
 }
+// ===== 🎒 我的生成 (token 追踪) =====
+let MY_TOKENS = new Set(JSON.parse(localStorage.getItem('mySpawnTokens') || '[]'));
+function rememberToken(t){ MY_TOKENS.add(t); localStorage.setItem('mySpawnTokens', JSON.stringify([...MY_TOKENS])); updateMyBtn(); }
+function forgetToken(t){ MY_TOKENS.delete(t); localStorage.setItem('mySpawnTokens', JSON.stringify([...MY_TOKENS])); }
+function updateMyBtn(){ document.getElementById('myBtn').textContent = `🎒 我的生成 (${MY_TOKENS.size})`; }
+let myShowing = false;
+document.getElementById('myBtn').onclick = () => {
+  myShowing = !myShowing;
+  document.getElementById('myPanel').classList.toggle('show', myShowing);
+  document.getElementById('myBtn').classList.toggle('on', myShowing);
+  if(myShowing) refreshMine();
+};
+async function refreshMine(){
+  const listEl = document.getElementById('myList');
+  if(!(await checkServer())){ listEl.innerHTML = '<div class="my-empty">服务器离线 — 启动游戏后重试</div>'; return; }
+  try{
+    const r = await fetch(API + '/api/mine');
+    const j = await r.json();
+    const items = (j.items||[]).filter(x => MY_TOKENS.has(x.token));
+    // 若服务器已无 (被删/重启), 清掉本地死 token
+    const live = new Set(items.map(x=>x.token));
+    [...MY_TOKENS].forEach(t => { if(!live.has(t)) MY_TOKENS.delete(t); });
+    localStorage.setItem('mySpawnTokens', JSON.stringify([...MY_TOKENS]));
+    updateMyBtn();
+    if(!items.length){ listEl.innerHTML = '<div class="my-empty">还没有生成记录 — 点卡片「生成 ×1」后这里会出现。刷新页面前有效。</div>'; return; }
+    listEl.innerHTML = items.map(x => `
+      <div class="my-item" data-token="${x.token}">
+        <div class="row1">
+          <span class="nm">${esc(x.name||x.id||'')}</span>
+          <span class="sub">${esc(x.id||'')} · 数量 ${x.count} · 价值 ${x.unitValue}</span>
+          <span class="acts">
+            <button class="edit-btn">✎ 编辑</button>
+            <button class="del-btn del">🗑 删除</button>
+          </span>
+        </div>
+        <div class="edit-form">
+          <label>名称<input class="f-name" value="${esc(x.name||'')}"></label>
+          <label>数量<input class="f-count" type="number" value="${x.count}" min="1"></label>
+          <label>价值<input class="f-value" type="number" value="${x.unitValue}"></label>
+          <label>描述<input class="f-desc wide" value="${esc(x.shortDescription||'')}" placeholder="shortDescription"></label>
+          <button class="apply" data-apply="${x.token}">✓ 应用</button>
+        </div>
+      </div>`).join('');
+    listEl.querySelectorAll('.edit-btn').forEach(b => b.onclick = () => {
+      const f = b.closest('.my-item').querySelector('.edit-form');
+      f.classList.toggle('show');
+    });
+    listEl.querySelectorAll('.del-btn').forEach(b => b.onclick = async () => {
+      const t = b.closest('.my-item').dataset.token;
+      if(!confirm('删除该物品? (从库存移除并销毁)')) return;
+      const rr = await fetch(API + '/api/delete?token=' + t);
+      const jj = await rr.json();
+      if(jj.ok){ toast('删除请求已发送', 'ok'); forgetToken(Number(t)); setTimeout(refreshMine, 600); }
+      else toast('删除失败: ' + (jj.err||''), 'bad');
+    });
+    listEl.querySelectorAll('.apply').forEach(b => b.onclick = async () => {
+      const item = b.closest('.my-item');
+      const t = item.dataset.token;
+      const fields = [
+        ['name', item.querySelector('.f-name').value],
+        ['unitCount', item.querySelector('.f-count').value],
+        ['unitValue', item.querySelector('.f-value').value],
+        ['shortDescription', item.querySelector('.f-desc').value]
+      ];
+      for(const [f,v] of fields){
+        const rr = await fetch(API + '/api/edit?token=' + t + '&field=' + f + '&value=' + encodeURIComponent(v));
+        const jj = await rr.json();
+        if(!jj.ok){ toast('编辑 ' + f + ' 失败: ' + (jj.err||''), 'bad'); return; }
+      }
+      toast('已应用', 'ok'); setTimeout(refreshMine, 600);
+    });
+  }catch(e){ listEl.innerHTML = '<div class="my-empty">加载失败: ' + esc(String(e)) + '</div>'; }
+}
 document.body.addEventListener('click', e => {
   const b = e.target.closest('[data-spawn]');
   if(b) spawnItem(b.dataset.spawn, b);
 });
 setInterval(()=>{ const d = document.querySelector('.dot'); checkServer(); }, 5000);
 checkServer();
+updateMyBtn();
 
 renderCats(); renderGrid();
 </script>
