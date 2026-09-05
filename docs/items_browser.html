@@ -450,7 +450,7 @@ function renderGrid(){
       <div class="cat">${(i.categories||[]).slice(0,4).map(c=>`<span class="tag">${zCat(c)}</span>`).join('')}</div>
       <div class="id">${esc(i.stableId||'')}</div>
       <div class="desc">${esc(i.descriptionZh||i.descriptionEn||'')}</div>
-      <div style="margin-top:10px">${(i.stableId||'').endsWith('_instruction') ? '<span class="tag" style="background:#8a6d3b">📄 图纸(不能直接生成)</span>' : `<button class="spawn-btn" data-spawn="${esc(i.stableId||'')}">生成 ×1</button>`}</div>
+      <div style="margin-top:10px">${(i.stableId||'').endsWith('_instruction') ? '<span class="tag" style="background:#8a6d3b">📄 图纸(不能直接生成)</span>' : `<button class="spawn-btn" data-spawn="${esc(i.stableId||'')}">生成</button>`}</div>
     </div>`).join('') : '<div class="empty">无匹配物品</div>';
   grid.querySelectorAll('.card').forEach(c => c.onclick = () => showDetail(c.dataset.id));
   grid.querySelectorAll('.fav-btn').forEach(b => b.onclick = (e) => { e.stopPropagation(); toggleFav(b.dataset.fav); });
@@ -500,22 +500,18 @@ async function checkServer(){
 }
 async function spawnItem(id, btn){
   if(!(await checkServer())){ toast('服务器离线, 请先打开游戏', 'bad'); return; }
-  btn.classList.add('done'); btn.disabled = true;
-  btn.textContent = '生成中...';
+  const b = btn;
+  b.textContent = '生成中...';
   try{
     const r = await fetch(API + '/api/spawn?itemId=' + encodeURIComponent(id) + '&count=1');
     const j = await r.json();
     if(j.ok){
-      btn.className='spawn-btn done'; btn.textContent='已生成 ✓';
-      toast('已生成: ' + id + ' ×1', 'ok');
+      toast('已生成: ' + id, 'ok');
       if(j.token) rememberToken(j.token);
     }
-    else { btn.className='spawn-btn err'; btn.textContent='失败'; toast('生成失败: ' + (j.err||''), 'bad'); }
-  }catch(e){
-    btn.className='spawn-btn err'; btn.textContent='失败';
-    toast('请求失败: ' + e, 'bad');
-  }
-  setTimeout(()=>{ btn.className='spawn-btn'; btn.textContent='生成 ×1'; btn.disabled=false; }, 2500);
+    else toast('生成失败: ' + (j.err||''), 'bad');
+  }catch(e){ toast('请求失败: ' + e, 'bad'); }
+  b.textContent = '生成';
 }
 // ===== 🎒 我的生成 (token 追踪) =====
 let MY_TOKENS = new Set(JSON.parse(localStorage.getItem('mySpawnTokens') || '[]'));
@@ -541,7 +537,7 @@ async function refreshMine(){
     [...MY_TOKENS].forEach(t => { if(!live.has(t)) MY_TOKENS.delete(t); });
     localStorage.setItem('mySpawnTokens', JSON.stringify([...MY_TOKENS]));
     updateMyBtn();
-    if(!items.length){ listEl.innerHTML = '<div class="my-empty">还没有生成记录 — 点卡片「生成 ×1」后这里会出现。刷新页面前有效。</div>'; return; }
+    if(!items.length){ listEl.innerHTML = '<div class="my-empty">还没有生成记录 — 点卡片「生成」后这里会出现。刷新页面前有效。</div>'; return; }
     listEl.innerHTML = items.map(x => `
       <div class="my-item" data-uid="${x.uid||0}">
         <div class="row1">
@@ -667,12 +663,35 @@ function renderTags(){
   document.getElementById('tagBase').innerHTML = base.length ? base.map(tagHTML).join('') : '<div class="insp-empty">无 base 标签</div>';
   document.getElementById('tagMod').innerHTML = mod.length ? mod.map(t => tagHTML(t,true)).join('') : '<div class="insp-empty">无 modified 标签</div>';
 }
+// tag 中文: 优先 TAG_ZH[key]; 剥掉 TYPE-STRING_ 前缀后查 TYPE_ZH(物品类型)/TAG_ZH; label 同法兜底
+function zhTag(t){
+  const k = String(t.key||'');
+  const l = String(t.label||'');
+  if(TAG_ZH && TAG_ZH[k]) return TAG_ZH[k];
+  const kk = k.replace(/^TYPE-STRING_/,'');
+  if(kk!==k){
+    if(TYPE_ZH && TYPE_ZH[kk]) return TYPE_ZH[kk];
+    if(TAG_ZH && TAG_ZH[kk]) return TAG_ZH[kk];
+  }
+  const ll = l.replace(/^TYPE-STRING_/,'');
+  if(TYPE_ZH && TYPE_ZH[ll]) return TYPE_ZH[ll];
+  if(TAG_ZH && TAG_ZH[ll]) return TAG_ZH[ll];
+  return l || t.key;
+}
+// label 是否只是未本地化键的镜像(TYPE-STRING_* 且能映射), 若是则 .v 不重复显示
+function isMirrorLabel(t){
+  const l = String(t.label||'');
+  if(!l.startsWith('TYPE-STRING_')) return false;
+  const ll = l.slice('TYPE-STRING_'.length);
+  return !!(TYPE_ZH && TYPE_ZH[ll]) || !!(TAG_ZH && TAG_ZH[ll]);
+}
 function tagHTML(t, modified){
   const m = modified ? '&mod' : '';
   const on = t.enabled;
+  const showL = t.label && !isMirrorLabel(t);
   return `<div class="insp-row">
-    <span class="k" title="key: ${esc(t.key)}">${esc((TAG_ZH && TAG_ZH[t.key]) || t.label || t.key)}</span>
-    <span class="v">${esc(t.label||'')} · int=${t.valueInt} · str=${esc(t.valueString||'')}</span>
+    <span class="k" title="key: ${esc(t.key)}">${esc(zhTag(t))}</span>
+    <span class="v">${showL ? esc(t.label) + ' · ' : ''}int=${t.valueInt} · str=${esc(t.valueString||'')}</span>
     <select class="tog" data-key="${esc(t.key)}" data-m="${m}">
       <option value="1" ${on?'selected':''}>开</option>
       <option value="0" ${!on?'selected':''}>关</option>
