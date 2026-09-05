@@ -645,12 +645,28 @@ function renderInspector(item){
     '<div class="insp-section-title">添加标签</div>' +
     '<div class="insp-row"><input id="newTagKey" placeholder="新标签 key"><input id="newTagLabel" placeholder="显示名 (可选)" style="width:150px">' +
     '<button class="mini-btn green" id="addTagBtn">+ 添加</button></div>';
-  // 特性 tab
+  // 特性 tab — 预设下拉 (照原版 ItemManager FeaturePresets 12 项) + 自定义 category
+  const FEAT_PRESETS = [
+    ['free','免费 / Free'],['retail_markup','零售加价 / Retail markup'],['donation','捐赠 / Donation'],
+    ['discounted_buy','折扣购买 / Discounted buy'],['premium_buy','高级购买 / Premium buy'],
+    ['cigarette_authenticity','香烟真伪 / Cigarette authenticity'],['stamp_authenticity','邮票真伪 / Stamp authenticity'],
+    ['module_stuck','模块卡住 / Module stuck'],['discount_25','25% 折扣 / 25% discount'],
+    ['bargain_markup','议价加价 / Bargain markup'],['bargain_discount','议价折扣 / Bargain discount'],
+    ['equipment_good','良好装备状态 / Good equipment']
+  ];
   const paneF = document.createElement('div'); paneF.className='insp-pane'; paneF.dataset.p='features';
+  const featOpts = '<option value="__custom__">自定义 category…</option>' + FEAT_PRESETS.map(p=>`<option value="${p[0]}">${p[1]}</option>`).join('');
   paneF.innerHTML = '<div class="insp-section-title">已有特性</div><div id="featList"></div>' +
-    '<div class="insp-section-title">添加特性 (按 category)</div>' +
-    '<div class="insp-row"><input id="newFeatCat" placeholder="category 如 cigarette / quality / condition"><button class="mini-btn green" id="addFeatBtn">+ 添加</button></div>';
+    '<div class="insp-section-title">添加特性</div>' +
+    '<div class="insp-row"><select id="newFeatSel">' + featOpts + '</select>' +
+    '<input id="newFeatCat" placeholder="自定义 category / identifier" style="display:none">' +
+    '<button class="mini-btn green" id="addFeatBtn">+ 添加</button></div>';
   baseEl.append(paneB, paneT, paneF);
+  const featSel = document.getElementById('newFeatSel');
+  if(featSel) featSel.onchange = () => {
+    const cus = document.getElementById('newFeatCat');
+    if(cus) cus.style.display = (featSel.value === '__custom__') ? '' : 'none';
+  };
   renderTags();
   renderFeats();
 }
@@ -746,7 +762,7 @@ document.getElementById('insFields').addEventListener('click', async e => {
   const rf = e.target.closest('button[data-rfeat]');
   if(rf){ e.stopPropagation(); await insEdit('featureRemove', rf.dataset.rfeat); toast('特性已删除', 'ok'); setTimeout(()=>refreshInspector(), 500); return; }
   if(e.target.id==='addTagBtn'){ const k=document.getElementById('newTagKey').value.trim(); const l=document.getElementById('newTagLabel').value.trim(); if(!k){toast('填 tag key','bad');return;} await insEdit('tagAdd', k+(l?'|'+l:'')); toast('已添加标签', 'ok'); document.getElementById('newTagKey').value=''; document.getElementById('newTagLabel').value=''; setTimeout(()=>refreshInspector(), 500); }
-  if(e.target.id==='addFeatBtn'){ const c=document.getElementById('newFeatCat').value.trim(); if(!c){toast('填 category','bad');return;} await insEdit('featureAdd', c); toast('已添加特性', 'ok'); document.getElementById('newFeatCat').value=''; setTimeout(()=>refreshInspector(), 500); }
+  if(e.target.id==='addFeatBtn'){ const sel=document.getElementById('newFeatSel'); const selV=sel?sel.value:'__custom__'; const c= selV==='__custom__' ? (document.getElementById('newFeatCat').value||'').trim() : selV; if(!c){toast('填 category','bad');return;} await insEdit('featureAdd', c); toast('已添加特性: '+c, 'ok'); if(document.getElementById('newFeatCat')) document.getElementById('newFeatCat').value=''; setTimeout(()=>refreshInspector(), 500); }
 });
 async function refreshInspector(){ if(CUR_UID) openInspector(CUR_UID); }
 document.getElementById('insClose').onclick = () => { document.getElementById('inspector').classList.remove('show'); };

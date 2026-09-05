@@ -209,14 +209,15 @@ namespace ProgressMod
                             long seq = System.Threading.Interlocked.Increment(ref _dumpSeq);
                             PendingItemDumps.Enqueue((uid, seq));
                             object dump = null;
+                            bool got = false;
                             int waited = 0;
                             while (waited < 5000)
                             {
-                                if (DumpResults.TryRemove(seq, out dump)) break;
+                                if (DumpResults.TryRemove(seq, out dump)) { got = true; break; }
                                 System.Threading.Thread.Sleep(10);
                                 waited += 10;
                             }
-                            if (dump == null && !DumpResults.ContainsKey(seq))
+                            if (!got)
                                 resp = new { ok = false, err = "dump timeout (主线程未响应, 是否在存档?)" };
                             else if (dump == null) { resp = new { ok = false, err = "item not found" }; }
                             else { resp = new { ok = true, item = dump }; code = 200; }
@@ -292,7 +293,6 @@ namespace ProgressMod
                     MelonLogger.Warning("[Spawn] 未进入存档 (主菜单无物品资源), 先进入存档再生成");
                     return;
                 }
-                try { MelonLogger.Msg($"[Spawn][dbg] id={id} cnt={count}"); } catch { }
                 // 图纸/蓝图不能直接生成: 映射到实物 (mod 目录不含图纸, 网页目录含)
                 if (!id.StartsWith("table:") && !id.StartsWith("prebuilt:") && id.EndsWith("_instruction"))
                 {
@@ -310,26 +310,36 @@ namespace ProgressMod
                 if (id.StartsWith("table:") || id.StartsWith("prebuilt:"))
                 {
                     // mod 引擎: 随机掉落表 / 预置变体
-                    try { MelonLogger.Msg($"[Spawn][dbg] gen {id}"); } catch { }
                     if (!TryCreateGeneratedItem(id, out item, out detail))
                     {
                         MelonLogger.Warning($"[Spawn] mod 引擎拒绝 {id}: {detail}");
                         return;
                     }
-                    try { MelonLogger.Msg($"[Spawn][dbg] gen ok item={item != null}"); } catch { }
                 }
                 else
                 {
-                    // 常规 stableId: DirectoryMaster 直生优先, ItemSpawner.Spawn (mod alias 解析) 兜底
-                    try { MelonLogger.Msg($"[Spawn][dbg] direct {id}"); } catch { }
-                    item = DirectoryMaster.Item(id, true);
-                    try { MelonLogger.Msg($"[Spawn][dbg] dm item={item != null}"); } catch { }
-                    if (item == null) item = ItemSpawner.Spawn(id);
-                    try { MelonLogger.Msg($"[Spawn][dbg] after fallback item={item != null}"); } catch { }
-                    if (item == null) { MelonLogger.Warning($"[Spawn] DirectoryMaster/ItemSpawner 均拒绝 {id}"); return; }
+                    // 常规 stableId: 对齐原版 ItemManager.cs:3366 —— ItemSpawner.Spawn 优先 (内部查
+                    // PreBuiltItemHelper 引擎表, 命中经引擎 factory 词条注入; 未命中 fallback 裸模板)
+                    try { item = ItemSpawner.Spawn(id); }
+                    catch (Exception spawnEx) { MelonLogger.Warning($"[Spawn] ItemSpawner.Spawn({id}) 抛异常: {spawnEx.Message}"); }
+                    if (item == null) { MelonLogger.Warning($"[Spawn] ItemSpawner 拒绝 {id}"); return; }
+                    // node/module 类模板件不带随机词条 —— 对齐原版引擎第二步: 引擎 (RandomNode/
+                    // RandomPerformanceModule) 在 DirectoryMaster.Item(base) 后调 InitRandomEffect 注入随机词条.
+                    // 直生非变体模板须在此补, 否则产物是游戏里不存在的裸态模块. (prebuilt 引擎产物已带,
+                    // 走上方 TryCreateGeneratedItem 分支, 不会二次注入)
+                    try
+                    {
+                        bool isNodeType = false, isModType = false;
+                        try { isNodeType = item.IsGameItemType("NODE"); } catch { }
+                        try { isModType = item.IsGameItemType("MODULE"); } catch { }
+                        if (isNodeType || isModType)
+                        {
+                            ModuleEffectHelper.InitRandomEffect(item);
+                        }
+                    }
+                    catch (Exception fxEx) { MelonLogger.Warning($"[Spawn] InitRandomEffect({id}) 异常: {fxEx.Message}"); }
                 }
                 var store = PlayerStore.Instance;
-                try { MelonLogger.Msg($"[Spawn][dbg] store null={(store == null)}"); } catch { }
                 if (store == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无玩家柜台"); return; }
                 item.SetAmount(count);
                 store.AddDirectToWeightedTable(item, true);
@@ -343,8 +353,7 @@ namespace ProgressMod
         // ============ 属性编辑 / 删除: 按 uid 定位任意库存物品 ============
         // 字段写回照 ProbablyStolenItemManager.ApplyBaseField, 删除照 TryExpelAndDestroy
         // (overrideLockRemove=true → inventory.Expel → item.Destroy)
-        private static void ApplyItemOp(int uid, ItemOpKind kind, string field, string value)
-        {
+        private static void ApplyItemOp(int uid, ItemOpKind kind, string field, string value)        {
             try
             {
                 GameItem item = FindItemByUid(uid);
@@ -376,8 +385,18 @@ namespace ProgressMod
                     case "lateUnitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var lu)) item.lateUnitValue = lu; break;
                     case "backupUnitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var bu)) item.backupUnitValue = bu; break;
                     case "bonusAccuracy": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var ba)) item.bonusAccuracy = ba; break;
+                    case "modifiedXOrigin": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var mx)) item.modifiedXOrigin = mx; break;
+                    case "modifiedYOrigin": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var my)) item.modifiedYOrigin = my; break;
                     case "spritePath": item.spritePath = value; break;
                     case "spriteAtlasPath": item.spriteAtlasPath = value; break;
+                    // Bool 切换字段 (照原版 ToggleBaseBool ItemManager.cs:2833): value "1"/"true"→设 true, "0"/"false"→设 false, 空/其他→翻转
+                    case "activateDefault": ToggleBoolField(() => item.activateDefault, v => item.activateDefault = v, value); break;
+                    case "forceDisableActivate": ToggleBoolField(() => item.forceDisableActivate, v => item.forceDisableActivate = v, value); break;
+                    case "forceDisableUse": ToggleBoolField(() => item.forceDisableUse, v => item.forceDisableUse = v, value); break;
+                    case "canUseOutsideCombat": ToggleBoolField(() => item.canUseOutsideCombat, v => item.canUseOutsideCombat = v, value); break;
+                    case "triggerOverwatch": ToggleBoolField(() => item.triggerOverwatch, v => item.triggerOverwatch = v, value); break;
+                    case "isCombatBackpack": ToggleBoolField(() => item.isCombatBackpack, v => item.isCombatBackpack = v, value); break;
+                    case "isDebugMenu": ToggleBoolField(() => item.isDebugMenu, v => item.isDebugMenu = v, value); break;
                     case "tagEnabled": SetItemTagEnabled(item, value, true); break;
                     case "tagModifiedEnabled": SetItemTagEnabled(item, value, false); break;
                     case "tagValue": SetItemTagStringValue(item, value, false); break;
@@ -390,13 +409,28 @@ namespace ProgressMod
                     default: MelonLogger.Warning($"[ItemOp] 未知字段 {field}"); return;
                 }
                 try { item.Validate(); } catch { }
+                RefreshItemAreas();
                 MelonLogger.Msg($"[ItemOp] edited uid={uid} {field}={value}");
             }
             catch (Exception e) { MelonLogger.Error($"[ItemOp] ex: {e.Message}"); }
         }
 
+        // 照原版 ToggleBaseBool 语义: value "1"/"true"/"on" → true; "0"/"false"/"off" → false; 空或其它 → 翻转当前值
+        private static void ToggleBoolField(System.Func<bool> getter, System.Action<bool> setter, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                var low = value.Trim().ToLowerInvariant();
+                if (low == "1" || low == "true" || low == "on") { setter(true); return; }
+                if (low == "0" || low == "false" || low == "off") { setter(false); return; }
+            }
+            try { setter(!getter()); } catch { }
+        }
+
         // ============ 库存枚举 / 定位 / 删除 (任意库存物品) ============
         // 全部玩家库存清单 (照 mod GetKnownInventories 主库存集合). 每个返回 GameInventory
+        // 注意: AddDirectToWeightedTable 落点是 EmporiumEntry.backInvinvElement (偏移 0x152),
+        // 漏枚举该容器会导致 spawn 物品 dump/inventory 查不到
         private static System.Collections.Generic.List<GameInventory> EnumeratePlayerInventories()
         {
             var list = new System.Collections.Generic.List<GameInventory>();
@@ -405,7 +439,23 @@ namespace ProgressMod
                 if (inv != null) list.Add(inv);
             }
             try { var p = PlayerStore.Instance; if (p != null) AddInv(p.gridInv); } catch { }
-            try { var e = EmporiumEntry.Instance; if (e != null) { AddInv(e.invElement); AddInv(e.showcaseElement); AddInv(e.docInvElement); AddInv(e.trashInvElement); AddInv(e.trashcanInvElement); } } catch { }
+            try
+            {
+                var e = EmporiumEntry.Instance;
+                if (e != null)
+                {
+                    AddInv(e.invElement); AddInv(e.showcaseElement); AddInv(e.docInvElement);
+                    AddInv(e.trashInvElement); AddInv(e.swapBufferElement); AddInv(e.drainInvElement);
+                    AddInv(e.frontInvinvElement); AddInv(e.backInvinvElement); AddInv(e.backInvinvElementCounter);
+                    AddInv(e.bazarLeftinvElement); AddInv(e.hiddenElement); AddInv(e.faucetElement);
+                    AddInv(e.cassettePlayerElement); AddInv(e.vendingMachineElement); AddInv(e.vendingFountainElement);
+                    AddInv(e.soldElement); AddInv(e.responseInventory); AddInv(e.responseInventoryClosable);
+                    AddInv(e.afterhourInventory);
+                    AddInv(e.afterhourPocketSlotInvLeft); AddInv(e.afterhourPocketSlotInvBackpack); AddInv(e.afterhourPocketSlotInvRight);
+                    AddInv(e.hirelingInv); AddInv(e.trashcanInvElement);
+                }
+            }
+            catch { }
             return list;
         }
 
@@ -426,6 +476,25 @@ namespace ProgressMod
                         if (inv == e.docInvElement) return "文档栏";
                         if (inv == e.trashInvElement) return "垃圾桶";
                         if (inv == e.trashcanInvElement) return "垃圾桶(trashcan)";
+                        if (inv == e.backInvinvElement) return "后柜台";
+                        if (inv == e.backInvinvElementCounter) return "后柜台(货架)";
+                        if (inv == e.frontInvinvElement) return "前柜台";
+                        if (inv == e.bazarLeftinvElement) return "巴扎左侧";
+                        if (inv == e.swapBufferElement) return "交换缓冲";
+                        if (inv == e.drainInvElement) return "排空栏";
+                        if (inv == e.hiddenElement) return "隐藏栏";
+                        if (inv == e.soldElement) return "已售区";
+                        if (inv == e.responseInventory) return "应召响应";
+                        if (inv == e.responseInventoryClosable) return "应召响应(可关)";
+                        if (inv == e.afterhourInventory) return "歇业库存";
+                        if (inv == e.faucetElement) return "水龙头";
+                        if (inv == e.cassettePlayerElement) return "磁带机";
+                        if (inv == e.vendingMachineElement) return "售货机";
+                        if (inv == e.vendingFountainElement) return "售货喷泉";
+                        if (inv == e.hirelingInv) return "雇工背包";
+                        if (inv == e.afterhourPocketSlotInvLeft) return "歇业口袋左";
+                        if (inv == e.afterhourPocketSlotInvBackpack) return "歇业口袋包";
+                        if (inv == e.afterhourPocketSlotInvRight) return "歇业口袋右";
                     }
                 }
                 catch { }
@@ -489,28 +558,130 @@ namespace ProgressMod
             return list;
         }
 
-        // 删除任意物品: 照 mod TryExpelAndDestroy (overrideLockRemove → Expel → Destroy)
+        // 删除任意物品: 照原版 ItemManager TryDeleteItem 三重兜底
+        // (parentInventory → 遍历全部库存 → fixture trashcan/drain), 成功 RefreshItemAreas
         private static void DeleteItem(GameItem item)
         {
+            if (item == null) return;
+            int uid = 0;
+            try { uid = item.uniqueId; } catch { }
+            // 层1: parentInventory
             GameInventory inv = null;
             try { inv = item.parentInventory; } catch { }
-            if (inv == null) { MelonLogger.Warning($"[ItemOp] delete uid={item.uniqueId}: 物品无 parentInventory, 跳过"); return; }
+            if (inv != null && TryExpelAndDestroy(inv, item))
+            {
+                RefreshItemAreas();
+                MelonLogger.Msg($"[ItemOp] deleted uid={uid}");
+                return;
+            }
+            // 层2: 遍历全部库存
+            foreach (var known in EnumeratePlayerInventories())
+            {
+                if (known == null || known == inv) continue;
+                if (InventoryContains(known, item) && TryExpelAndDestroy(known, item))
+                {
+                    RefreshItemAreas();
+                    MelonLogger.Msg($"[ItemOp] deleted uid={uid} ({InvLabel(known)})");
+                    return;
+                }
+            }
+            // 层3: fixture (垃圾桶本体/排水口)
+            if (TryDeleteKnownFixture(item))
+            {
+                RefreshItemAreas();
+                MelonLogger.Msg($"[ItemOp] deleted uid={uid} (fixture)");
+                return;
+            }
+            MelonLogger.Warning($"[ItemOp] delete uid={uid}: item is not in a removable inventory");
+        }
+
+        // 照原版 TryExpelAndDestroy: 备份 overrideLockRemove=true → Expel → Destroy → 还原
+        private static bool TryExpelAndDestroy(GameInventory inventory, GameItem item)
+        {
             bool restoredLock = false;
-            try { inv.overrideLockRemove = true; restoredLock = true; } catch { }
+            bool overrideLockRemove = false;
             try
             {
-                if (!inv.Expel(item)) { MelonLogger.Warning($"[ItemOp] delete uid={item.uniqueId}: inventory rejected removal"); return; }
-                try { item.Destroy(); } catch (Exception e2) { MelonLogger.Warning($"[ItemOp] delete uid={item.uniqueId}: destroy ex {e2.Message}"); }
-                try { EmporiumEntry.Instance.Validate(false); } catch { }
-                MelonLogger.Msg($"[ItemOp] deleted uid={item.uniqueId}");
+                overrideLockRemove = inventory.overrideLockRemove;
+                inventory.overrideLockRemove = true;
+                restoredLock = true;
+            }
+            catch { }
+            try
+            {
+                if (!inventory.Expel(item)) return false;
+                try { item.Destroy(); } catch { }
+                return true;
             }
             finally
             {
                 if (restoredLock)
                 {
-                    try { inv.overrideLockRemove = false; } catch { }
+                    try { inventory.overrideLockRemove = overrideLockRemove; } catch { }
                 }
             }
+        }
+
+        // 照原版 RefreshItemAreas: PlayerStore.RefreshCounterItem + EmporiumEntry.Validate(false)
+        private static void RefreshItemAreas()
+        {
+            try
+            {
+                var p = PlayerStore.Instance;
+                if (p != null) p.RefreshCounterItem();
+            }
+            catch { }
+            try
+            {
+                var e = EmporiumEntry.Instance;
+                if (e != null) e.Validate(false);
+            }
+            catch { }
+        }
+
+        // 照原版 InventoryContains: grid.items + childItems (GameSlotInventory.currentItem 为 private, 经 childItems 覆盖)
+        private static bool InventoryContains(GameInventory inventory, GameItem item)
+        {
+            if (inventory == null || item == null) return false;
+            foreach (var it in ReadInventoryItems(inventory))
+            {
+                if (it == null) continue;
+                try { if (it == item) return true; } catch { }
+                try { if (it.uniqueId != 0 && item.uniqueId != 0 && it.uniqueId == item.uniqueId) return true; } catch { }
+            }
+            return false;
+        }
+
+        // 照原版 TryDeleteKnownFixture: trashcan/drain 本体对应容器
+        private static bool TryDeleteKnownFixture(GameItem item)
+        {
+            if (item == null) return false;
+            try
+            {
+                var e = EmporiumEntry.Instance;
+                if (e == null) return false;
+                try
+                {
+                    if (IsSameItem(e.trashcan, item) && e.trashcanInvElement != null) return TryExpelAndDestroy(e.trashcanInvElement, item);
+                }
+                catch { }
+                try
+                {
+                    if (IsSameItem(e.drain, item) && e.drainInvElement != null) return TryExpelAndDestroy(e.drainInvElement, item);
+                }
+                catch { }
+            }
+            catch { }
+            return false;
+        }
+
+        // 照原版 IsSameItem: 引用相等或 uniqueId 相等 (uid!=0)
+        private static bool IsSameItem(GameItem a, GameItem b)
+        {
+            if (a == null || b == null) return false;
+            try { if (a == b) return true; } catch { }
+            try { if (a.uniqueId != 0 && a.uniqueId == b.uniqueId) return true; } catch { }
+            return false;
         }
 
         // ============ 标签 / 特性 操作 ============
@@ -540,33 +711,32 @@ namespace ProgressMod
 
         private static void SetItemTagStringValue(GameItem item, string keyValue, bool modified)
         {
-            // keyValue 形如 "key=值" — 直写 TagState 底层 valueString
+            // keyValue 形如 "key=值" — 照原版 ApplyTagField (ItemManager.cs:2919) 用 SetString (与直写 valueString 同存储, 仅 API 保真)
             int eq = keyValue.IndexOf('=');
             if (eq <= 0) { MelonLogger.Warning($"[ItemOp] tagValue 需 key=值: {keyValue}"); return; }
             string key = keyValue.Substring(0, eq);
             string val = keyValue.Substring(eq + 1);
             var st = FindTagState(item, key, modified);
             if (st == null) { MelonLogger.Warning($"[ItemOp] tag {key} 不存在"); return; }
-            try { st.valueString = val; } catch { }
+            try { st.SetString(val); } catch { }
         }
 
+        // 照原版 RemoveTagFromItem (ItemManager.cs:2665): 只从指定 system 的 dict.Remove, 缺失报错, 不做跨 system fallback
         private static void RemoveItemTag(GameItem item, string key, bool modified)
         {
             try
             {
                 var ts = modified ? item.modifiedState : item.state;
                 if (ts == null || ts.dict == null || !ts.dict.Remove(key))
-                {
-                    var ts2 = modified ? item.state : item.modifiedState;
-                    if (ts2 != null && ts2.dict != null) ts2.dict.Remove(key);
-                }
+                    MelonLogger.Warning($"[ItemOp] tag 未找到: {key}");
             }
             catch { }
         }
 
         private static void AddItemTag(GameItem item, string keyLabel)
         {
-            // keyLabel 形如 "key|label" — 新 TagState 直入 base dict (InitTagString 是 private, 用 ctor)
+            // keyLabel 形如 "key|label" — 新 TagState 直入 base dict, 照原版 AddTagToItem (ItemManager.cs:2653) 建后 SetEnabled(true)
+            // (InitTagString 是 TagSystem private 无法直调, 用 ctor 等价且免 TYPE-STRING_ 前缀 warning)
             int pipe = keyLabel.IndexOf('|');
             string key = pipe > 0 ? keyLabel.Substring(0, pipe) : keyLabel;
             string label = pipe > 0 ? keyLabel.Substring(pipe + 1) : key;
@@ -576,21 +746,79 @@ namespace ProgressMod
                 if (ts == null || ts.dict == null) return;
                 if (ts.dict.ContainsKey(key)) { MelonLogger.Warning($"[ItemOp] tag {key} 已存在"); return; }
                 var st = new TagState(key, label);
+                st.SetEnabled(true);
                 ts.dict.Add(key, st);
             }
             catch { }
         }
 
+        // 照原版 AddPresetFeature/AddFeatureObject (ItemManager.cs:2691/2725): category 命中 preset → 调 ItemFeatureList 工厂得到完整 feature
+        // (规范 category 常量/identifier/featureType/conditions/useCondition/modifiers/display 齐全, 裸 new ItemFeature 缺这些字段 → 游戏内无效);
+        // 再照 AddFeatureObject: FindItemFeatureByID 查重 → parentItemUniqueId=item.uniqueId → AddItemFeature
         private static void AddItemFeatureByCategory(GameItem item, string category)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(category)) return;
-                var f = new ItemFeature(category);
+                var f = BuildItemFeatureByKey(category.Trim());
+                if (f == null)
+                {
+                    // 未命中预设 → 照原版 AddCustomFeature (ItemManager.cs:2704) 裸建 (向后兼容自定义 id)
+                    f = new ItemFeature(category.Trim());
+                }
+                try
+                {
+                    string fid = f.identifier;
+                    if (!string.IsNullOrWhiteSpace(fid) && item.FindItemFeatureByID(fid) != null)
+                    {
+                        MelonLogger.Warning($"[ItemOp] feature 已存在: {fid}");
+                        return;
+                    }
+                }
+                catch { }
                 try { f.parentItemUniqueId = item.uniqueId; } catch { }
                 item.AddItemFeature(f);
+                MelonLogger.Msg($"[ItemOp] feature added: {category.Trim()}");
             }
             catch { }
+        }
+
+        // 原版 FeaturePresets (ItemManager.cs:206-219) 的 12 个预设: 按 preset key / 规范 category 双键 → ItemFeatureList 工厂
+        // (工厂产物 identifier/category 见子 agent ISIL 报告: free→CATEGORY_FREE/free, discount_25→discount, equipment_good→CATEGORY_EQUIPMENT_CONDITION 等)
+        private static ItemFeature BuildItemFeatureByKey(string key)
+        {
+            try
+            {
+                switch (key)
+                {
+                    case "free":
+                    case "CATEGORY_FREE": return ItemFeatureList.FreeFeature();
+                    case "retail_markup":
+                    case "retailMarkUp": return ItemFeatureList.RetailMarkUp();
+                    case "donation":
+                    case "bribeDonation": return ItemFeatureList.Donation();
+                    case "discounted_buy":
+                    case "discountedBuy": return ItemFeatureList.DiscountedBuy();
+                    case "premium_buy":
+                    case "premiumBuy": return ItemFeatureList.PremiumBuy();
+                    case "cigarette_authenticity":
+                    case "CATEGORY_GENUINE_CIGARETTE": return ItemFeatureList.CigaretteAuthenticity();
+                    case "stamp_authenticity":
+                    case "CATEGORY_GENUINE_STAMP": return ItemFeatureList.StampAuthenticity();
+                    case "module_stuck":
+                    case "moduleStuck":
+                    case "CATEGORY_MODULE_STUCK": return ItemFeatureList.ModuleStuckFeature();
+                    case "discount_25": return ItemFeatureList.Discount(25);
+                    case "bargain_markup":
+                    case "bargainMarkup": return ItemFeatureList.BargainMarkup(10);
+                    case "bargain_discount":
+                    case "bargainBuyingDiscount": return ItemFeatureList.BargainBuyingDiscount(10);
+                    case "equipment_good":
+                    case "CATEGORY_EQUIPMENT_CONDITION": return ItemFeatureList.EquipementConditionFeature((ItemFeatureList.EquipmentCondition)2);
+                }
+            }
+            catch { }
+            return null;
         }
 
         // 物品全字段 dump (基础 + 标签 base/modified + 特性含条件)
