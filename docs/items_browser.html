@@ -454,6 +454,7 @@ function renderGrid(){
     </div>`).join('') : '<div class="empty">无匹配物品</div>';
   grid.querySelectorAll('.card').forEach(c => c.onclick = () => showDetail(c.dataset.id));
   grid.querySelectorAll('.fav-btn').forEach(b => b.onclick = (e) => { e.stopPropagation(); toggleFav(b.dataset.fav); });
+  grid.querySelectorAll('.spawn-btn').forEach(b => b.onclick = (e) => { e.stopPropagation(); spawnItem(b.dataset.spawn, b); });
 }
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function showDetail(id){
@@ -756,10 +757,6 @@ document.getElementById('insDelete').onclick = async () => {
   if(jj.ok){ toast('删除请求已发送', 'ok'); document.getElementById('inspector').classList.remove('show'); setTimeout(()=>{ if(invShowing) refreshInv(); refreshMine(); }, 600); }
   else toast('删除失败: ' + (jj.err||''), 'bad');
 };
-document.body.addEventListener('click', e => {
-  const b = e.target.closest('[data-spawn]');
-  if(b) spawnItem(b.dataset.spawn, b);
-});
 setInterval(()=>{ const d = document.querySelector('.dot'); checkServer(); }, 5000);
 checkServer();
 updateMyBtn();
