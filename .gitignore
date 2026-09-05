@@ -3,7 +3,9 @@ obj/
 *.dll
 *.user
 *.bak_*
-dump/
+dump/*
+!dump/ascs/
+!dump/cpp2il_isil/
 InventorySorter/rs_algos/target/
 InventorySorter/rs_algos/*.txt
 InventorySorter/tscripts/pool_result.txt

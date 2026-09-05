@@ -136,30 +136,155 @@ namespace ProgressMod
             catch { /* IL2CPP 异常: 保持原值 */ }
         }
 
-        private void SpawnItem(string stableId, int count)
+        // ============ 生成物品: 玩家柜台加权表 (mod 引擎移植) ============
+        // 参照 ProbablyStolenItemManager: 生成 → SetAmount → AddDirectToWeightedTable(玩家柜台)
+        // → RefreshCounterItem. id 支持三种: stableId | "table:junk" 随机表 | "prebuilt:xxx" 变体
+        private void SpawnItem(string id, int count)
         {
             try
             {
-                var inv = EmporiumEntry.Instance.invElement;
-                if (inv == null) { MelonLogger.Warning("[Spawn] main inventory unavailable"); return; }
-                // 图纸/蓝图类不能直接生成: 提示正确物品ID
-                if (stableId.EndsWith("_instruction"))
+                if (count < 1) count = 1;
+                if (count > 999) count = 999;
+                // 存档门: 主菜单 sprite/lootTables 未初始化, DirectoryMaster.Item 会 NRE.
+                // EmporiumEntry 只有进入存档才存在 (原实现用其 invElement 判定)
+                if (EmporiumEntry.Instance == null)
                 {
-                    string alt = InstructionToItem(stableId);
-                    MelonLogger.Warning($"[Spawn] {stableId} 是图纸(蓝图), 不能直接生成. 用 {alt} 生成实物");
+                    MelonLogger.Warning("[Spawn] 未进入存档 (主菜单无物品资源), 先进入存档再生成");
                     return;
                 }
-                int ok = 0;
-                for (int i = 0; i < count; i++)
+                try { MelonLogger.Msg($"[Spawn][dbg] id={id} cnt={count}"); } catch { }
+                // 图纸/蓝图不能直接生成: 映射到实物 (mod 目录不含图纸, 网页目录含)
+                if (!id.StartsWith("table:") && !id.StartsWith("prebuilt:") && id.EndsWith("_instruction"))
                 {
-                    GameItem item = DirectoryMaster.Item(stableId, true);
-                    if (item == null) { MelonLogger.Warning($"[Spawn] DirectoryMaster rejected {stableId}"); break; }
-                    if (!((GameInventory)inv).MayHaveValidInventorySlot(item)) { MelonLogger.Warning($"[Spawn] no valid slot after {ok}/{count}"); break; }
-                    if (!((GameInventory)inv).UncheckedAccept(item)) { MelonLogger.Warning($"[Spawn] native rejected after {ok}/{count}"); break; }
-                    ok++;
+                    string alt = InstructionToItem(id);
+                    if (alt.StartsWith("<"))
+                    {
+                        MelonLogger.Warning($"[Spawn] {id} 是图纸(蓝图), 目录未映射实物, 跳过");
+                        return;
+                    }
+                    MelonLogger.Msg($"[Spawn] {id} 图纸 -> 实物 {alt}");
+                    id = alt;
                 }
+                GameItem item = null;
+                string detail = "";
+                if (id.StartsWith("table:") || id.StartsWith("prebuilt:"))
+                {
+                    // mod 引擎: 随机掉落表 / 预置变体
+                    try { MelonLogger.Msg($"[Spawn][dbg] gen {id}"); } catch { }
+                    if (!TryCreateGeneratedItem(id, out item, out detail))
+                    {
+                        MelonLogger.Warning($"[Spawn] mod 引擎拒绝 {id}: {detail}");
+                        return;
+                    }
+                    try { MelonLogger.Msg($"[Spawn][dbg] gen ok item={item != null}"); } catch { }
+                }
+                else
+                {
+                    // 常规 stableId: DirectoryMaster 直生优先, ItemSpawner.Spawn (mod alias 解析) 兜底
+                    try { MelonLogger.Msg($"[Spawn][dbg] direct {id}"); } catch { }
+                    item = DirectoryMaster.Item(id, true);
+                    try { MelonLogger.Msg($"[Spawn][dbg] dm item={item != null}"); } catch { }
+                    if (item == null) item = ItemSpawner.Spawn(id);
+                    try { MelonLogger.Msg($"[Spawn][dbg] after fallback item={item != null}"); } catch { }
+                    if (item == null) { MelonLogger.Warning($"[Spawn] DirectoryMaster/ItemSpawner 均拒绝 {id}"); return; }
+                }
+                var store = PlayerStore.Instance;
+                try { MelonLogger.Msg($"[Spawn][dbg] store null={(store == null)}"); } catch { }
+                if (store == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无玩家柜台"); return; }
+                item.SetAmount(count);
+                store.AddDirectToWeightedTable(item, true);
+                try { store.RefreshCounterItem(); } catch { /* IL2CPP 异常: 保持原值 */ }
+                MelonLogger.Msg($"[Spawn] added to counter {id} x{count}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
+        }
+
+        // mod 引擎: table:/prebuilt: 统一生成入口 (照抄 ProbablyStolenItemManager.TryCreateGeneratedItem)
+        private static bool TryCreateGeneratedItem(string generatorKey, out GameItem item, out string detail)
+        {
+            item = null;
+            detail = "";
+            try
+            {
+                if (generatorKey.StartsWith("table:", StringComparison.Ordinal))
+                {
+                    string text = ResolveNamedTableId(generatorKey.Substring("table:".Length));
+                    if (string.IsNullOrWhiteSpace(text)) { detail = "table not initialized"; return false; }
+                    item = ItemSpawner.SpawnFromTable(text);
+                }
+                else
+                {
+                    switch (generatorKey)
+                    {
+                        case "prebuilt:random_cigarette": item = PreBuiltItemHelper.RandomCigarette(); break;
+                        case "prebuilt:fake_cigarette": item = PreBuiltItemHelper.FakeCigarette(); break;
+                        case "prebuilt:counterfeit_cigarette": item = PreBuiltItemHelper.CounterfeitCigarette(); break;
+                        case "prebuilt:random_injector": item = PreBuiltItemHelper.CreateRandomInjector(); break;
+                        case "prebuilt:genuine_injector": item = PreBuiltItemHelper.CreateRealGenuineInjector(); break;
+                        case "prebuilt:expired_injector": item = PreBuiltItemHelper.CreateRealExpiredInjector(); break;
+                        case "prebuilt:counterfeit_injector": item = PreBuiltItemHelper.CreateRealCounterfeitInjector(); break;
+                        case "prebuilt:random_stamp": item = PreBuiltItemHelper.CreateRandomStamp(); break;
+                        case "prebuilt:fake_stamp": item = PreBuiltItemHelper.CreateFakeStamp(); break;
+                        case "prebuilt:real_stamp": item = PreBuiltItemHelper.CreateRealStamp(); break;
+                        case "prebuilt:random_performance_module": item = PreBuiltItemHelper.RandomPerformanceModule(); break;
+                        case "prebuilt:random_efficiency_module": item = PreBuiltItemHelper.RandomEfficiencyModule(); break;
+                        case "prebuilt:random_quality_module": item = PreBuiltItemHelper.RandomQualityModule(); break;
+                        case "prebuilt:random_overclock_module": item = PreBuiltItemHelper.RandomOverclockModule(); break;
+                        case "prebuilt:random_eco_module": item = PreBuiltItemHelper.RandomEcoModule(); break;
+                        case "prebuilt:random_fineness_module": item = PreBuiltItemHelper.RandomFinenessModule(); break;
+                        case "prebuilt:random_node": item = PreBuiltItemHelper.RandomNode(); break;
+                        case "prebuilt:random_ribwich": item = PreBuiltItemHelper.CreateRibwichRandom(); break;
+                        case "prebuilt:random_hand": item = PreBuiltItemHelper.CreateHandRandom(); break;
+                        default: detail = "unknown generator key"; return false;
+                    }
+                }
+                if (item == null) { detail = "game returned no item"; return false; }
+                return true;
+            }
+            catch (Exception e) { detail = e.Message; return false; }
+        }
+
+        // mod 引擎: 命名表 -> 游戏表 ID (TableMaster const 优先, 同名 ID 回退)
+        private static string ResolveNamedTableId(string tableKey)
+        {
+            try
+            {
+                if (TableMaster.Instance != null)
+                {
+                    string text = tableKey switch
+                    {
+                        "junk" => TableMaster.junkTable,
+                        "access_card" => TableMaster.accessCardTable,
+                        "all_module" => TableMaster.allModuleTable,
+                        "makeshift_weapon" => TableMaster.makeshiftWeaponTable,
+                        "material" => TableMaster.materialTable,
+                        "household" => TableMaster.householdTable,
+                        "packed_food" => TableMaster.packedFoodTable,
+                        "t1module" => TableMaster.t1moduleTable,
+                        "t2module" => TableMaster.t2moduleTable,
+                        "tool" => TableMaster.toolTable,
+                        "medical" => TableMaster.medicalTable,
+                        _ => "",
+                    };
+                    if (!string.IsNullOrWhiteSpace(text)) return text;
+                }
+            }
+            catch { /* IL2CPP 异常: 保持原值 */ }
+            return tableKey switch
+            {
+                "junk" => "junk",
+                "access_card" => "access_card",
+                "all_module" => "all_module",
+                "makeshift_weapon" => "makeshift_weapon",
+                "material" => "material",
+                "household" => "household",
+                "packed_food" => "packed_food",
+                "t1module" => "t1module",
+                "t2module" => "t2module",
+                "tool" => "tool",
+                "medical" => "medical",
+                _ => "",
+            };
         }
 
         // 图纸 -> 实物物品 映射 (布局目录里的机器/家具)

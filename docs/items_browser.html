@@ -87,6 +87,41 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
 </div>
 <script src="items_data_full.js"></script>
 <script>
+// mod 生成引擎合成卡 (参照 ProbablyStolenItemManager.GeneratedEntries): 随机掉落表 + 预置变体
+// itemId 传 table:xxx / prebuilt:xxx, ProgressMod 端按前缀分发
+const GENERATED_ITEMS = [
+  {stableId:'table:junk',nameZh:'随机掉落：杂项',nameEn:'Random drop: Junk',categories:['RANDOM_DROP'],descriptionZh:'从杂项掉落表随机取一件',descriptionEn:'Random item from the junk drop table',kind:'mod-generator'},
+  {stableId:'table:access_card',nameZh:'随机掉落：门禁卡',nameEn:'Random drop: Access card',categories:['RANDOM_DROP'],descriptionZh:'从门禁卡掉落表随机取一张',descriptionEn:'Random access card',kind:'mod-generator'},
+  {stableId:'table:all_module',nameZh:'随机掉落：全部模块',nameEn:'Random drop: All modules',categories:['RANDOM_DROP'],descriptionZh:'从全模块掉落表随机取一个',descriptionEn:'Random module from the full module table',kind:'mod-generator'},
+  {stableId:'table:makeshift_weapon',nameZh:'随机掉落：简易武器',nameEn:'Random drop: Makeshift weapon',categories:['RANDOM_DROP'],descriptionZh:'从简易武器掉落表随机取一件',descriptionEn:'Random makeshift weapon',kind:'mod-generator'},
+  {stableId:'table:material',nameZh:'随机掉落：材料',nameEn:'Random drop: Material',categories:['RANDOM_DROP'],descriptionZh:'从材料掉落表随机取一件',descriptionEn:'Random material',kind:'mod-generator'},
+  {stableId:'table:household',nameZh:'随机掉落：日用品',nameEn:'Random drop: Household',categories:['RANDOM_DROP'],descriptionZh:'从日用品掉落表随机取一件',descriptionEn:'Random household good',kind:'mod-generator'},
+  {stableId:'table:packed_food',nameZh:'随机掉落：包装食品',nameEn:'Random drop: Packed food',categories:['RANDOM_DROP'],descriptionZh:'从包装食品掉落表随机取一件',descriptionEn:'Random packed food',kind:'mod-generator'},
+  {stableId:'table:t1module',nameZh:'随机掉落：一级模块',nameEn:'Random drop: Tier 1 module',categories:['RANDOM_DROP'],descriptionZh:'从一级模块掉落表随机取一个',descriptionEn:'Random tier-1 module',kind:'mod-generator'},
+  {stableId:'table:t2module',nameZh:'随机掉落：二级模块',nameEn:'Random drop: Tier 2 module',categories:['RANDOM_DROP'],descriptionZh:'从二级模块掉落表随机取一个',descriptionEn:'Random tier-2 module',kind:'mod-generator'},
+  {stableId:'table:tool',nameZh:'随机掉落：工具',nameEn:'Random drop: Tool',categories:['RANDOM_DROP'],descriptionZh:'从工具掉落表随机取一件',descriptionEn:'Random tool',kind:'mod-generator'},
+  {stableId:'table:medical',nameZh:'随机掉落：医疗品',nameEn:'Random drop: Medical',categories:['RANDOM_DROP'],descriptionZh:'从医疗品掉落表随机取一件',descriptionEn:'Random medical item',kind:'mod-generator'},
+  {stableId:'prebuilt:random_cigarette',nameZh:'变体：随机香烟',nameEn:'Variant: Random cigarette',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机状态的香烟',descriptionEn:'Prebuilt variant: cigarette in a random condition',kind:'mod-generator'},
+  {stableId:'prebuilt:fake_cigarette',nameZh:'变体：假香烟',nameEn:'Variant: Fake cigarette',categories:['PREBUILT'],descriptionZh:'游戏预置变体：假香烟',descriptionEn:'Prebuilt variant: fake cigarette',kind:'mod-generator'},
+  {stableId:'prebuilt:counterfeit_cigarette',nameZh:'变体：仿制香烟',nameEn:'Variant: Counterfeit cigarette',categories:['PREBUILT'],descriptionZh:'游戏预置变体：仿制香烟',descriptionEn:'Prebuilt variant: counterfeit cigarette',kind:'mod-generator'},
+  {stableId:'prebuilt:random_injector',nameZh:'变体：随机注射器',nameEn:'Variant: Random injector',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机状态注射器',descriptionEn:'Prebuilt variant: injector in a random state',kind:'mod-generator'},
+  {stableId:'prebuilt:genuine_injector',nameZh:'变体：真注射器',nameEn:'Variant: Genuine injector',categories:['PREBUILT'],descriptionZh:'游戏预置变体：真注射器',descriptionEn:'Prebuilt variant: genuine injector',kind:'mod-generator'},
+  {stableId:'prebuilt:expired_injector',nameZh:'变体：过期注射器',nameEn:'Variant: Expired injector',categories:['PREBUILT'],descriptionZh:'游戏预置变体：过期注射器',descriptionEn:'Prebuilt variant: expired injector',kind:'mod-generator'},
+  {stableId:'prebuilt:counterfeit_injector',nameZh:'变体：仿制注射器',nameEn:'Variant: Counterfeit injector',categories:['PREBUILT'],descriptionZh:'游戏预置变体：仿制注射器',descriptionEn:'Prebuilt variant: counterfeit injector',kind:'mod-generator'},
+  {stableId:'prebuilt:random_stamp',nameZh:'变体：随机邮票',nameEn:'Variant: Random stamp',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机状态邮票',descriptionEn:'Prebuilt variant: stamp in a random state',kind:'mod-generator'},
+  {stableId:'prebuilt:fake_stamp',nameZh:'变体：假邮票',nameEn:'Variant: Fake stamp',categories:['PREBUILT'],descriptionZh:'游戏预置变体：假邮票',descriptionEn:'Prebuilt variant: fake stamp',kind:'mod-generator'},
+  {stableId:'prebuilt:real_stamp',nameZh:'变体：真邮票',nameEn:'Variant: Real stamp',categories:['PREBUILT'],descriptionZh:'游戏预置变体：真邮票',descriptionEn:'Prebuilt variant: real stamp',kind:'mod-generator'},
+  {stableId:'prebuilt:random_performance_module',nameZh:'变体：随机性能模块',nameEn:'Variant: Random performance module',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机性能模块',descriptionEn:'Prebuilt variant: random performance module',kind:'mod-generator'},
+  {stableId:'prebuilt:random_efficiency_module',nameZh:'变体：随机效率模块',nameEn:'Variant: Random efficiency module',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机效率模块',descriptionEn:'Prebuilt variant: random efficiency module',kind:'mod-generator'},
+  {stableId:'prebuilt:random_quality_module',nameZh:'变体：随机质量模块',nameEn:'Variant: Random quality module',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机质量模块',descriptionEn:'Prebuilt variant: random quality module',kind:'mod-generator'},
+  {stableId:'prebuilt:random_overclock_module',nameZh:'变体：随机超频模块',nameEn:'Variant: Random overclock module',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机超频模块',descriptionEn:'Prebuilt variant: random overclock module',kind:'mod-generator'},
+  {stableId:'prebuilt:random_eco_module',nameZh:'变体：随机生态模块',nameEn:'Variant: Random eco module',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机生态模块',descriptionEn:'Prebuilt variant: random eco module',kind:'mod-generator'},
+  {stableId:'prebuilt:random_fineness_module',nameZh:'变体：随机精细模块',nameEn:'Variant: Random fineness module',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机精细模块',descriptionEn:'Prebuilt variant: random fineness module',kind:'mod-generator'},
+  {stableId:'prebuilt:random_node',nameZh:'变体：随机节点',nameEn:'Variant: Random node',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机节点',descriptionEn:'Prebuilt variant: random node',kind:'mod-generator'},
+  {stableId:'prebuilt:random_ribwich',nameZh:'变体：随机 Ribwich',nameEn:'Variant: Random Ribwich',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机 Ribwich 三明治',descriptionEn:'Prebuilt variant: random Ribwich',kind:'mod-generator'},
+  {stableId:'prebuilt:random_hand',nameZh:'变体：随机手部物品',nameEn:'Variant: Random hand item',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机手部物品',descriptionEn:'Prebuilt variant: random hand item',kind:'mod-generator'}
+];
+ITEMS.push(...GENERATED_ITEMS);
 const grid = document.getElementById('grid');
 const search = document.getElementById('search');
 const catList = document.getElementById('catList');
@@ -126,7 +161,9 @@ const CAT_ZH = {
   'SUPPLIES': '补给品',
   'TOOLS': '工具',
   'WEAPONS': '武器',
-  'WEAPON_MODS': '武器配件'
+  'WEAPON_MODS': '武器配件',
+  'RANDOM_DROP': '🎲 随机掉落',
+  'PREBUILT': '🧬 预置变体'
 };
 function zCat(c){ return CAT_ZH[c] || c; }
 
