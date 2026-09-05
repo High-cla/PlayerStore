@@ -281,9 +281,11 @@ namespace ProgressMod
             catch { /* IL2CPP 异常: 保持原值 */ }
         }
 
-        // ============ 生成物品: 玩家柜台加权表 (mod 引擎移植) ============
-        // 参照 ProbablyStolenItemManager: 生成 → SetAmount → AddDirectToWeightedTable(玩家柜台)
-        // → RefreshCounterItem. id 支持三种: stableId | "table:junk" 随机表 | "prebuilt:xxx" 变体
+        // ============ 生成物品: 落点主背包 (v0.4.3) ============
+        // 生成 → SetAmount → invElement(主背包) MayHaveValidInventorySlot + UncheckedAccept
+        // (老版 ca0866d 同款落点). 先前 91844a7/3eed77f 走柜台 AddDirectToWeightedTable →
+        // RefreshCounterItem, 但后柜台网格装不下大件(如 backpack_large_military) 会静默生成失败,
+        // 用户确认全量改回主背包. id 支持三种: stableId | "table:junk" 随机表 | "prebuilt:xxx" 变体
         private void SpawnItem(int token, string id, int count)
         {
             try
@@ -343,13 +345,29 @@ namespace ProgressMod
                     }
                     catch (Exception fxEx) { MelonLogger.Warning($"[Spawn] InitRandomEffect({id}) 异常: {fxEx.Message}"); }
                 }
-                var store = PlayerStore.Instance;
-                if (store == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无玩家柜台"); return; }
+                var inv = EmporiumEntry.Instance?.invElement;
+                if (inv == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无主背包容器"); return; }
                 item.SetAmount(count);
-                store.AddDirectToWeightedTable(item, true);
-                try { store.RefreshCounterItem(); } catch { /* IL2CPP 异常: 保持原值 */ }
+                try
+                {
+                    if (!((GameInventory)inv).MayHaveValidInventorySlot(item))
+                    {
+                        MelonLogger.Warning($"[Spawn] 主背包无有效格子放置 {id} (背包满?)");
+                        return;
+                    }
+                }
+                catch (Exception slotEx) { MelonLogger.Warning($"[Spawn] MayHaveValidInventorySlot({id}) 异常: {slotEx.Message}"); }
+                try
+                {
+                    if (!((GameInventory)inv).UncheckedAccept(item))
+                    {
+                        MelonLogger.Warning($"[Spawn] UncheckedAccept 拒绝 {id}");
+                        return;
+                    }
+                }
+                catch (Exception accEx) { MelonLogger.Warning($"[Spawn] UncheckedAccept({id}) 异常: {accEx.Message}"); }
                 if (token > 0) { SpawnedItems[token] = item; }
-                MelonLogger.Msg($"[Spawn] added to counter {id} x{count}");
+                MelonLogger.Msg($"[Spawn] 生成到主背包 {id} x{count}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
         }
@@ -433,8 +451,8 @@ namespace ProgressMod
 
         // ============ 库存枚举 / 定位 / 删除 (任意库存物品) ============
         // 全部玩家库存清单 (照 mod GetKnownInventories 主库存集合). 每个返回 GameInventory
-        // 注意: AddDirectToWeightedTable 落点是 EmporiumEntry.backInvinvElement (偏移 0x152),
-        // 漏枚举该容器会导致 spawn 物品 dump/inventory 查不到
+        // 注意: spawn 落点 = EmporiumEntry.invElement (柜台货架/主背包, 本函数第 451 行已枚举);
+        // 其余后柜台/巴扎等容器一并枚举, 供 edit/delete 定位任意库存物品
         private static System.Collections.Generic.List<GameInventory> EnumeratePlayerInventories()
         {
             var list = new System.Collections.Generic.List<GameInventory>();
