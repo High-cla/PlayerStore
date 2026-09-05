@@ -407,6 +407,16 @@ const TYPE_ZH = {
   'SUPPLY_CRATE': '补给箱', 'TOOL': '工具', 'TREAT': '零食', 'WATER': '水',
   'WATER_PURIFICATION_SUPPLY': '净水用品', 'WATER_RATION': '配给水', 'WEAPON': '武器'
 };
+// 游戏内部属性标签名 → 中文: item.state/modifiedState 里某些 tag 的 key/label 本身是
+// TYPE-STRING_<snake_case> 本地化键 (TagSystem.StringToDisplayString 生成, 如装甲/背包件模板自动标签),
+// 不在物品类型 TYPE_ZH 词表内. key 全小写匹配. (实测来源: backpack_large_military 真机 dump)
+const TAGNAME_ZH = {
+  backpack:'背包', equippable:'可装备', armor_item:'护甲件',
+  default_armor_value:'默认护甲值', current_max_armor_value:'当前最大护甲值', current_armor_value:'当前护甲值',
+  armor_efficiency:'护甲效率', armor_mitigation:'护甲减伤', armor_protection:'护甲防护',
+  armor_resilience:'护甲韧性', armor_accuracy_modifier:'护甲精度修正', armor_dodge_modifier:'护甲闪避修正',
+  item_type_string:'物品类型'
+};
 function zType(t){ return TYPE_ZH[t] || t; }
 
 function categoryCounts(){
@@ -680,7 +690,7 @@ function renderTags(){
   document.getElementById('tagBase').innerHTML = base.length ? base.map(tagHTML).join('') : '<div class="insp-empty">无 base 标签</div>';
   document.getElementById('tagMod').innerHTML = mod.length ? mod.map(t => tagHTML(t,true)).join('') : '<div class="insp-empty">无 modified 标签</div>';
 }
-// tag 中文: 优先 TAG_ZH[key]; 剥掉 TYPE-STRING_ 前缀后查 TYPE_ZH(物品类型)/TAG_ZH; label 同法兜底
+// tag 中文: 优先 TAG_ZH[key]; 剥掉 TYPE-STRING_ 前缀后查 TYPE_ZH(物品类型)/TAG_ZH/TAGNAME_ZH(内部属性名); label 同法兜底
 function zhTag(t){
   const k = String(t.key||'');
   const l = String(t.label||'');
@@ -689,10 +699,14 @@ function zhTag(t){
   if(kk!==k){
     if(TYPE_ZH && TYPE_ZH[kk]) return TYPE_ZH[kk];
     if(TAG_ZH && TAG_ZH[kk]) return TAG_ZH[kk];
+    const kkk = kk.toLowerCase();
+    if(TAGNAME_ZH && TAGNAME_ZH[kkk]) return TAGNAME_ZH[kkk];
   }
   const ll = l.replace(/^TYPE-STRING_/,'');
   if(TYPE_ZH && TYPE_ZH[ll]) return TYPE_ZH[ll];
   if(TAG_ZH && TAG_ZH[ll]) return TAG_ZH[ll];
+  const lll = ll.toLowerCase();
+  if(TAGNAME_ZH && TAGNAME_ZH[lll]) return TAGNAME_ZH[lll];
   return l || t.key;
 }
 // label 是否只是未本地化键的镜像(TYPE-STRING_* 且能映射), 若是则 .v 不重复显示
@@ -700,7 +714,7 @@ function isMirrorLabel(t){
   const l = String(t.label||'');
   if(!l.startsWith('TYPE-STRING_')) return false;
   const ll = l.slice('TYPE-STRING_'.length);
-  return !!(TYPE_ZH && TYPE_ZH[ll]) || !!(TAG_ZH && TAG_ZH[ll]);
+  return !!(TYPE_ZH && TYPE_ZH[ll]) || !!(TAG_ZH && TAG_ZH[ll]) || !!(TAGNAME_ZH && TAGNAME_ZH[ll.toLowerCase()]);
 }
 function tagHTML(t, modified){
   const m = modified ? '&mod' : '';
