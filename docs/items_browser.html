@@ -180,6 +180,7 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
    </div>
  </div>
 <script src="items_data_full.js"></script>
+<script src="tag_zh.js"></script>
 <script>
 // mod 生成引擎合成卡 (参照 ProbablyStolenItemManager.GeneratedEntries): 随机掉落表 + 预置变体
 // itemId 传 table:xxx / prebuilt:xxx, ProgressMod 端按前缀分发
@@ -216,6 +217,134 @@ const GENERATED_ITEMS = [
   {stableId:'prebuilt:random_hand',nameZh:'变体：随机手部物品',nameEn:'Variant: Random hand item',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机手部物品',descriptionEn:'Prebuilt variant: random hand item',kind:'mod-generator'}
 ];
 ITEMS.push(...GENERATED_ITEMS);
+// ===== NEW_ITEMS 30 项中英名补全 (源: mod/item_catalog.json + 同类推断) =====
+const EXTRA_NAMES = {
+ "3d_printer_instruction": {
+  "zh": "3D打印机说明",
+  "en": "3D Printer Instruction"
+ },
+ "age_well": {
+  "zh": "催陈器",
+  "en": "AgeWell"
+ },
+ "age_well_instruction": {
+  "zh": "催陈器说明",
+  "en": "AgeWell Instructions"
+ },
+ "alarm_instruction": {
+  "zh": "警报器使用手册",
+  "en": "Alarm Instruction Manual"
+ },
+ "ancient_alien_relics": {
+  "zh": "“远古外星遗物”",
+  "en": "\"Ancient Alien Relics\""
+ },
+ "bandage": {
+  "zh": "基础绷带",
+  "en": "Basic Bandage"
+ },
+ "beer_case": {
+  "zh": "一箱红魔啤酒",
+  "en": "Red Imp Beer Case"
+ },
+ "dehydrated_water": {
+  "zh": "100%脱水纯水",
+  "en": "100% Pure Dehydrated Water"
+ },
+ "evaporator_instruction": {
+  "zh": "蒸发器说明",
+  "en": "Evaporator Instruction"
+ },
+ "furnace_instruction": {
+  "zh": "使用说明：熔炉",
+  "en": "How To: The Furnace"
+ },
+ "genetic_scanner": {
+  "zh": "基因扫描仪",
+  "en": "Gene Scanner"
+ },
+ "hemostatic_bandage": {
+  "zh": "止血绷带",
+  "en": "Hemostatic Bandage"
+ },
+ "hydroponic_instruction": {
+  "zh": "水培系统说明",
+  "en": "Hydroponic Instruction"
+ },
+ "hydroponic_nutrient_tablet": {
+  "zh": "水培营养片",
+  "en": "Hydroponic Nutrient Tablet"
+ },
+ "modified_access_card": {
+  "zh": "篡改识别卡",
+  "en": "Modified Access Card"
+ },
+ "moisture_farm_instruction": {
+  "zh": "使用说明：水分收集器",
+  "en": "How To: The Moisture Farm"
+ },
+ "node": {
+  "zh": "节点",
+  "en": "Node"
+ },
+ "permit_gun_1": {
+  "zh": "一级武器许可证",
+  "en": "Class 1 Weapon Permit"
+ },
+ "printer_chip": {
+  "zh": "3D打印芯片",
+  "en": "3D Printer Chip"
+ },
+ "projector_instruction": {
+  "zh": "使用说明：投影仪",
+  "en": "How To: The Projector"
+ },
+ "scav_journal": {
+  "zh": "拾荒者的日志",
+  "en": "Scav's journal entry"
+ },
+ "sign_generic": {
+  "zh": "普通霓虹灯牌",
+  "en": "Generic Neon Sign"
+ },
+ "sign_luxury": {
+  "zh": "奢侈品霓虹灯牌",
+  "en": "Luxury Item Neon Sign"
+ },
+ "skinning_knife": {
+  "zh": "剥皮刀",
+  "en": "Skinning Knife"
+ },
+ "toolbox": {
+  "zh": "工具箱",
+  "en": "Toolbox"
+ },
+ "topical_bandage": {
+  "zh": "外用药膏绷带",
+  "en": "Topical Medication Bandage"
+ },
+ "used_water_testing_strip": {
+  "zh": "水质检测试纸（已使用）",
+  "en": "Water Testing Strip (Used)"
+ },
+ "water_purifier_instruction": {
+  "zh": "净水器说明",
+  "en": "Water Purifier Instructions"
+ },
+ "wine_bloomberry": {
+  "zh": "荧光莓果酿",
+  "en": "BloomBerry Wine"
+ },
+ "wine_gloomberry": {
+  "zh": "阴光莓果酿",
+  "en": "GloomBerry Wine"
+ }
+};
+ITEMS.forEach(it => {
+  const x = EXTRA_NAMES[it.stableId];
+  if(x && !it.nameZh) it.nameZh = x.zh;
+  if(x && !it.nameEn) it.nameEn = x.en;
+});
 const grid = document.getElementById('grid');
 const search = document.getElementById('search');
 const catList = document.getElementById('catList');
@@ -257,7 +386,8 @@ const CAT_ZH = {
   'WEAPONS': '武器',
   'WEAPON_MODS': '武器配件',
   'RANDOM_DROP': '🎲 随机掉落',
-  'PREBUILT': '🧬 预置变体'
+  'PREBUILT': '🧬 预置变体',
+  'NEW_ITEMS': '🆕 新增物品'
 };
 function zCat(c){ return CAT_ZH[c] || c; }
 
@@ -541,7 +671,7 @@ function tagHTML(t, modified){
   const m = modified ? '&mod' : '';
   const on = t.enabled;
   return `<div class="insp-row">
-    <span class="k">${esc(t.key)}</span>
+    <span class="k" title="key: ${esc(t.key)}">${esc((TAG_ZH && TAG_ZH[t.key]) || t.label || t.key)}</span>
     <span class="v">${esc(t.label||'')} · int=${t.valueInt} · str=${esc(t.valueString||'')}</span>
     <select class="tog" data-key="${esc(t.key)}" data-m="${m}">
       <option value="1" ${on?'selected':''}>开</option>

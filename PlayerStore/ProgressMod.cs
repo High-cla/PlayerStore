@@ -44,6 +44,13 @@ namespace ProgressMod
         private enum ItemOpKind { Edit, Delete }
         private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)> PendingItemOps =
             new System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)>();
+        // DumpItem 含 native 方法调用 (GetPublicDisplay/GetActualDisplay 等), 跨线程会 AccessViolation (il2cpp_runtime_invoke).
+        // 必须主线程执行: HTTP 线程入队 (uid, seq), 主线程 OnUpdate 产出写 DumpResults[seq], HTTP 线程轮询取值.
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<(int uid, long seq)> PendingItemDumps =
+            new System.Collections.Concurrent.ConcurrentQueue<(int uid, long seq)>();
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, object> DumpResults =
+            new System.Collections.Concurrent.ConcurrentDictionary<long, object>();
+        private static long _dumpSeq;
         // token -> 本次生成实例 (网页端 "我的生成" 追踪). 游戏重启即失效 (物品仍在库存但引用丢失, 由新生成覆盖)
         private static readonly System.Collections.Generic.Dictionary<int, GameItem> SpawnedItems = new System.Collections.Generic.Dictionary<int, GameItem>();
         private static int _spawnTokenSeq;
@@ -60,6 +67,16 @@ namespace ProgressMod
                 while (PendingItemOps.TryDequeue(out var op))
                 {
                     ApplyItemOp(op.Item1, op.Item2, op.Item3, op.Item4);
+                }
+                while (PendingItemDumps.TryDequeue(out var dj))
+                {
+                    // 主线程执行 DumpItem (含 native 方法调用), 结果写回供 HTTP 线程轮询
+                    try
+                    {
+                        var ditem = FindItemByUid(dj.uid);
+                        DumpResults[dj.seq] = ditem == null ? null : DumpItem(ditem);
+                    }
+                    catch (Exception e) { DumpResults[dj.seq] = null; MelonLogger.Error($"[ItemOp] dump uid={dj.uid} ex: {e.Message}"); }
                 }
             }
             catch { /* IL2CPP 异常: 保持原值 */ }
@@ -183,11 +200,27 @@ namespace ProgressMod
                     }
                     else if (req.Url.AbsolutePath == "/api/item")
                     {
+                        // DumpItem 含 native 方法调用, 必须主线程执行: 入队 (uid, seq) 后轮询 DumpResults
                         var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
                         int uid = 0; int.TryParse(q["uid"], out uid);
-                        var it = uid != 0 ? FindItemByUid(uid) : null;
-                        if (it == null) { resp = new { ok = false, err = "item not found" }; }
-                        else { resp = new { ok = true, item = DumpItem(it) }; code = 200; }
+                        if (uid == 0) { resp = new { ok = false, err = "need uid" }; }
+                        else
+                        {
+                            long seq = System.Threading.Interlocked.Increment(ref _dumpSeq);
+                            PendingItemDumps.Enqueue((uid, seq));
+                            object dump = null;
+                            int waited = 0;
+                            while (waited < 5000)
+                            {
+                                if (DumpResults.TryRemove(seq, out dump)) break;
+                                System.Threading.Thread.Sleep(10);
+                                waited += 10;
+                            }
+                            if (dump == null && !DumpResults.ContainsKey(seq))
+                                resp = new { ok = false, err = "dump timeout (主线程未响应, 是否在存档?)" };
+                            else if (dump == null) { resp = new { ok = false, err = "item not found" }; }
+                            else { resp = new { ok = true, item = dump }; code = 200; }
+                        }
                     }
                     else if (req.Url.AbsolutePath == "/api/edit")
                     {
