@@ -19,12 +19,16 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<int> CfgOutputMult = Cfg.CreateEntry<int>("OutputMult", 3, "机器产出倍率");
         public static readonly MelonPreferences_Entry<string> CfgSpawnId = Cfg.CreateEntry<string>("SpawnItemId", "", "生成物品: 填物品 stableId (如 box_tampon), F9 生成到主背包. 空=禁用");
         public static readonly MelonPreferences_Entry<int> CfgSpawnCount = Cfg.CreateEntry<int>("SpawnItemCount", 1, "生成物品数量 (不填默认1)");
+        public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
+        public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
         public static bool ForceFinish => CfgForceFinish.Value;
         public static bool NoDurability => CfgNoDurability.Value;
         public static int ModuleBoostMult => CfgModuleBoostMult.Value;
         public static bool PurifyAlwaysPure => CfgPurifyAlwaysPure.Value;
         public static int OutputMult => CfgOutputMult.Value;
+        public static bool NeverWounded => CfgNeverWounded.Value;
+        public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
 
         public override void OnInitializeMelon()
         {
@@ -1171,6 +1175,63 @@ namespace ProgressMod
             }
         }
 
+
+        // ============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============
+        // ScavHelper 负责拾荒受伤掷骰; HealthData 负责伤口结算与恶化.
+        // 统一策略: bool 返回 Postfix 强制 false/0, void 结算 Prefix 跳过.
+        [HarmonyPatch(typeof(ScavHelper), "RollMinorWound")] public static class PatchRollMinorWound
+        {
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "RollMajorWound")] public static class PatchRollMajorWound
+        {
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "GetMinorWoundChance")] public static class PatchGetMinorWoundChance
+        {
+            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { /* IL2CPP 异常: 保持原值 */ } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "GetMajorWoundChance")] public static class PatchGetMajorWoundChance
+        {
+            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { /* IL2CPP 异常: 保持原值 */ } }
+        }
+        [HarmonyPatch(typeof(HealthData), "ReceiveMinorWound")] public static class PatchReceiveMinorWound
+        {
+            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
+        }
+        [HarmonyPatch(typeof(HealthData), "ReceiveMajorWound")] public static class PatchReceiveMajorWound
+        {
+            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
+        }
+        [HarmonyPatch(typeof(HealthData), "IsSeriouslyWounded")] public static class PatchIsSeriouslyWounded
+        {
+            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
+        }
+        [HarmonyPatch(typeof(HealthData), "HandleNightlyWound")] public static class PatchHandleNightlyWound
+        {
+            public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
+        }
+
+        // ============ 无限拾荒: 次数与冷却不受限 ============
+        // Cpp2IL ISIL 静态分析 (ScavHelper.txt):
+        //   CanScavenge: 内联计算 base(5/7 - IsProficientScavenger) - 折算used - PlayerStore[+536](今日计数), 剩余<=0 返回 false
+        //   GetMaxScavAttempts/GetScavTimeLeft: 同样内联计算 (不互相调用)
+        //   ResetScavenging: PlayerStore[+536] = 0
+        // 核心限制点是 CanScavenge (UI/逻辑都问它), patch 它返回 true 即可;
+        // GetMaxScavAttempts/GetScavTimeLeft 也 patch 9999 (其他调用方可能直接读).
+        [HarmonyPatch(typeof(ScavHelper), "CanScavenge")]
+        public static class PatchCanScavenge
+        {
+            public static void Postfix(ref bool __result) { try { if (InfiniteScavenging) __result = true; } catch { /* IL2CPP 异常: 保持原值 */ } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "GetMaxScavAttempts")] public static class PatchGetMaxScavAttempts
+        {
+            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { /* IL2CPP 异常: 保持原值 */ } }
+        }
+        [HarmonyPatch(typeof(ScavHelper), "GetScavTimeLeft")] public static class PatchGetScavTimeLeft
+        {
+            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { /* IL2CPP 异常: 保持原值 */ } }
+        }
 
     }
 }
