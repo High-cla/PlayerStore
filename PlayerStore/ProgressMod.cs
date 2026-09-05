@@ -281,11 +281,14 @@ namespace ProgressMod
             catch { /* IL2CPP 异常: 保持原值 */ }
         }
 
-        // ============ 生成物品: 落点主背包 (v0.4.3) ============
-        // 生成 → SetAmount → invElement(主背包) MayHaveValidInventorySlot + UncheckedAccept
-        // (老版 ca0866d 同款落点). 先前 91844a7/3eed77f 走柜台 AddDirectToWeightedTable →
-        // RefreshCounterItem, 但后柜台网格装不下大件(如 backpack_large_military) 会静默生成失败,
-        // 用户确认全量改回主背包. id 支持三种: stableId | "table:junk" 随机表 | "prebuilt:xxx" 变体
+        // ============ 生成物品: 落点照物品管理器 (玩家柜台加权表) ============
+        // 生成 → SetAmount → PlayerStore.Instance.AddDirectToWeightedTable(item, true) →
+        // RefreshCounterItem. 照 ProbablyStolenItemManager.ItemManager.cs:3386-3394; 物品管理器
+        // 从不做网格放置 (MayHave/UncheckedAccept) —— 硬塞网格会让机器件 (printer/chem_scanner/
+        // 50ml_cylinder) 变 "?" + 未拥有幽灵物. 加权表入货 = 玩家柜台可售库存, 机器件也是普通货.
+        // 历史: 91844a7/3eed77f 曾走 EmporiumEntry 柜台 → 大件静默失败 → 0a2e7e9 改 invElement
+        // 主背包网格 → 机器件变 "?" → 本次照物品管理器改回 PlayerStore.Instance 加权表 (仅落点).
+        // id 三种: stableId | "table:junk" 随机表 | "prebuilt:xxx" 变体
         private void SpawnItem(int token, string id, int count)
         {
             try
@@ -324,10 +327,14 @@ namespace ProgressMod
                 }
                 else
                 {
-                    // 常规 stableId: 对齐原版 ItemManager.cs:3366 —— ItemSpawner.Spawn 优先 (内部查
-                    // PreBuiltItemHelper 引擎表, 命中经引擎 factory 词条注入; 未命中 fallback 裸模板)
-                    try { item = ItemSpawner.Spawn(id); }
-                    catch (Exception spawnEx) { MelonLogger.Warning($"[Spawn] ItemSpawner.Spawn({id}) 抛异常: {spawnEx.Message}"); }
+                    // 常规 stableId: 直接 DirectoryMaster.Item(id, true) 构造普通商品模板 —— 用户裁决:
+                    // ItemSpawner.Spawn 对命中 PreBuiltItemHelper 预置模板的 id (如 printer/chem_scanner/
+                    // 50ml_cylinder) 返回"已部署设备"预置实例 (factory: CreatePrinter = DirectoryMaster.Item
+                    // + Machine.CreateNote + TryAcceptAll), 非可售商品, 入柜台/网格即变 "?"+未拥有.
+                    // DirectoryMaster.Item(id,true) 正是 ItemSpawner.Spawn 未命中预置时的 miss 路径
+                    // (ItemSpawner.txt, DirectoryMaster.Item:2091), furnace 等正常件亦同此构造.
+                    try { item = DirectoryMaster.Item(id, true); }
+                    catch (Exception spawnEx) { MelonLogger.Warning($"[Spawn] DirectoryMaster.Item({id}) 抛异常: {spawnEx.Message}"); }
                     if (item == null) { MelonLogger.Warning($"[Spawn] ItemSpawner 拒绝 {id}"); return; }
                     // node/module 类模板件不带随机词条 —— 对齐原版引擎第二步: 引擎 (RandomNode/
                     // RandomPerformanceModule) 在 DirectoryMaster.Item(base) 后调 InitRandomEffect 注入随机词条.
@@ -345,29 +352,25 @@ namespace ProgressMod
                     }
                     catch (Exception fxEx) { MelonLogger.Warning($"[Spawn] InitRandomEffect({id}) 异常: {fxEx.Message}"); }
                 }
-                var inv = EmporiumEntry.Instance?.invElement;
-                if (inv == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无主背包容器"); return; }
+                // 落点照物品管理器 (ProbablyStolenItemManager.ItemManager.cs:3386-3394):
+                // PlayerStore.Instance.AddDirectToWeightedTable(item, true) → RefreshCounterItem.
+                // 物品管理器从不做网格放置 (MayHave/UncheckedAccept); 硬塞网格会让机器件/设施件
+                // 变 "?" + 未拥有幽灵物. 加权表入货 = 玩家柜台可售库存, 机器件也是普通货.
+                PlayerStore store = PlayerStore.Instance;
+                if (store == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无玩家柜台"); return; }
                 item.SetAmount(count);
                 try
                 {
-                    if (!((GameInventory)inv).MayHaveValidInventorySlot(item))
-                    {
-                        MelonLogger.Warning($"[Spawn] 主背包无有效格子放置 {id} (背包满?)");
-                        return;
-                    }
+                    store.AddDirectToWeightedTable(item, true);
                 }
-                catch (Exception slotEx) { MelonLogger.Warning($"[Spawn] MayHaveValidInventorySlot({id}) 异常: {slotEx.Message}"); }
-                try
+                catch (Exception wEx)
                 {
-                    if (!((GameInventory)inv).UncheckedAccept(item))
-                    {
-                        MelonLogger.Warning($"[Spawn] UncheckedAccept 拒绝 {id}");
-                        return;
-                    }
+                    MelonLogger.Warning($"[Spawn] AddDirectToWeightedTable({id}) 异常: {wEx.Message}");
+                    return;
                 }
-                catch (Exception accEx) { MelonLogger.Warning($"[Spawn] UncheckedAccept({id}) 异常: {accEx.Message}"); }
+                try { store.RefreshCounterItem(); } catch { /* 照物品管理器吞掉 */ }
                 if (token > 0) { SpawnedItems[token] = item; }
-                MelonLogger.Msg($"[Spawn] 生成到主背包 {id} x{count}");
+                MelonLogger.Msg($"[Spawn] 已添加到玩家柜台 {id} x{count}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
         }
