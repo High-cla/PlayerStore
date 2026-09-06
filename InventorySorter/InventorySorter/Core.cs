@@ -911,6 +911,7 @@ public class Core : MelonMod
 			}
 			Dictionary<GameItem, Placement> layout = null;
 			string mode = null;
+			int relocated2 = 0;
 			if (GroupByTag.Value)
 			{
 				// 同类合并: 从 tag 分组中剔除被合并件(代表件保留), 布局后重叠致放自动合并
@@ -964,9 +965,32 @@ public class Core : MelonMod
 			}
 			if (layout == null)
 			{
-				RestoreOriginal(inv, original);
-				Toast("not enough room to sort cleanly, left unchanged");
-				return;
+				// 降级残局(Residual): 全放失败不再整包放弃 — 大件各选最贴合位, 小件尽力塞缝, 放不下的留原位.
+				// 严格布局器"任一放不下整候选作废"; 此处失败件留位且占位作障碍, 落地永不与未动件重叠.
+				// 超大网格坐标扫描过贵(主线程), 维持原 abort.
+				Dictionary<GameItem, Placement> degradeLayout = null;
+				if ((long)w * h < 5000)
+				{
+					List<GameItem> placePool2 = new List<GameItem>();
+					HashSet<int> absIdx2 = new HashSet<int>(mergeAbsorb);
+					for (int gi = 0; gi < sortPool.Count; gi++)
+					{
+						if (!absIdx2.Contains(gi)) placePool2.Add(sortPool[gi]);
+					}
+					degradeLayout = TryResidualLayout(keptContainers, sortPool, placePool2, masks, w, h, out relocated2);
+				}
+				// 全留原位且无同类可堆 -> 无收益, 维持原 abort 语义
+				if (degradeLayout != null && degradeLayout.Count > 0 && (relocated2 > 0 || mergeAbsorb.Count > 0))
+				{
+					layout = degradeLayout;
+					mode = "degraded";
+				}
+				else
+				{
+					RestoreOriginal(inv, original);
+					Toast("not enough room to sort cleanly, left unchanged");
+					return;
+				}
 			}
 			int num = 0;
 			// 同类合并应用: 布局成功后, 被合并件致放到代表件同一位置(重叠) — 游戏堆叠机制自动合并为一格.
@@ -1019,7 +1043,7 @@ public class Core : MelonMod
 			{
 				MelonLogger.Error("[InvSorter] post-layout Validate failed: " + exV.Message);
 			}
-			Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
+			Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((mode == "degraded") ? $", {relocated2} tucked into gaps" : "") + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
 		}
 		catch (System.Exception ex2)
 		{
@@ -1250,6 +1274,118 @@ public class Core : MelonMod
 			}
 		}
 		return best;
+	}
+
+	// ===== 降级残局(Residual): 全放失败不再整包放弃 =====
+	// 语义(离线 tscripts/bench_residual 对拍): 每件大先小后, 各自选"最贴合"空位(脚印浪费最小, 平手 y 再 x)
+	// = 尽力把物品塞进能容纳的最小缝隙; 与严格布局器(任一放不下整候选作废)不同, 失败/无更优位则留原位.
+	// 安全: 处理前预订全部物品(含 absorbed)当前 bbox 占位, 每件释放自身预订后选位, 原地不动者恢复占位 —
+	// 保证落位永不与未动件重叠; 吸收件(同类被合并)原格全程保留, 应用阶段由 merge 重叠堆到代表件上.
+	private static Dictionary<GameItem, Placement> TryResidualLayout(
+		List<GameItem> fixedItems, List<GameItem> allItems, List<GameItem> placeItems,
+		Dictionary<GameItem, ItemMask> masks, int W, int H, out int relocated)
+	{
+		relocated = 0;
+		// 当前精确格: BuildMask 按当前 flip 快照 C0, C1..C3 = C0 的 0/90/180/270 旋转;
+		// 世界朝向 = ShapeOf.orientation, 精确格 = CellsOf(m, orientation)
+		List<(int, int)> CurCells(ItemMask mm, GameItem it)
+		{
+			int o = 0;
+			try
+			{
+				GridShape sh = ShapeOf(it);
+				if (sh != null) o = (int)sh.orientation;
+			}
+			catch { }
+			List<(int, int)> cs = CellsOf(mm, o);
+			return (cs != null && cs.Count > 0) ? cs : mm.C0;
+		}
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem f in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, f);
+		}
+		// 预订全部物品(含 absorbed)当前精确格: 未处理件/留位件/吸收件原格永不被压.
+		// 必须用精确格而非 bbox: bbox 覆盖邻件实占格, 误清后会让后续件落位重叠.
+		foreach (GameItem it in allItems)
+		{
+			ItemMask mr = masks[it];
+			MarkCells(occ, W, H, PosX(it), PosY(it), CurCells(mr, it), true);
+		}
+		Dictionary<GameItem, Placement> layout = new Dictionary<GameItem, Placement>();
+		List<GameItem> order = new List<GameItem>(placeItems);
+		order.Sort((a, b) => CellCount(b, masks).CompareTo(CellCount(a, masks)));
+		foreach (GameItem it in order)
+		{
+			ItemMask m = masks[it];
+			int ox0 = PosX(it);
+			int oy0 = PosY(it);
+			// 释放自身精确格(允许回原位)
+			MarkCells(occ, W, H, ox0, oy0, CurCells(m, it), false);
+			if (TryTightestSlot(occ, W, H, m, out int px, out int py, out int po))
+			{
+				List<(int, int)> cs = CellsOf(m, po);
+				if (cs == null || cs.Count == 0)
+				{
+					cs = m.C0;
+				}
+				MarkCells(occ, W, H, px, py, cs, true);
+				layout[it] = new Placement(px, py, po);
+				if (px != ox0 || py != oy0)
+				{
+					relocated++;
+				}
+			}
+			else
+			{
+				// 原地不动: 恢复自身精确格占位(不入 layout, 应用阶段不动它)
+				MarkCells(occ, W, H, ox0, oy0, CurCells(m, it), true);
+			}
+		}
+		return layout;
+	}
+
+	// 最贴合空位: 全朝向 x 全坐标中取 (脚印浪费 = bbox面积 - cells数 最小, 平手 minY 再 minX) 的空位
+	private static bool TryTightestSlot(bool[,] occ, int W, int H, ItemMask m, out int px, out int py, out int po)
+	{
+		long best = long.MaxValue;
+		px = -1;
+		py = -1;
+		po = 0;
+		for (int ori = 0; ori < 4; ori++)
+		{
+			List<(int, int)> cs = CellsOf(m, ori);
+			if (cs == null || cs.Count == 0)
+			{
+				continue;
+			}
+			int gw = (ori == 1 || ori == 3) ? m.Gh0 : m.Gw0;
+			int gh = (ori == 1 || ori == 3) ? m.Gw0 : m.Gh0;
+			if (gw > W || gh > H)
+			{
+				continue;
+			}
+			long waste = (long)gw * gh - cs.Count;
+			for (int y = 0; y + gh <= H; y++)
+			{
+				for (int x = 0; x + gw <= W; x++)
+				{
+					if (!CellsFree(occ, x, y, cs))
+					{
+						continue;
+					}
+					long key = waste * 1000000L + (long)y * 100000L + x;
+					if (key < best)
+					{
+						best = key;
+						px = x;
+						py = y;
+						po = ori;
+					}
+				}
+			}
+		}
+		return best != long.MaxValue;
 	}
 
 	// GrowTouch: 每物品取"触摸分最大"的位(相邻已占格+贴边计分), 碎片空间利用率优于行堆积.

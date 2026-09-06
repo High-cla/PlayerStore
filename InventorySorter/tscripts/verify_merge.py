@@ -3,7 +3,8 @@
 数据: parse_dump 会话级. 算法: 各算法跑"全独立" vs "同类合并后", 取最大空矩差.
 """
 import sys
-sys.path.insert(0, "/d/git/invsort/tscripts")
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from parse_dump import parse_dump
 import verify_all as va
 

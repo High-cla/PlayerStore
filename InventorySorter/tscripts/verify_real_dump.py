@@ -3,7 +3,8 @@
 直接从 parse_dump 拿真实散件, 复用 verify_csharp_pipeline 的配对+PlaceGrounded 逻辑
 """
 import sys
-sys.path.insert(0, "/d/git/invsort/tscripts")
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from analyze_shapes import rotations, can_place, mark
 from analyze2 import largest_empty_rect_fast
 from parse_dump import parse_dump
