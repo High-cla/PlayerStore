@@ -16,7 +16,7 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgNoDurability = Cfg.CreateEntry<bool>("NoDurability", true, "不消耗耐久");
         public static readonly MelonPreferences_Entry<int> CfgModuleBoostMult = Cfg.CreateEntry<int>("ModuleBoostMult", 10, "模块加成倍率");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyAlwaysPure = Cfg.CreateEntry<bool>("PurifyAlwaysPure", true, "净化器/过滤器: PurifyToBaseWater 永远净化100%纯水");
-        public static readonly MelonPreferences_Entry<int> CfgOutputMult = Cfg.CreateEntry<int>("OutputMult", 3, "机器产出倍率");
+        public static readonly MelonPreferences_Entry<bool> CfgMaxWineQuality = Cfg.CreateEntry<bool>("MaxWineQuality", true, "酒品质最高档");
         public static readonly MelonPreferences_Entry<string> CfgSpawnId = Cfg.CreateEntry<string>("SpawnItemId", "", "生成物品: 填物品 stableId (如 box_tampon), F9 生成到主背包. 空=禁用");
         public static readonly MelonPreferences_Entry<int> CfgSpawnCount = Cfg.CreateEntry<int>("SpawnItemCount", 1, "生成物品数量 (不填默认1)");
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
@@ -26,7 +26,7 @@ namespace ProgressMod
         public static bool NoDurability => CfgNoDurability.Value;
         public static int ModuleBoostMult => CfgModuleBoostMult.Value;
         public static bool PurifyAlwaysPure => CfgPurifyAlwaysPure.Value;
-        public static int OutputMult => CfgOutputMult.Value;
+        public static bool MaxWineQuality => CfgMaxWineQuality.Value;
         public static bool NeverWounded => CfgNeverWounded.Value;
         public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
 
@@ -1155,19 +1155,20 @@ namespace ProgressMod
         }
 
 
-        // ============ 机器产出倍率 ============
-        // InitProgressSourceItem 有 2 个重载 (3参/6参), 必须用 Type[] 消歧锁定 6 参完整版,
-        // 否则 Harmony 匹配首个重载导致 Prefix 参数对不上而静默失效.
-        [HarmonyPatch(typeof(MachineProgressHelper), "InitProgressSourceItem",
-            new Type[] { typeof(GameItem), typeof(int), typeof(string), typeof(bool), typeof(int), typeof(string) })]
-        public static class PatchOutputMult
+        // ============ 酒品质最高档 ============
+        // GetWineQualityTier 读 WINE_SCORE_INT 映射 tier: score>=6→5、5→4、3-4→3、2→2、1→1、<=0→0
+        // (真实范围 0-5, 5 = 最高档). Postfix 强置 5 (游戏自身最高档, 不越界).
+        [HarmonyPatch(typeof(WineHelper), "GetWineQualityTier")]
+        public static class PatchWineQuality
         {
-            // 签名: InitProgressSourceItem(GameItem sourceItem, int targetAmount, string targetItemID,
-            //        bool useDefaultTooltip, int targetItemCount, string requiredMachineTag)
-            public static void Prefix(GameItem sourceItem, int targetAmount, string targetItemID, bool useDefaultTooltip, ref int targetItemCount, string requiredMachineTag)
+            public static void Postfix(GameItem __0, ref int __result)
             {
-                if (OutputMult <= 1) return;
-                targetItemCount *= OutputMult; // 默认 3x: 产出件数写入 PROGRESS_ITEM_TARGET_ITEM_COUNT_TAG
+                try
+                {
+                    if (!MaxWineQuality || __0 == null) return;
+                    if (__result < 5) __result = 5;
+                }
+                catch { /* IL2CPP 异常: 保持原值 */ }
             }
         }
 
