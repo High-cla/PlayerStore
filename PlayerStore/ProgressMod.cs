@@ -861,9 +861,8 @@ namespace ProgressMod
                     case "CATEGORY_GENUINE_CIGARETTE": return ItemFeatureList.CigaretteAuthenticity();
                     case "stamp_authenticity":
                     case "CATEGORY_GENUINE_STAMP": return ItemFeatureList.StampAuthenticity();
-                    case "module_stuck":
-                    case "moduleStuck":
-                    case "CATEGORY_MODULE_STUCK": return ItemFeatureList.ModuleStuckFeature();
+                    // game 0.46D: ItemFeatureList.ModuleStuckFeature 已移除 (module_stuck 现为 ItemCondition,
+                    // 见 ItemConditionList.CreateModuleStuck) — 本方法返回 ItemFeature, 故走裸建兜底.
                     case "discount_25": return ItemFeatureList.Discount(25);
                     case "bargain_markup":
                     case "bargainMarkup": return ItemFeatureList.BargainMarkup(10);
