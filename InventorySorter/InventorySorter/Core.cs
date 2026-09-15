@@ -1273,6 +1273,15 @@ public class Core : MelonMod
 				best = cand;
 			}
 		}
+		// 填充算法放最后: 对胜出布局做残局填充精修(小件优先挪进能容纳它的最小空矩+贴邻), 空矩不降才采纳
+		if (best != null)
+		{
+			Dictionary<GameItem, Placement> refined = TryFillRefine(fixedItems, best, masks, W, H);
+			if (refined != null)
+			{
+				best = refined;
+			}
+		}
 		return best;
 	}
 
@@ -1281,6 +1290,195 @@ public class Core : MelonMod
 	// = 尽力把物品塞进能容纳的最小缝隙; 与严格布局器(任一放不下整候选作废)不同, 失败/无更优位则留原位.
 	// 安全: 处理前预订全部物品(含 absorbed)当前 bbox 占位, 每件释放自身预订后选位, 原地不动者恢复占位 —
 	// 保证落位永不与未动件重叠; 吸收件(同类被合并)原格全程保留, 应用阶段由 merge 重叠堆到代表件上.
+	// ===== 残局填充精修(FillRefine): 填充算法放最后 =====
+	// 语义(用户裁定 1+2): 不做预分类; 排完胜出布局后, 对每个非堆叠件(独占格可安全释放/重放)小件优先逐件
+	// 释放自身格 → 找"能容纳它的最小空矩"(塞最小洞) → 在该空矩内取"贴邻已占物/壁最多"的位(贴邻),
+	// 全局最大连续空矩不降才采纳(否则维持原位). 复用精确格, 逐件用 occ 校验不重叠, 安全不变量与残局一致.
+	private static Dictionary<GameItem, Placement> TryFillRefine(
+		List<GameItem> fixedItems, Dictionary<GameItem, Placement> placed,
+		Dictionary<GameItem, ItemMask> masks, int W, int H)
+	{
+		if ((long)W * H > 5000)
+		{
+			return placed; // 超大网格全位扫描过贵, 跳过精修(维持原布局)
+		}
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem f in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, f);
+		}
+		bool occOk = true;
+		foreach (KeyValuePair<GameItem, Placement> kv in placed)
+		{
+			if (!masks.TryGetValue(kv.Key, out ItemMask mm))
+			{
+				occOk = false;
+				break;
+			}
+			List<(int, int)> cs = CellsOf(mm, kv.Value.O);
+			if (cs == null || cs.Count == 0)
+			{
+				cs = mm.C0;
+			}
+			bool stackable = Stacked(kv.Key);
+			int fresh = 0;
+			foreach ((int dx, int dy) in cs)
+			{
+				int cx = kv.Value.X + dx;
+				int cy = kv.Value.Y + dy;
+				if (cx < 0 || cy < 0 || cx >= W || cy >= H)
+				{
+					occOk = false;
+					break;
+				}
+				if (occ[cx, cy])
+				{
+					if (!stackable)
+					{
+						occOk = false;
+						break;
+					}
+					continue;
+				}
+				occ[cx, cy] = true;
+				fresh++;
+			}
+			if (stackable && fresh == 0)
+			{
+				occOk = false;
+			}
+			if (!occOk)
+			{
+				break;
+			}
+		}
+		if (!occOk)
+		{
+			return placed; // 不应发生; 保守原样
+		}
+		long originalArea = LargestEmptyArea(occ, W, H);
+		// 仅处理非堆叠件(独占格), 小件优先(脚印小者先)
+		List<GameItem> order = new List<GameItem>();
+		foreach (KeyValuePair<GameItem, Placement> kv in placed)
+		{
+			if (!Stacked(kv.Key))
+			{
+				order.Add(kv.Key);
+			}
+		}
+		if (order.Count <= 1)
+		{
+			return placed;
+		}
+		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)));
+		Dictionary<GameItem, Placement> result = new Dictionary<GameItem, Placement>(placed);
+		foreach (GameItem it in order)
+		{
+			if (!result.TryGetValue(it, out Placement cur))
+			{
+				continue;
+			}
+			if (!masks.TryGetValue(it, out ItemMask m))
+			{
+				continue;
+			}
+			List<(int, int)> curCells = CellsOf(m, cur.O);
+			if (curCells == null || curCells.Count == 0)
+			{
+				curCells = m.C0;
+			}
+			// 释放自身格(独占, 安全)
+			MarkCells(occ, W, H, cur.X, cur.Y, curCells, false);
+			// 释放后当前位贴邻数(不含自身); 采纳守卫要求候选位贴邻不低于当前位, 防 FillRefine 把贴簇小件拆散进孤立袋
+			long curTouch = TouchCount(occ, W, H, cur.X, cur.Y, curCells);
+			// 候选: 找最小可容纳空矩(FindFreeRects 面积升序), 命中即在该空矩内取贴邻最多位
+			List<(int x, int y, int w, int h)> rects = FindFreeRects(occ, W, H);
+			rects.Sort((p, q) => ((long)p.w * p.h).CompareTo((long)q.w * q.h));
+			bool found = false;
+			Placement cand = default;
+			long candTouch = -1;
+			foreach (var R in rects)
+			{
+				long bestTouch = -1;
+				Placement bestP = default;
+				bool bestFound = false;
+				for (int o = 0; o < 4; o++)
+				{
+					List<(int, int)> cs = CellsOf(m, o);
+					if (cs == null || cs.Count == 0)
+					{
+						continue;
+					}
+					int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+					int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+					if (gw > R.w || gh > R.h)
+					{
+						continue;
+					}
+					for (int py = R.y; py + gh <= R.y + R.h; py++)
+					{
+						for (int px = R.x; px + gw <= R.x + R.w; px++)
+						{
+							if (!CellsFree(occ, px, py, cs))
+							{
+								continue;
+							}
+							long touch = 0;
+							foreach ((int dx, int dy) in cs)
+							{
+								int cx2 = px + dx;
+								int cy2 = py + dy;
+								if (cx2 == 0 || cx2 == W - 1) touch++;
+								if (cy2 == 0 || cy2 == H - 1) touch++;
+								if (cx2 > 0 && occ[cx2 - 1, cy2]) touch++;
+								if (cx2 < W - 1 && occ[cx2 + 1, cy2]) touch++;
+								if (cy2 > 0 && occ[cx2, cy2 - 1]) touch++;
+								if (cy2 < H - 1 && occ[cx2, cy2 + 1]) touch++;
+							}
+							if (!bestFound || touch > bestTouch || (touch == bestTouch && (py < bestP.Y || (py == bestP.Y && px < bestP.X))))
+							{
+								bestTouch = touch;
+								bestP = new Placement(px, py, o);
+								bestFound = true;
+							}
+						}
+					}
+				}
+				if (bestFound)
+				{
+					cand = bestP;
+					candTouch = bestTouch;
+					found = true;
+					break; // 最小可容纳空矩命中即定
+				}
+			}
+			if (!found || (cand.X == cur.X && cand.Y == cur.Y && cand.O == cur.O))
+			{
+				MarkCells(occ, W, H, cur.X, cur.Y, curCells, true);
+				continue;
+			}
+			// 试放候选位
+			List<(int, int)> candCells = CellsOf(m, cand.O);
+			if (candCells == null || candCells.Count == 0)
+			{
+				candCells = m.C0;
+			}
+			MarkCells(occ, W, H, cand.X, cand.Y, candCells, true);
+			long newArea = LargestEmptyArea(occ, W, H);
+			if (newArea >= originalArea && candTouch >= curTouch)
+			{
+				result[it] = cand; // 采纳(塞更小洞/更贴邻, 且空矩不降 + 不许把贴簇小件拆散)
+			}
+			else
+			{
+				// 回退
+				MarkCells(occ, W, H, cand.X, cand.Y, candCells, false);
+				MarkCells(occ, W, H, cur.X, cur.Y, curCells, true);
+			}
+		}
+		return result;
+	}
+
 	private static Dictionary<GameItem, Placement> TryResidualLayout(
 		List<GameItem> fixedItems, List<GameItem> allItems, List<GameItem> placeItems,
 		Dictionary<GameItem, ItemMask> masks, int W, int H, out int relocated)
@@ -2491,6 +2689,23 @@ public class Core : MelonMod
 			}
 		}
 		return true;
+	}
+
+	private static long TouchCount(bool[,] occ, int W, int H, int x, int y, List<(int dx, int dy)> cells)
+	{
+		long t = 0;
+		foreach ((int dx, int dy) in cells)
+		{
+			int cx = x + dx;
+			int cy = y + dy;
+			if (cx == 0 || cx == W - 1) t++;
+			if (cy == 0 || cy == H - 1) t++;
+			if (cx > 0 && occ[cx - 1, cy]) t++;
+			if (cx < W - 1 && occ[cx + 1, cy]) t++;
+			if (cy > 0 && occ[cx, cy - 1]) t++;
+			if (cy < H - 1 && occ[cx, cy + 1]) t++;
+		}
+		return t;
 	}
 
 	private static bool CellsFree(bool[,] occ, int x, int y, List<(int dx, int dy)> cells)
