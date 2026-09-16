@@ -912,6 +912,8 @@ public class Core : MelonMod
 			Dictionary<GameItem, Placement> layout = null;
 			string mode = null;
 			int relocated2 = 0;
+			// 横带路径精修采纳件数(塞进缝隙的件数), 仅用于 toast 统计
+			int tucked = 0;
 			if (GroupByTag.Value)
 			{
 				// 同类合并: 从 tag 分组中剔除被合并件(代表件保留), 布局后重叠致放自动合并
@@ -931,6 +933,22 @@ public class Core : MelonMod
 				if (layout != null)
 				{
 					mode = "grouped";
+					// 横带成功后也做同一精修层(以前只有 LayoutDense 会精修 ⇒ 横带成功路径零塞缝):
+					// 小件优先释放自身格 → 塞进"能容纳它的最小空矩" → 空矩内取最贴邻位.
+					// 采纳条件(新空矩 >= 起始空矩 且 贴邻不降)在 TryFillRefine 内部, 非劣化才改位 ⇒
+					// 最大空矩单调不减, 拆散(贴邻下降)恒 0, 落地重叠/压未动件/越界 与横带原结果同(逐件用 occ 精确校验).
+					Dictionary<GameItem, Placement> refinedBanded = TryFillRefine(keptContainers, layout, masks, w, h);
+					if (refinedBanded != null)
+					{
+						foreach (KeyValuePair<GameItem, Placement> kvTuck in refinedBanded)
+						{
+							if (layout.TryGetValue(kvTuck.Key, out Placement oldTuck) && (oldTuck.X != kvTuck.Value.X || oldTuck.Y != kvTuck.Value.Y || oldTuck.O != kvTuck.Value.O))
+							{
+								tucked++;
+							}
+						}
+						layout = refinedBanded;
+					}
 				}
 			}
 			if (layout == null)
@@ -1043,7 +1061,7 @@ public class Core : MelonMod
 			{
 				MelonLogger.Error("[InvSorter] post-layout Validate failed: " + exV.Message);
 			}
-			Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((mode == "degraded") ? $", {relocated2} tucked into gaps" : "") + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
+			Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((mode == "degraded") ? $", {relocated2} tucked into gaps" : "") + ((mode == "grouped" && tucked > 0) ? $", {tucked} tucked into gaps" : "") + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
 		}
 		catch (System.Exception ex2)
 		{
@@ -1145,6 +1163,16 @@ public class Core : MelonMod
 		List<object> paired = (W * H >= 100) ? BuildUnits(flat, masks) : null;
 		List<object> singles = new List<object>(flat);
 		singles.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+		// ===== 原生语义候选(第 5 候选, 与旧 4 布局器同池) =====
+		// 对齐游戏原生 InventorySortHelper.Sort 语义(docs/NATIVE_SORT_SPEC.md §3.2/§7 §9): 大件先占好位,
+		// 小件按"行主序第一个能放的位置"自然落进缝隙(逐件 first-fit, 无评分/无 waste 比较).
+		// 取舍(v5, Lead 裁定): 旧版"原生全放即早退"会把更优且更稳的择优换掉(实测空矩和 20003 vs 基线 20056,
+		// churn 54.2% vs 8.7%), 但原生在部分会话确实更优(逐会话 更好 30 / 更差 60) ⇒ 改为把原生当第 5 个候选,
+		// 与旧 4 布局器候选**同池 + 同精修层**择优: 取两者最优, 只在原生真正胜出时才承担它的位移代价.
+		// 入选条件 = 原生全放(leftover==0), 否则作废(与原生"放不下即中止"一致, 也不引入部分布局).
+		// 候选顺序 = 追加到旧候选之后 ⇒ 空矩持平时优先保留旧布局器结果(原生须严格更优才顶替, churn 更小).
+		LayoutNativeFirstFit(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictNative, out int nativeLeftover);
+		bool hasNative = dictNative != null && nativeLeftover == 0;
 		long gridCells = (long)W * H;
 		if (gridCells < 4000)
 		{
@@ -1204,10 +1232,21 @@ public class Core : MelonMod
 				candidates.Add(dict2);
 			}
 		}
+		if (hasNative)
+		{
+			candidates.Add(dictNative); // 原生候选追加在末尾: 空矩持平则旧布局器优先(原生须严格更优才顶替)
+		}
+		// 同一精修层比较: 每个候选先各自 TryFillRefine(小件塞缝; 采纳条件保证各自非劣化), 再按最大连续空矩择优.
+		// 否则"该候选是否被精修过"会左右胜负, 比较不公平. 代价 = 候选数(<=6)次精修; W*H>5000 时 TryFillRefine 原样返回.
+		List<Dictionary<GameItem, Placement>> polished = new List<Dictionary<GameItem, Placement>>(candidates.Count);
+		foreach (Dictionary<GameItem, Placement> raw in candidates)
+		{
+			polished.Add(TryFillRefine(fixedItems, raw, masks, W, H) ?? raw);
+		}
 		// 择优: 剩余最大连续空矩最大者
 		Dictionary<GameItem, Placement> best = null;
 		long bestArea = -1;
-		foreach (Dictionary<GameItem, Placement> cand in candidates)
+		foreach (Dictionary<GameItem, Placement> cand in polished)
 		{
 			bool[,] occ = new bool[W, H];
 			foreach (GameItem fixedItem in fixedItems)
@@ -1273,16 +1312,136 @@ public class Core : MelonMod
 				best = cand;
 			}
 		}
-		// 填充算法放最后: 对胜出布局做残局填充精修(小件优先挪进能容纳它的最小空矩+贴邻), 空矩不降才采纳
-		if (best != null)
+		// 精修已在择优前对每个候选完成(见上"同一精修层比较"), 胜出布局本身即精修结果, 此处不再重复精修.
+		return best;
+	}
+
+	// ===== 原生首选落位(LayoutNativeFirstFit): 对齐游戏原生 InventorySortHelper.Sort 的落位语义 =====
+	// 语义证据 docs/NATIVE_SORT_SPEC.md, 逐条对应: §7 排序键 / §3.2 控制流 / §5.2-5.3 层掩码 / §6 CellCount / §9 伪代码.
+	//   排序键 = 物品占格数(CellCount = 形状局部非零单元数) 降序 → identifier(string.Compare Ordinal) →
+	//            当前格行主序下标(y*W+x);
+	//   落位   = 逐件"外 y 内 x"从 (0,0) 行主序扫描, 第一个能放的位置即胜出 ——
+	//            无评分、无 waste 比较、无最大空矩比较(与旧 4 布局器 + LargestEmptyArea 择优的根本差别);
+	//            扫描域 = [0, W-bboxW] × [0, H-bboxH](原生 maxX/maxY 口径, L 形也按 bbox 夹取);
+	//            锚点 = 形状 min 角(原生 b.SetPosition(x,y), 与本文件 CellsOf 局部坐标同构);
+	//   占用   = 单层占用(等价原生 itemLayers 全 0/1 位掩码; §5.2/§5.3 的 1<<(v&31) 退化为布尔占用).
+	// 与原生两处有意差异(我方宽容, 用户裁定"大件最优 + 小件尽力塞缝"):
+	//   ① 原生任一物品找不到位 → 整次 return false 中止; 我方记 leftover 继续排更小的件, 并由调用方决定取舍;
+	//   ② 原生只用物品当前朝向(排序不改朝向); 我方当前朝向全网格扫不到时再试其余朝向, 换取填充率.
+	// 安全不变量(与旧候选同口径): occ 起手只标 fixedItems(容器原位), 每件落位前 CellsFree 校验 + 界内夹取 →
+	//   布局必然满足既有校验(不重叠、不压容器、界内); leftover>0 时调用方整次弃用, 不存在压住未移动件的泄漏.
+	private static void LayoutNativeFirstFit(
+		List<GameItem> fixedItems, List<GameItem> allItems, Dictionary<GameItem, ItemMask> masks,
+		int W, int H, out Dictionary<GameItem, Placement> layout, out int leftover)
+	{
+		layout = new Dictionary<GameItem, Placement>();
+		leftover = 0;
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem f in fixedItems)
 		{
-			Dictionary<GameItem, Placement> refined = TryFillRefine(fixedItems, best, masks, W, H);
-			if (refined != null)
+			MarkCurrentCells(occ, W, H, f);
+		}
+		List<GameItem> order = new List<GameItem>(allItems);
+		order.Sort((GameItem a, GameItem b) => NativeOrderCompare(a, b, masks, W));
+		foreach (GameItem it in order)
+		{
+			ItemMask m = masks[it];
+			int o0 = CurOri(it);
+			int bx = -1;
+			int by = -1;
+			int bo = 0;
+			for (int k = 0; k < 4; k++)
 			{
-				best = refined;
+				int o = (o0 + k) & 3;
+				FindFirstFitSlot(occ, W, H, m, o, out bx, out by);
+				if (bx >= 0)
+				{
+					bo = o;
+					break;
+				}
+			}
+			if (bx < 0)
+			{
+				leftover++; // 原生在此整次中止; 我方继续排更小的件
+				continue;
+			}
+			MarkCells(occ, W, H, bx, by, CellsOf(m, bo), true);
+			layout[it] = new Placement(bx, by, bo);
+		}
+	}
+
+	// 原生排序键(§7): 占格数降序 → identifier Ordinal → 当前格行主序下标(§7 第三键).
+	// 末键 uniqueId 收尾: 原生比较器对相同前两键物品不保证次序, 我方 List.Sort 不稳定, 用 uniqueId 定序防抖动.
+	private static int NativeOrderCompare(GameItem a, GameItem b, Dictionary<GameItem, ItemMask> masks, int W)
+	{
+		int ca = masks[a].C0.Count;
+		int cb = masks[b].C0.Count;
+		if (ca != cb)
+		{
+			return cb - ca;
+		}
+		int ic = string.Compare(Ident(a), Ident(b), StringComparison.Ordinal);
+		if (ic != 0)
+		{
+			return ic;
+		}
+		int pa = PosY(a) * W + PosX(a);
+		int pb = PosY(b) * W + PosX(b);
+		if (pa != pb)
+		{
+			return pa - pb;
+		}
+		return Uid(a).CompareTo(Uid(b));
+	}
+
+	// 原生扫描(§3.2): 外 y 内 x 从 (0,0) 起, 返回第一个可行位; 无评分/无 waste 比较; 扫描域按 bbox 夹取.
+	private static void FindFirstFitSlot(bool[,] occ, int W, int H, ItemMask m, int o, out int bx, out int by)
+	{
+		bx = -1;
+		by = -1;
+		List<(int, int)> cells = CellsOf(m, o);
+		if (cells == null || cells.Count == 0)
+		{
+			return;
+		}
+		int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+		int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+		int maxX = W - gw;
+		int maxY = H - gh;
+		if (maxX < 0 || maxY < 0)
+		{
+			return; // 该朝向比容器大(原生整次中止; 我方交调用方兜底)
+		}
+		for (int y = 0; y <= maxY; y++)
+		{
+			for (int x = 0; x <= maxX; x++)
+			{
+				if (CellsFree(occ, x, y, cells))
+				{
+					bx = x;
+					by = y;
+					return;
+				}
 			}
 		}
-		return best;
+	}
+
+	// 物品当前朝向(BuildMask C0..C3 的索引); 与 TryResidualLayout 内联读取同义, 抽出来给原生路径复用.
+	private static int CurOri(GameItem it)
+	{
+		try
+		{
+			GridShape sh = ShapeOf(it);
+			if (sh != null)
+			{
+				return ((int)sh.orientation) & 3;
+			}
+		}
+		catch
+		{
+			// ponytail: IL2CPP native probe, silent fallback
+		}
+		return 0;
 	}
 
 	// ===== 降级残局(Residual): 全放失败不再整包放弃 =====
