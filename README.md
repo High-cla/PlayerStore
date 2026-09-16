@@ -5,8 +5,6 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 > 游戏：Probably Stolen（Questing Goose Studio）· MelonLoader 7 · IL2CPP
 > Unity 网格物品背包 + 机械加工系统
 
-最新发布：**v0.4.5**（v0.4.4 起支持游戏 0.46D；tag 见 [Releases](https://github.com/High-cla/PlayerStore/releases)）
-
 ## 模块
 
 | 模块 | 路径 | 功能 |
