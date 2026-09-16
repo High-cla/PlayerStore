@@ -11,7 +11,7 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 
 | 模块 | 路径 | 功能 |
 | --- | --- | --- |
-| **ProgressMod** | `PlayerStore/ProgressMod.cs` | 机械加工增强 + 网页生成物品：进度强制完成、免耐久、酒品质最高档、净化必纯、模块加成、永不受伤、无限拾荒、HTTP 物品生成服务器 |
+| **ProgressMod** | `PlayerStore/ProgressMod.cs` | 机械加工增强 + 网页生成物品：进度强制完成、免耐久、净化必纯、模块加成、永不受伤、无限拾荒、HTTP 物品生成服务器 |
 | **InventorySorter** | `InventorySorter/InventorySorter/Core.cs` | 背包一键整理：大件最优布局 + 小件统一塞缝（5 候选同池择优、残局降级），最大化剩余连续空矩 |
 
 > 版本事实以 git tag 为准（Assembly 里的 `1.12.1` 是历史静态值，未随 tag 更新）。
@@ -53,7 +53,6 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 | `NoDurability` | `true` | 机器/工具不消耗耐久 |
 | `ModuleBoostMult` | `10` | 模块加成倍率 |
 | `PurifyAlwaysPure` | `true` | 净化器/过滤器：`PurifyToBaseWater` 永远净化 100% 纯水 |
-| `MaxWineQuality` | `true` | 酒品质最高档：Postfix 强置**游戏真实最高档 5**（原生映射 `score>=6→5`、`5→4`…，故置 6 越界无效果） |
 | `SpawnItemId` | `""` | 生成物品 stableId（F9 快捷生成，空=禁用） |
 | `SpawnItemCount` | `1` | F9 生成数量 |
 | `NeverWounded` | `true` | 永不受伤：拾荒/战斗不产生伤口、伤口不恶化、深夜不恶化 |
@@ -65,21 +64,20 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 | --- | --- | --- | --- |
 | 1 | `PatchContinue` | `MachineProgressHelper.ContinueProgressTypeMachine` | 进度推进拦截 + `ForceFinish` 直写 TARGET |
 | 2 | `PatchUpdate` | `MachineryHelper.UpdateProcessingTypeMachine` | 真推进点日志（进度/target/速度 + tag dump） |
-| 3 | `PatchWineQuality` | `WineHelper.GetWineQualityTier` | 酒品质强置 5（游戏真实最高档） |
-| 4 | `PatchDurability` | `DurabilityHelper.ChangeDurability` | `NoDurability`：跳过耐久扣减 |
-| 5 | `PatchPurifyToPure` | `WaterHelper.PurifyToBaseWater` | 净水器净化 100% 纯水 |
-| 6 | `PatchModuleBoost` | `ModuleHelper.InitModuleItem` | 模块创建：perf/eff/qual ×`ModuleBoostMult`，负加成取绝对值 |
-| 7 | `PatchRollMinorWound` | `ScavHelper.RollMinorWound` | 永不受伤：不产生轻伤 |
-| 8 | `PatchRollMajorWound` | `ScavHelper.RollMajorWound` | 永不受伤：不产生重伤 |
-| 9 | `PatchGetMinorWoundChance` | `ScavHelper.GetMinorWoundChance` | 轻伤概率强制 0 |
-| 10 | `PatchGetMajorWoundChance` | `ScavHelper.GetMajorWoundChance` | 重伤概率强制 0 |
-| 11 | `PatchReceiveMinorWound` | `HealthData.ReceiveMinorWound` | 受伤入口拦截 |
-| 12 | `PatchReceiveMajorWound` | `HealthData.ReceiveMajorWound` | 受伤入口拦截 |
-| 13 | `PatchIsSeriouslyWounded` | `HealthData.IsSeriouslyWounded` | 恒 false |
-| 14 | `PatchHandleNightlyWound` | `HealthData.HandleNightlyWound` | 深夜不恶化 |
-| 15 | `PatchCanScavenge` | `ScavHelper.CanScavenge` | 无限拾荒：始终可拾荒 |
-| 16 | `PatchGetMaxScavAttempts` | `ScavHelper.GetMaxScavAttempts` | 拾荒次数不受限 |
-| 17 | `PatchGetScavTimeLeft` | `ScavHelper.GetScavTimeLeft` | 拾荒冷却清零 |
+| 3 | `PatchDurability` | `DurabilityHelper.ChangeDurability` | `NoDurability`：跳过耐久扣减 |
+| 4 | `PatchPurifyToPure` | `WaterHelper.PurifyToBaseWater` | 净水器净化 100% 纯水 |
+| 5 | `PatchModuleBoost` | `ModuleHelper.InitModuleItem` | 模块创建：perf/eff/qual ×`ModuleBoostMult`，负加成取绝对值 |
+| 6 | `PatchRollMinorWound` | `ScavHelper.RollMinorWound` | 永不受伤：不产生轻伤 |
+| 7 | `PatchRollMajorWound` | `ScavHelper.RollMajorWound` | 永不受伤：不产生重伤 |
+| 8 | `PatchGetMinorWoundChance` | `ScavHelper.GetMinorWoundChance` | 轻伤概率强制 0 |
+| 9 | `PatchGetMajorWoundChance` | `ScavHelper.GetMajorWoundChance` | 重伤概率强制 0 |
+| 10 | `PatchReceiveMinorWound` | `HealthData.ReceiveMinorWound` | 受伤入口拦截 |
+| 11 | `PatchReceiveMajorWound` | `HealthData.ReceiveMajorWound` | 受伤入口拦截 |
+| 12 | `PatchIsSeriouslyWounded` | `HealthData.IsSeriouslyWounded` | 恒 false |
+| 13 | `PatchHandleNightlyWound` | `HealthData.HandleNightlyWound` | 深夜不恶化 |
+| 14 | `PatchCanScavenge` | `ScavHelper.CanScavenge` | 无限拾荒：始终可拾荒 |
+| 15 | `PatchGetMaxScavAttempts` | `ScavHelper.GetMaxScavAttempts` | 拾荒次数不受限 |
+| 16 | `PatchGetScavTimeLeft` | `ScavHelper.GetScavTimeLeft` | 拾荒冷却清零 |
 
 ---
 
