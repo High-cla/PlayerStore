@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "authorityItemCount": 395,
+  "authorityItemCount": 399,
   "numericResourceCount": 2,
-  "visibleRecordCount": 397,
+  "visibleRecordCount": 401,
   "records": [
     {
       "kind": "ITEM",
@@ -7619,6 +7619,44 @@
       ],
       "addPolicy": "ENABLED",
       "spriteStatus": "RUNTIME_UI_RESOURCE"
+    },
+    {
+      "kind": "ITEM",
+      "stableId": "beis_icecream",
+      "directory": "FoodItemDirectory",
+      "nameZh": "",
+      "nameEn": "Beis Ice Cream",
+      "descriptionZh": "",
+      "descriptionEn": "",
+      "atlasPath": "Items/items_food",
+      "spritePath": "beis_icecream",
+      "categories": [
+        "FOOD_DRINK"
+      ],
+      "itemTypes": [
+        "TREAT"
+      ],
+      "addPolicy": "ENABLED",
+      "spriteStatus": "RUNTIME_VERIFIED"
+    },
+    {
+      "kind": "ITEM",
+      "stableId": "fridge",
+      "directory": "FurnitureItemDirectory",
+      "nameZh": "",
+      "nameEn": "Fridge",
+      "descriptionZh": "",
+      "descriptionEn": "",
+      "atlasPath": "Items/items_ship",
+      "spritePath": "fridge",
+      "categories": [
+        "MACHINES_STORAGE"
+      ],
+      "itemTypes": [
+        "MACHINE"
+      ],
+      "addPolicy": "ENABLED",
+      "spriteStatus": "RUNTIME_VERIFIED"
     }
   ]
 }
