@@ -124,7 +124,7 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
 <body>
 <header>
   <h1>Probably Stolen — 物品浏览器</h1>
-  <p>数据源: item-catalog.json (399 项) + metadata 提取 (30 新增) = 429 项</p>
+  <p>数据源: item-catalog.json (399 项) + metadata 提取 (30 项) = 429 项 · 🆕 分类含本版新增物品 (冰淇淋 / 冰箱 等)</p>
   <div class="search-bar">
     <input type="text" id="search" placeholder="搜索名称 / ID / 描述...（支持中英）">
     <span class="count-badge" id="count">0 项</span>
@@ -179,8 +179,9 @@ aside h3{font-size:13px;color:#8ecff7;text-transform:uppercase;letter-spacing:1p
      <div id="insFields"></div>
    </div>
  </div>
-<script src="items_data_full.js"></script>
-<script src="tag_zh.js"></script>
+<!-- 数据/标签脚本带版本戳: 数据更新时必须同步 bump, 否则浏览器按 max-age 缓存旧副本 -->
+<script src="items_data_full.js?v=20260916"></script>
+<script src="tag_zh.js?v=20260916"></script>
 <script>
 // mod 生成引擎合成卡 (参照 ProbablyStolenItemManager.GeneratedEntries): 随机掉落表 + 预置变体
 // itemId 传 table:xxx / prebuilt:xxx, ProgressMod 端按前缀分发

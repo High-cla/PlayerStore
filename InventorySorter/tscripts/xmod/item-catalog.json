@@ -7624,14 +7624,15 @@
       "kind": "ITEM",
       "stableId": "beis_icecream",
       "directory": "FoodItemDirectory",
-      "nameZh": "",
+      "nameZh": "贝伊斯冰淇淋",
       "nameEn": "Beis Ice Cream",
       "descriptionZh": "",
       "descriptionEn": "",
       "atlasPath": "Items/items_food",
       "spritePath": "beis_icecream",
       "categories": [
-        "FOOD_DRINK"
+        "FOOD_DRINK",
+        "NEW_ITEMS"
       ],
       "itemTypes": [
         "TREAT"
@@ -7643,14 +7644,15 @@
       "kind": "ITEM",
       "stableId": "fridge",
       "directory": "FurnitureItemDirectory",
-      "nameZh": "",
+      "nameZh": "冰箱",
       "nameEn": "Fridge",
       "descriptionZh": "",
       "descriptionEn": "",
       "atlasPath": "Items/items_ship",
       "spritePath": "fridge",
       "categories": [
-        "MACHINES_STORAGE"
+        "MACHINES_STORAGE",
+        "NEW_ITEMS"
       ],
       "itemTypes": [
         "MACHINE"
