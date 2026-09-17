@@ -84,6 +84,9 @@ public class Core : MelonMod
 
 	internal static MelonPreferences_Entry<int> MaxRows;
 
+	// task-6: 同类聚带优先容差(0~1), 决定「横带 vs 密集」定夺; 曲线与实测见 tscripts/bench_banded.py
+	internal static MelonPreferences_Entry<float> CfgBandedTolerance;
+
 	internal static bool ButtonsVisible = true;
 
 	// OnGUI 缓存: GUI 事件循环同帧多次调用 OnGUI, CollectSortables 结果同帧不变, 只算一次
@@ -140,6 +143,7 @@ public class Core : MelonMod
 		NativePosX = Cfg.CreateEntry<float>("NativePosX", -100000f, (string)null, "Saved native-window position (X). Set automatically when you drag it.", false, false, (ValueValidator)null, (string)null);
 		NativePosY = Cfg.CreateEntry<float>("NativePosY", -100000f, (string)null, "Saved native-window position (Y). Set automatically when you drag it.", false, false, (ValueValidator)null, (string)null);
 		MaxRows = Cfg.CreateEntry<int>("MaxRows", 7, (string)null, "Fixed height of the window in rows. The button list scrolls if there are more; the window itself never changes size.", false, false, (ValueValidator)null, (string)null);
+		CfgBandedTolerance = Cfg.CreateEntry<float>("BandedToleranceRatio", 0.05f, (string)null, "Same-tag banding priority tolerance (0-1): use the grouped (same-tag) layout when its largest empty area >= dense area - tolerance * dense area. 0 = group only when it never costs packing; 0.05 = default (spend <=5% empty area for visible grouping, measured 0.2% aggregate); 0.03 = knee; 1 = always group when every item fits.", false, false, (ValueValidator)null, (string)null);
 		GroupByTagDefaulted = Cfg.CreateEntry<bool>("GroupByTagDefaulted", false, (string)null, "Internal: set once after GroupByTag has been defaulted on. Do not edit.", false, false, (ValueValidator)null, (string)null);
 		if (!GroupByTagDefaulted.Value)
 		{
@@ -910,6 +914,8 @@ public class Core : MelonMod
 				}
 			}
 			Dictionary<GameItem, Placement> layout = null;
+			// task-6: 横带(聚带)候选与密集候选同池, 按「带容差的聚带优先」定夺(见 BandedToleranceRatio)
+			Dictionary<GameItem, Placement> bandedLayout = null;
 			string mode = null;
 			int relocated2 = 0;
 			// 横带路径精修采纳件数(塞进缝隙的件数), 仅用于 toast 统计
@@ -929,29 +935,30 @@ public class Core : MelonMod
 						group.RemoveAll(g => absorbSet2.Contains(g));
 					}
 				}
-				layout = LayoutBanded(tagOrder, tagGroups, masks, w, h, keptContainers);
-				if (layout != null)
+				Dictionary<GameItem, Placement> layoutBanded = LayoutBanded(tagOrder, tagGroups, masks, w, h, keptContainers);
+				if (layoutBanded != null)
 				{
-					mode = "grouped";
 					// 横带成功后也做同一精修层(以前只有 LayoutDense 会精修 ⇒ 横带成功路径零塞缝):
-					// 小件优先释放自身格 → 塞进"能容纳它的最小空矩" → 空矩内取最贴邻位.
+					// 小件优先释放自身格 → 塞进「能容纳它的最小空矩」 → 空矩内取最贴邻位.
 					// 采纳条件(新空矩 >= 起始空矩 且 贴邻不降)在 TryFillRefine 内部, 非劣化才改位 ⇒
 					// 最大空矩单调不减, 拆散(贴邻下降)恒 0, 落地重叠/压未动件/越界 与横带原结果同(逐件用 occ 精确校验).
-					Dictionary<GameItem, Placement> refinedBanded = TryFillRefine(keptContainers, layout, masks, w, h);
+					Dictionary<GameItem, Placement> refinedBanded = TryFillRefine(keptContainers, layoutBanded, masks, w, h);
 					if (refinedBanded != null)
 					{
 						foreach (KeyValuePair<GameItem, Placement> kvTuck in refinedBanded)
 						{
-							if (layout.TryGetValue(kvTuck.Key, out Placement oldTuck) && (oldTuck.X != kvTuck.Value.X || oldTuck.Y != kvTuck.Value.Y || oldTuck.O != kvTuck.Value.O))
+							if (layoutBanded.TryGetValue(kvTuck.Key, out Placement oldTuck) && (oldTuck.X != kvTuck.Value.X || oldTuck.Y != kvTuck.Value.Y || oldTuck.O != kvTuck.Value.O))
 							{
 								tucked++;
 							}
 						}
-						layout = refinedBanded;
+						layoutBanded = refinedBanded;
 					}
+					bandedLayout = layoutBanded;
 				}
 			}
-			if (layout == null)
+			// 密集候选: 无论横带成败都算(task-6 需两边空矩才能按容差定夺; LayoutDense 只在局部 occ 上算, 无副作用)
+			Dictionary<GameItem, Placement> denseLayout = null;
 			{
 				foreach (Comparison<GameItem> cmp in new List<Comparison<GameItem>>
 				{
@@ -973,13 +980,39 @@ public class Core : MelonMod
 						candidate.RemoveAll(g => absorbSet.Contains(g));
 					}
 					candidate.Sort(cmp);
-					layout = LayoutDense(candidate, masks, w, h, keptContainers);
-					if (layout != null)
+					denseLayout = LayoutDense(candidate, masks, w, h, keptContainers);
+					if (denseLayout != null)
 					{
-						mode = "packed";
 						break;
 					}
 				}
+			}
+			if (bandedLayout != null && denseLayout != null)
+			{
+				// task-6 容差定夺: 横带全放 且 横带空矩 >= 密集空矩 - tol*密集空矩 ⇒ 选横带(保「同类聚带」产品目标),
+				// 否则选密集. tol = BandedToleranceRatio, 离线曲线见 InventorySorter/tscripts/bench_banded.py
+				long areaBanded = EmptyAreaOfLayout(keptContainers, bandedLayout, masks, w, h);
+				long areaDense = EmptyAreaOfLayout(keptContainers, denseLayout, masks, w, h);
+				if (areaBanded >= areaDense - (long)(areaDense * BandedToleranceRatio))
+				{
+					layout = bandedLayout;
+					mode = "grouped";
+				}
+				else
+				{
+					layout = denseLayout;
+					mode = "packed";
+				}
+			}
+			else if (bandedLayout != null)
+			{
+				layout = bandedLayout;
+				mode = "grouped";
+			}
+			else if (denseLayout != null)
+			{
+				layout = denseLayout;
+				mode = "packed";
 			}
 			if (layout == null)
 			{
@@ -1106,6 +1139,10 @@ public class Core : MelonMod
 		}
 	}
 
+	// 同类聚带(横带)布局: 逐 tag 连续横带(带底 = 前带 bottom), 带内用 MFR 池落位 —— 产品目标: 同类聚在一起.
+	// task-6 修复(近满包原先 0/93 全失败): ①支撑改自支撑(HasSupportSelf, 厚件/首件可放)
+	// ②落位失败先重算 MFR 池(增量 ShrinkRects 切块会丢空间) ③仍失败则全网格自支撑 first-fit(带底压缩/回退).
+	// 逐 tag 连续带语义不变(同 tag 件不跨带交错): 只有整件在带区放不下时才允许落到带外空位; 任一件彻底无处可放 ⇒ 整次返回 null.
 	private static Dictionary<GameItem, Placement> LayoutBanded(List<string> order, Dictionary<string, List<GameItem>> buckets, Dictionary<GameItem, ItemMask> masks, int W, int H, List<GameItem> fixedItems)
 	{
 		bool[,] occ = new bool[W, H];
@@ -1122,15 +1159,37 @@ public class Core : MelonMod
 			int num2 = num;
 			foreach (GameItem item2 in buckets[item])
 			{
-				if (!PlaceInto(occ, W, H, masks[item2], num, out var bx, out var by, out var bo, out var bottom, rects))
+				// ① 带内(带底 num)落位; 支撑用自支撑版(自身格互撑 ⇒ 厚件/空网格首件可放)
+				bool ok = PlaceInto(occ, W, H, masks[item2], num, out int bx, out int by, out int bo, out int bottom, rects, selfSupport: true);
+				bool fromFallback = false;
+				if (!ok)
 				{
-					return null;
+					// ② 增量 ShrinkRects 切块会丢可用空间(近满包尤甚) ⇒ 重算整个 MFR 池再试
+					rects = FindFreeRects(occ, W, H);
+					ok = PlaceInto(occ, W, H, masks[item2], num, out bx, out by, out bo, out bottom, rects, selfSupport: true);
+				}
+				if (!ok)
+				{
+					// ③ 带底压缩/回退: 允许落到带区之外的任意自支撑空位(仍不重叠/不越界/不压未动件)
+					ok = PlaceFirstFit(occ, W, H, masks[item2], out bx, out by, out bo, out bottom);
+					fromFallback = ok;
+				}
+				if (!ok)
+				{
+					return null; // 真正无处可放: 整次 grouped 作废, 由密集候选/降级残局兜底
 				}
 				dictionary[item2] = new Placement(bx, by, bo);
 				ItemMask mm = masks[item2];
 				int pw = (bo == 1 || bo == 3) ? mm.Gh0 : mm.Gw0;
 				int ph = (bo == 1 || bo == 3) ? mm.Gw0 : mm.Gh0;
-				ShrinkRects(rects, bx, by, pw, ph);
+				if (fromFallback)
+				{
+					rects = FindFreeRects(occ, W, H); // 落点可能在缓存之外 ⇒ 缓存重算(保持「缓存 ⊆ 空闲」)
+				}
+				else
+				{
+					ShrinkRects(rects, bx, by, pw, ph);
+				}
 				if (bottom > num2)
 				{
 					num2 = bottom;
@@ -2508,7 +2567,7 @@ public class Core : MelonMod
 		}
 	}
 
-	private static bool PlaceInto(bool[,] occ, int W, int H, ItemMask m, int minY, out int bx, out int by, out int bo, out int bottom, List<(int x, int y, int w, int h)> cachedRects = null)
+	private static bool PlaceInto(bool[,] occ, int W, int H, ItemMask m, int minY, out int bx, out int by, out int bo, out int bottom, List<(int x, int y, int w, int h)> cachedRects = null, bool selfSupport = false)
 	{
 		bx = -1;
 		by = -1;
@@ -2549,7 +2608,7 @@ public class Core : MelonMod
 				}
 				if (list != null && list.Count != 0)
 				{
-					if (FindFreeSpotCells(rects, occ, W, H, list, gw, gh, minY2, out var ox, out var oy, out long waste) && (bx < 0 || oy < by || (oy == by && ox < bx)))
+					if (FindFreeSpotCells(rects, occ, W, H, list, gw, gh, minY2, out var ox, out var oy, out long waste, selfSupport) && (bx < 0 || oy < by || (oy == by && ox < bx)))
 					{
 					bx = ox;
 					by = oy;
@@ -2788,7 +2847,7 @@ public class Core : MelonMod
 	// 使所有物品从左上角单向生长成实心连通块 — 剩余空间变成右下角一整块连续矩形,
 	// 好放入更大物品. 支撑约束是聚合的关键: 无支撑的物品会散开碎片化剩余空间.
 	// 候选按左上优先(最小 y 再最小 x): 聚成紧实团块.
-	private static bool FindFreeSpotCells(List<(int x, int y, int w, int h)> rects, bool[,] occ, int W, int H, List<(int dx, int dy)> cells, int gw, int gh, int minY, out int ox, out int oy, out long waste)
+	private static bool FindFreeSpotCells(List<(int x, int y, int w, int h)> rects, bool[,] occ, int W, int H, List<(int dx, int dy)> cells, int gw, int gh, int minY, out int ox, out int oy, out long waste, bool selfSupport = false)
 	{
 		ox = 0;
 		oy = 0;
@@ -2815,7 +2874,7 @@ public class Core : MelonMod
 			{
 				continue;
 			}
-			if (!HasSupport(occ, px, py, cells))
+			if (!(selfSupport ? HasSupportSelf(occ, px, py, cells) : HasSupport(occ, px, py, cells)))
 			{
 				continue;
 			}
@@ -2848,6 +2907,148 @@ public class Core : MelonMod
 			}
 		}
 		return true;
+	}
+
+	// task-6 布局最大空矩(与 LayoutDense 择优循环同口径): fixedItems 用 bbox, 布局件用精确格, 堆叠件允许压已占格
+	private static long EmptyAreaOfLayout(List<GameItem> fixedItems, Dictionary<GameItem, Placement> layout, Dictionary<GameItem, ItemMask> masks, int W, int H)
+	{
+		bool[,] occ = new bool[W, H];
+		foreach (GameItem f in fixedItems)
+		{
+			MarkCurrentCells(occ, W, H, f);
+		}
+		foreach (KeyValuePair<GameItem, Placement> kv in layout)
+		{
+			if (!masks.TryGetValue(kv.Key, out ItemMask mm))
+			{
+				continue;
+			}
+			List<(int, int)> cs = CellsOf(mm, kv.Value.O);
+			if (cs == null || cs.Count == 0)
+			{
+				cs = mm.C0;
+			}
+			bool stackable = Stacked(kv.Key);
+			foreach ((int dx, int dy) in cs)
+			{
+				int cx = kv.Value.X + dx;
+				int cy = kv.Value.Y + dy;
+				if (cx < 0 || cy < 0 || cx >= W || cy >= H)
+				{
+					continue;
+				}
+				if (occ[cx, cy] && !stackable)
+				{
+					continue; // 不该发生(安全不变量); 保守跳过不重复计
+				}
+				occ[cx, cy] = true;
+			}
+		}
+		return LargestEmptyArea(occ, W, H);
+	}
+
+	// task-6: 同类聚带优先容差(占密集候选最大空矩的比例) — 取自配置 BandedToleranceRatio, 越界钳制到 [0,1]
+	//   0    = 横带空矩不劣于密集才选横带(空矩严格不退化)
+	//   0.03 = 默认: 用 <=3% 空矩代价换用户可见的同类聚带
+	//   1    = 只要横带能全放就强制聚带
+	// 曲线与实测: InventorySorter/tscripts/bench_banded.py
+	private static double BandedToleranceRatio => Math.Clamp((double)CfgBandedTolerance.Value, 0.0, 1.0);
+
+	// task-6 自支撑版支撑判据(仅横带路径使用; 密集路径仍用上面的 HasSupport, 不改其行为):
+	// 每格需「贴首行/首列」或「邻格(左/上/下)已占」或「邻格属于本件自身」.
+	// 原版自身格不计支撑 ⇒ 厚件在空网格当首件时逐格互不支撑, 整件放不下(离线诊断实测).
+	// 仍非恒真: 漂浮孤立位(四邻无物且不在首行/首列)照旧不放 — 保留「聚成实心块」语义.
+	private static readonly HashSet<int> _selfCells = new HashSet<int>();
+
+	private static bool HasSupportSelf(bool[,] occ, int x, int y, List<(int dx, int dy)> cells)
+	{
+		int h = occ.GetLength(1);
+		_selfCells.Clear();
+		foreach ((int dx0, int dy0) in cells)
+		{
+			_selfCells.Add(dx0 * 1024 + dy0);
+		}
+		foreach ((int dx, int dy) in cells)
+		{
+			int cx = x + dx;
+			int cy = y + dy;
+			bool sup = cy == 0 || cx == 0
+				|| (cx - 1 >= 0 && (occ[cx - 1, cy] || _selfCells.Contains((dx - 1) * 1024 + dy)))
+				|| (cy - 1 >= 0 && (occ[cx, cy - 1] || _selfCells.Contains(dx * 1024 + (dy - 1))))
+				|| (cy + 1 < h && (occ[cx, cy + 1] || _selfCells.Contains(dx * 1024 + (dy + 1))));
+			if (!sup)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// task-6 ③ 带底压缩/回退: 全网格(y 外层, x 内层)取第一个「界内 + 空 + 自支撑」的位(位置优先于朝向 = 原生扫描口径).
+	// 仅在带内 MFR(含重算)都放不下时调用 ⇒ 允许物品落到带区之外的任意空位, 保住 grouped 成功.
+	private static bool PlaceFirstFit(bool[,] occ, int W, int H, ItemMask m, out int bx, out int by, out int bo, out int bottom)
+	{
+		bx = -1;
+		by = -1;
+		bo = 0;
+		bottom = 0;
+		for (int y = 0; y < H; y++)
+		{
+			for (int x = 0; x < W; x++)
+			{
+				for (int o = 0; o < 4; o++)
+				{
+					List<(int, int)> cs;
+					int gw;
+					int gh;
+					switch (o)
+					{
+						case 1:
+							cs = m.C1;
+							gw = m.Gw1;
+							gh = m.Gh1;
+							break;
+						case 2:
+							cs = m.C2;
+							gw = m.Gw2;
+							gh = m.Gh2;
+							break;
+						case 3:
+							cs = m.C3;
+							gw = m.Gw3;
+							gh = m.Gh3;
+							break;
+						default:
+							cs = m.C0;
+							gw = m.Gw0;
+							gh = m.Gh0;
+							break;
+					}
+					if (cs == null || cs.Count == 0 || x + gw > W || y + gh > H)
+					{
+						continue;
+					}
+					if (!CellsFree(occ, x, y, cs) || !HasSupportSelf(occ, x, y, cs))
+					{
+						continue;
+					}
+					bx = x;
+					by = y;
+					bo = o;
+					MarkCells(occ, W, H, x, y, cs, val: true);
+					bottom = 0;
+					foreach ((int dx2, int dy2) in cs)
+					{
+						if (y + dy2 + 1 > bottom)
+						{
+							bottom = y + dy2 + 1;
+						}
+					}
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	private static long TouchCount(bool[,] occ, int W, int H, int x, int y, List<(int dx, int dy)> cells)
