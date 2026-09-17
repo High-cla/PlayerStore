@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>NetworkUnlockMod</AssemblyName>
+    <RootNamespace>NetworkUnlockMod</RootNamespace>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GameDir>D:\steam\steamapps\common\Probably Stolen Demo</GameDir>
+    <OutputPath>$(GameDir)\Mods\</OutputPath>
+  </PropertyGroup>
+  <!-- 编译后自动本地提交: 仅 Debug 配置触发(Release 构建不落提交). -->
+  <Target Name="AutoCommit" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+    <Exec Command="git -c user.name=dev -c user.email=dev@local add -A &amp;&amp; git -c user.name=dev -c user.email=dev@local diff --cached --quiet || (git -c user.name=dev -c user.email=dev@local commit -m &quot;build: auto-commit $(Configuration) $(TargetFramework)&quot;)" IgnoreExitCode="true" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+  <ItemGroup>
+    <Reference Include="MelonLoader">
+      <HintPath>$(GameDir)\MelonLoader\net6\MelonLoader.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(GameDir)\MelonLoader\net6\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(GameDir)\MelonLoader\net6\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameDir)\MelonLoader\Il2CppAssemblies\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
