@@ -1,6 +1,6 @@
 # PlayerStore
 
-ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
+ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probably Stolen*）
 
 > 游戏：Probably Stolen（Questing Goose Studio）· MelonLoader 7 · IL2CPP
 > Unity 网格物品背包 + 机械加工系统
@@ -10,7 +10,8 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 | 模块 | 路径 | 功能 |
 | --- | --- | --- |
 | **ProgressMod** | `PlayerStore/ProgressMod.cs` | 机械加工增强 + 网页生成物品：进度强制完成、免耐久、净化必纯、模块加成、永不受伤、无限拾荒、HTTP 物品生成服务器 |
-| **InventorySorter** | `InventorySorter/InventorySorter/Core.cs` | 背包一键整理：大件最优布局 + 小件统一塞缝（5 候选同池择优、残局降级），最大化剩余连续空矩 |
+| **InventorySorter** | `InventorySorter/InventorySorter/Core.cs` | 背包一键整理：大件最优布局 + 小件统一塞缝（5 候选同池择优、同类聚带、残局降级），最大化剩余连续空矩 |
+| **NetworkUnlockMod** | `NetworkUnlockMod/NetworkUnlockMod.cs` | 解锁 demo 锁定内容：Harmony 接管 `NetworkUpgrade.IsLockedInDemo`（默认 10 个网络升级条目），不改 `GameAssembly.dll`、不随游戏更新失效 |
 
 > 版本事实以 git tag 为准（Assembly 里的 `1.12.1` 是历史静态值，未随 tag 更新）。
 
@@ -18,7 +19,7 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 
 ## 安装
 
-1. 从 [Releases](https://github.com/High-cla/PlayerStore/releases) 下载 `ProgressMod.dll` + `InventorySorter.dll`
+1. 从 [Releases](https://github.com/High-cla/PlayerStore/releases) 下载 `ProgressMod.dll` + `InventorySorter.dll` + `NetworkUnlockMod.dll`
 2. 放入 `<游戏目录>/MelonLoader/Mods/`（或游戏根目录 `Mods/`）
 3. 依赖：MelonLoader 7（自带 Harmony + Il2CppInterop.Runtime）
 
@@ -79,6 +80,26 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 
 ---
 
+## NetworkUnlockMod 功能清单
+
+解锁游戏里**已经存在、但被 Playtest/demo 闸门锁住**的网络升级条目。
+
+- **机制**（反编译证据 `dump/cpp2il_isil/IsilDump/Assembly-CSharp/`）：`WildUIManager.txt:1883` 调 `NetworkUpgrade.IsLockedInDemo(id)`（**全网唯一调用点**），为 `true` 时显示 `network_ui_demo_locked` 文案并禁用购买；`NetworkUpgrade.txt:2534` 该方法是 `public static bool`。
+- **实现**：Harmony Prefix 命中解锁列表即 `__result = false` 并跳过原方法，其余 id 走游戏原逻辑；Postfix 把游戏原生判定为锁定的 id 写入日志（自检 + 核对列表）。**不改 `GameAssembly.dll`、不做内存字节补丁** ⇒ 不随游戏更新失效。
+- **默认解锁**：`CHEMIST`、`PHARMA`、`CRIMINEL_NETWORK`、`SHOWCASE_II`、`RUINED_MACHINE_UNLOCK`、`RETIRED_GUNSMITH`、`RETIRED_CHEMIST`、`JACKSON2`、`RENOVATION3`、`RETIRED_FARMER`
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `Enabled` | `true` | 总开关 |
+| `UnlockAllDemoLocked` | `false` | 解锁全部 demo 锁定条目（忽略 `UnlockIds`） |
+| `UnlockIds` | 见上表 | 逗号分隔的条目 id（与游戏 `NetworkUpgrade` 的 id 一致，大写） |
+
+**验证**：启动后 `MelonLoader\Latest.log` 出现 `[NetworkUnlock] 已启用…`；打开网络 UI 后出现 `[NetworkUnlock] 解锁网络条目: <ID>`（该行即证明拦到了游戏内部调用）与 `[NetworkUnlock] 游戏原生判定 demo 锁定: <ID>`。
+
+> 与社区 `ProbablyStolenUnlockMod`（作者 小行星）的关系：那是内存字节补丁，仅在 `GameAssembly.dll` 的 SHA-256/大小与其 profile 一致时启用，游戏更新即自动停用（其 payload 含 143 处硬编码游戏 RVA，只能由作者按新构建重出）。两者互不干扰，但不要同时依赖。参考包见 `unlock/`（未入库）。
+
+---
+
 ## InventorySorter 算法细节
 
 **目标**：最大化剩余连续矩形空间（能放下更大物品）。
@@ -96,7 +117,10 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 - **同一精修层比较**：每个候选先各自过 `TryFillRefine`（小件塞缝），再按最大连续空矩择优 —— 否则"候选是否被精修过"会左右胜负。
 - **严格采纳口径**：原生候选排在自研候选之后，**空矩持平则保留自研结果**（原生须严格更优才顶替）。实测原生只在 30/296 会话胜出、贡献空矩 +217，而平手也采纳会把 churn 从 15% 抬到 42%。
 - **残局降级**（`TryResidualLayout`）：候选全失败时不再整包放弃 —— 大件先放，放不下的小件留在原位（其原格作为障碍），迭代至不动点，落地不与未动件重叠。
-- **横带路径**（`GroupByTag` 默认 `true`）：`LayoutBanded` 成功后同样过精修再采纳。
+- **横带（同类聚带）路径**（`GroupByTag` 默认 `true`）：`LayoutBanded` 成功后同样过精修再采纳；横带与密集候选**同池定夺** —— 横带空矩 ≥ 密集空矩 − `BandedToleranceRatio`×密集空矩 时选横带（保「同类聚带」产品目标），否则选密集。
+  - task-6 修复（原先近满包 0/93 全失败）：① 支撑改自支撑（`HasSupportSelf`：厚件/空网格首件可放）② 落位失败先重算整个 MFR 池（增量 `ShrinkRects` 切割丢空间）③ 仍失败则全网格自支撑 first-fit（`PlaceFirstFit`，实测零增量、留作安全网）。**仅横带路径启用**，密集路径 `HasSupport` 一字未改。
+  - 实测（真 dump 296 会话）：grouped 成功率 **5.7% → 98.0%**，近满包 fill≥0.60 **0/93 → 87/93**。
+  - 容差曲线（`tscripts/bench_banded.py`）：0% 132/296 空矩 21030 ｜ 2% 137/21025 ｜ 3%=4% 138/21021 ｜ 5% 146/20983。默认 **0.05**（空矩成本实测 0.22%）；`0` = 空矩严格不退化，`1` = 强制聚带。
 - 大网格（≥4000，理论边界）用落地堆积兜底（`TryPlaceUnits` 配对 + 单件）。
 
 **择优判据**：剩余最大连续空矩最大者。验证：非堆叠全空格 / 堆叠 ≥1 新格可见。
@@ -121,7 +145,7 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 | `guillotine_test.py` / `guillotine_deadpen_test.py` | Guillotine 对比 / 死洞惩罚项验证 |
 | `optimal_combo.py` / `benchmark_combo.py` | 组合择优 / 基准 |
 | `bench_native.py` | 原生语义 vs 自研候选对拍（含校准段与安全不变量列） |
-| `bench_banded.py` | 横带（分组）路径模型 + 横带精修对拍 |
+| `bench_banded.py` | 横带（分组）路径模型：grouped 成功率逐项隔离 + 精修收益 + 容差曲线（grouped 选取率 vs 空矩代价） |
 | `bench_fillrefine.py` | 贴邻守卫对拍（guard OFF 296/61/103/20008 vs ON 296/0/0/20056） |
 | `bench_residual.py` / `bench_online.py` | 残局降级救回率 / 镜像 C# 全流程对拍 |
 
@@ -150,9 +174,11 @@ ProgressMod + InventorySorter 单仓库（melons for *Probably Stolen*）
 dotnet build PlayerStore/ProgressMod.csproj -c Release
 # InventorySorter
 dotnet build InventorySorter/InventorySorter.csproj -c Release
+# NetworkUnlockMod
+dotnet build NetworkUnlockMod/NetworkUnlockMod.csproj -c Release
 ```
 
-两个 csproj 通过单一属性 `<GameDir>` 定位游戏目录（改名只改一处），`OutputPath` 直写 `$(GameDir)\Mods\`（部署即生效）。Debug 构建自动本地提交（`AutoCommit` target）——**发布用的正式构建请用 `-c Release`**。
+三个 csproj 通过单一属性 `<GameDir>` 定位游戏目录（改名只改一处），`OutputPath` 直写 `$(GameDir)\Mods\`（部署即生效）。Debug 构建自动本地提交（`AutoCommit` target）——**发布用的正式构建请用 `-c Release`**。
 
 ## 许可证
 
