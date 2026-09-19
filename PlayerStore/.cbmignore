@@ -1,0 +1,12 @@
+# codebase-memory 索引忽略规则（仅 ProgressMod）
+# 目标：索引只包含 ProgressMod 本体源码 = ProgressMod.cs
+# 排除 Cheat Engine 离线脚本（非模组源码，混入会产生 t / PlayerStore_Cash 噪声簇）。
+
+# 构建产物
+obj/
+bin/
+*.dll
+
+# Cheat Engine 脚本与自动定位脚本（离线逆向用，不属于 mod）
+*.ct
+*.lua

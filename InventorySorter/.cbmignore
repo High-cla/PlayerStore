@@ -1,0 +1,13 @@
+# codebase-memory 索引忽略规则（仅本模组）
+# 目标：索引只包含 InventorySorter 本体源码 = InventorySorter/InventorySorter/Core.cs
+# + InventorySorter/Properties/AssemblyInfo.cs（MelonInfo 版本）。
+
+# 构建产物
+obj/
+bin/
+*.dll
+*.bak
+
+# 离线验证脚本与反编译物（非本模组源码，混入会污染符号搜索）
+tscripts/
+rs_algos/
