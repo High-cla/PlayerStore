@@ -16,8 +16,7 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgNoDurability = Cfg.CreateEntry<bool>("NoDurability", true, "不消耗耐久");
         public static readonly MelonPreferences_Entry<int> CfgModuleBoostMult = Cfg.CreateEntry<int>("ModuleBoostMult", 10, "模块加成倍率");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyAlwaysPure = Cfg.CreateEntry<bool>("PurifyAlwaysPure", true, "净化器/过滤器: PurifyToBaseWater 永远净化100%纯水");
-        public static readonly MelonPreferences_Entry<string> CfgSpawnId = Cfg.CreateEntry<string>("SpawnItemId", "", "生成物品: 填物品 stableId (如 box_tampon), F9 生成到主背包. 空=禁用");
-        public static readonly MelonPreferences_Entry<int> CfgSpawnCount = Cfg.CreateEntry<int>("SpawnItemCount", 1, "生成物品数量 (不填默认1)");
+        // 生成物品已改由 HTTP 网页生成器承担(F9 快捷生成在 ca0866d 移除), 旧键由 PurgeLegacyEntries 清出配置。
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
@@ -30,9 +29,40 @@ namespace ProgressMod
 
         public override void OnInitializeMelon()
         {
+            PurgeLegacyEntries();
             // 配置在游戏启动时即落盘生成, 玩家可提前看到并修改
             MelonPreferences.Save();
             StartSpawnServer();
+        }
+
+        // 清掉旧版遗留配置项(旧键仍会留在 MelonPreferences.cfg 里; 新版不再使用)。
+        // 反射调用 DeleteEntry: 没有该 API 的 MelonLoader 上安全跳过(残留旧键无害)。
+        private static void PurgeLegacyEntries()
+        {
+            try
+            {
+                System.Reflection.MethodInfo del = typeof(MelonPreferences_Category).GetMethod("DeleteEntry", new System.Type[1] { typeof(string) });
+                if (del == null)
+                {
+                    return;
+                }
+                string[] legacy = new string[2] { "SpawnItemId", "SpawnItemCount" };
+                foreach (string id in legacy)
+                {
+                    try
+                    {
+                        del.Invoke(Cfg, new object[1] { id });
+                    }
+                    catch
+                    {
+                        // 该项本就不存在, 忽略
+                    }
+                }
+            }
+            catch
+            {
+                // ponytail: 反射探测, 静默回退
+            }
         }
 
         // ============ 生成物品: HTTP 本地服务器 (网页点击生成) ============

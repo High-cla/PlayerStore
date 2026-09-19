@@ -52,10 +52,10 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 | `NoDurability` | `true` | 机器/工具不消耗耐久 |
 | `ModuleBoostMult` | `10` | 模块加成倍率 |
 | `PurifyAlwaysPure` | `true` | 净化器/过滤器：`PurifyToBaseWater` 永远净化 100% 纯水 |
-| `SpawnItemId` | `""` | 生成物品 stableId（F9 快捷生成，空=禁用） |
-| `SpawnItemCount` | `1` | F9 生成数量 |
 | `NeverWounded` | `true` | 永不受伤：拾荒/战斗不产生伤口、伤口不恶化、深夜不恶化 |
 | `InfiniteScavenging` | `true` | 无限拾荒：次数/冷却不受限 |
+
+> 历史上的 `SpawnItemId` / `SpawnItemCount`（F9 快捷生成）已在 `ca0866d` 移除，由网页生成器取代；这两个键会被 `PurgeLegacyEntries()` 清出配置文件。
 
 ### Harmony Patch 清单
 
