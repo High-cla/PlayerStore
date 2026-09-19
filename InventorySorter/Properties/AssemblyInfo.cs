@@ -5,7 +5,7 @@ using System.Runtime.Versioning;
 using InventorySorter;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(Core), "Inventory Sorter", "1.0.1", "DyrClone", null)]
+[assembly: MelonInfo(typeof(Core), "Inventory Sorter", "1.1.0", "DyrClone", null)]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 [assembly: AssemblyCompany("DyrClone")]
 [assembly: AssemblyConfiguration("Release")]

@@ -54,46 +54,32 @@ public class Core : MelonMod
 
 	internal static MelonPreferences_Category Cfg;
 
-	internal static MelonPreferences_Entry<bool> Enabled;
+	// 用户配置只剩两项: 自动排序开关 + 排序快捷键。
+	// 其余原配置项按实测最优解固化为下方常量(分支保留, 便于日后回调), 不再暴露给玩家。
+	internal static MelonPreferences_Entry<bool> AutoSortLastOpened;
 
-	internal static MelonPreferences_Entry<bool> KeepContainers;
+	internal static MelonPreferences_Entry<string> SortHotkey;
 
-	internal static MelonPreferences_Entry<bool> SkipBarter;
-
-	internal static MelonPreferences_Entry<int> MinCells;
-
-	internal static MelonPreferences_Entry<bool> ShowBackground;
-
-	internal static MelonPreferences_Entry<bool> OnlyNamedBackground;
-
-	internal static MelonPreferences_Entry<string> DisplayCaseSizes;
-
-	internal static MelonPreferences_Entry<string> MainStorageSizes;
-
-	internal static MelonPreferences_Entry<string> IgnoreBackgroundSizes;
-
-	internal static MelonPreferences_Entry<bool> GroupByTag;
-
-	internal static MelonPreferences_Entry<bool> GroupByTagDefaulted;
-
-	internal static MelonPreferences_Entry<bool> UseNativeUI;
-
+	// 内部状态(is_hidden, 不算用户配置): 原生窗口拖动位置记忆
 	internal static MelonPreferences_Entry<float> NativePosX;
 
 	internal static MelonPreferences_Entry<float> NativePosY;
 
-	internal static MelonPreferences_Entry<int> MaxRows;
+	// ---- 固化常量(原 MelonPreferences 项; 值 = 原默认最优解) ----
+	// 恒真的两项不留常量(无分支可挂): 原 Enabled(功能总开关)与 ShowBackground(显示常驻背景存储)均固定为开。
+	private const bool KeepContainersConst = false; // 原 KeepContainersInPlace: 容器(含液体瓶)也参与排序
 
-	// task-6: 同类聚带优先容差(0~1), 决定「横带 vs 密集」定夺; 曲线与实测见 tscripts/bench_banded.py
-	internal static MelonPreferences_Entry<float> CfgBandedTolerance;
+	private const bool SkipBarterConst = true; // 原 SkipBarterWindows: 不给交易/选择弹窗加排序按钮
+
+	private const int MinCellsConst = 10; // 原 MinCells: 小于此格数的垃圾格子不显示
+
+	private const bool GroupByTagConst = true; // 原 GroupByTag: 同类聚带优先(容差见 BandedToleranceConst)
+
+	private const int MaxRowsConst = 7; // 原 MaxRows: 面板固定高度(行)
+
+	private const double BandedToleranceConst = 0.05; // 原 BandedToleranceRatio: 聚带空矩容差
 
 	internal static bool ButtonsVisible = true;
-
-	// OnGUI 缓存: GUI 事件循环同帧多次调用 OnGUI, CollectSortables 结果同帧不变, 只算一次
-	private static float _guiCacheTimer = -999f;
-	private static readonly List<GameInventory> _guiInvs = new List<GameInventory>();
-	private static readonly List<string> _guiLabels = new List<string>();
-	private static int _guiCount = -1;
 
 
 	// LargestEmptyArea 复用缓冲区: 每次候选计算分配 int[W]+int[W+1] 是 GC 热点, 改为按需扩容复用(布局器串行调用, 不用锁)
@@ -118,39 +104,33 @@ public class Core : MelonMod
 
 	private static readonly List<System.Action> _rootedActions = new List<Action>();
 
-	private static float PanelX = 12f;
+	// ---- 「最后打开的容器」与自动排序状态 ----
+	// 原生 PixelWindow.focusStamp 是全局自增焦点戳(每次 ToFront/提权 +1, 见 PixelWindow.ToFront),
+	// 故 visibleWindows 中 focusStamp 最大者 = 玩家最近打开/最前的那个窗口。
 
-	private static float PanelY = 12f;
+	// 自动排序: 只在窗口「从无到有」出现时触发一次(而非每次聚焦, 免得玩家拿东西时被重排);
+	// 首轮 tick 只登记不触发(开游戏时已有一堆常驻窗口, 不能当成「刚打开」)。
+	private static readonly HashSet<long> _seenWindows = new HashSet<long>();
 
-	private static bool Dragging = false;
+	private static bool _autoWarmup = true;
 
-	private static Vector2 DragOff;
+	private static PixelWindow _pendingAuto;
+
+	// 排序快捷键解析缓存(配置字符串变了才重新解析)
+	private static string _hkSig;
+
+	private static int _hkKey = -1;
+
+	private static int[] _hkMods = new int[0];
 
 	public override void OnInitializeMelon()
 	{
 		Cfg = MelonPreferences.CreateCategory("InventorySorter");
-		Enabled = Cfg.CreateEntry<bool>("Enabled", true, (string)null, "Master on/off for the Sort buttons.", false, false, (ValueValidator)null, (string)null);
-		KeepContainers = Cfg.CreateEntry<bool>("KeepContainersInPlace", false, (string)null, "Leave placed storage units (bays/cages) where they are; sort only loose items. Disabled: containers (incl. liquid bottles) sort too.", false, false, (ValueValidator)null, (string)null);
-		SkipBarter = Cfg.CreateEntry<bool>("SkipBarterWindows", true, (string)null, "Do not add a Sort button to the barter / item-choose popups.", false, false, (ValueValidator)null, (string)null);
-		MinCells = Cfg.CreateEntry<int>("MinCells", 10, (string)null, "Hide any grid smaller than this many cells (drops tiny slot/junk grids).", false, false, (ValueValidator)null, (string)null);
-		ShowBackground = Cfg.CreateEntry<bool>("ShowBackground", true, (string)null, "Show the always-open inventories (display case / main storage). Titled containers always show.", false, false, (ValueValidator)null, (string)null);
-		OnlyNamedBackground = Cfg.CreateEntry<bool>("OnlyNamedBackground", false, (string)null, "Strict mode: hide any background storage whose size isn't listed below. Off by default, unknown sizes still show as 'Storage (N)'.", false, false, (ValueValidator)null, (string)null);
-		DisplayCaseSizes = Cfg.CreateEntry<string>("DisplayCaseSizes", "35,48", (string)null, "Comma-separated cell counts labelled 'Display Case' (e.g. 7x5=35, 8x6=48). Add more as you upgrade.", false, false, (ValueValidator)null, (string)null);
-		MainStorageSizes = Cfg.CreateEntry<string>("MainStorageSizes", "240", (string)null, "Comma-separated cell counts labelled 'Main Storage'. Add more if it upgrades.", false, false, (ValueValidator)null, (string)null);
-		IgnoreBackgroundSizes = Cfg.CreateEntry<string>("IgnoreBackgroundSizes", "72", (string)null, "Comma-separated cell counts of always-open junk grids to hide (e.g. the 72-cell system grid).", false, false, (ValueValidator)null, (string)null);
-		GroupByTag = Cfg.CreateEntry<bool>("GroupByTag", true, (string)null, "Keep items sharing their first tag (e.g. FOOD, WEAPON) next to each other. On by default; the packer falls back to the tightest layout when grouping doesn't fit.", false, false, (ValueValidator)null, (string)null);
-		UseNativeUI = Cfg.CreateEntry<bool>("UseNativeUI", true, (string)null, "Use the game's native window for the Sort buttons. Set false to use the classic IMGUI panel instead.", false, false, (ValueValidator)null, (string)null);
-		NativePosX = Cfg.CreateEntry<float>("NativePosX", -100000f, (string)null, "Saved native-window position (X). Set automatically when you drag it.", false, false, (ValueValidator)null, (string)null);
-		NativePosY = Cfg.CreateEntry<float>("NativePosY", -100000f, (string)null, "Saved native-window position (Y). Set automatically when you drag it.", false, false, (ValueValidator)null, (string)null);
-		MaxRows = Cfg.CreateEntry<int>("MaxRows", 7, (string)null, "Fixed height of the window in rows. The button list scrolls if there are more; the window itself never changes size.", false, false, (ValueValidator)null, (string)null);
-		CfgBandedTolerance = Cfg.CreateEntry<float>("BandedToleranceRatio", 0.05f, (string)null, "Same-tag banding priority tolerance (0-1): use the grouped (same-tag) layout when its largest empty area >= dense area - tolerance * dense area. 0 = group only when it never costs packing; 0.05 = default (spend <=5% empty area for visible grouping, measured 0.2% aggregate); 0.03 = knee; 1 = always group when every item fits.", false, false, (ValueValidator)null, (string)null);
-		GroupByTagDefaulted = Cfg.CreateEntry<bool>("GroupByTagDefaulted", false, (string)null, "Internal: set once after GroupByTag has been defaulted on. Do not edit.", false, false, (ValueValidator)null, (string)null);
-		if (!GroupByTagDefaulted.Value)
-		{
-			GroupByTag.Value = true;
-			GroupByTagDefaulted.Value = true;
-			MelonPreferences.Save();
-		}
+		AutoSortLastOpened = Cfg.CreateEntry<bool>("AutoSortLastOpened", false, (string)null, "Auto-sort a container the moment you open it (the most recently opened one). Off by default.", false, false, (ValueValidator)null, (string)null);
+		SortHotkey = Cfg.CreateEntry<string>("SortHotkey", "F7", (string)null, "Hotkey that sorts the container you opened last. Single key or combo: F7 / G / LeftControl+F7 / LeftShift+LeftAlt+G. Modifiers: LeftShift RightShift LeftControl RightControl LeftAlt RightAlt. Invalid value falls back to F7.", false, false, (ValueValidator)null, (string)null);
+		NativePosX = Cfg.CreateEntry<float>("NativePosX", -100000f, (string)null, "Internal state: saved window position X. Do not edit.", true, false, (ValueValidator)null, (string)null);
+		NativePosY = Cfg.CreateEntry<float>("NativePosY", -100000f, (string)null, "Internal state: saved window position Y. Do not edit.", true, false, (ValueValidator)null, (string)null);
+		PurgeLegacyEntries();
 		// 配置在游戏启动时即落盘生成 (不再等首次触发/退出), 玩家可提前看到并修改
 		MelonPreferences.Save();
 	}
@@ -158,6 +138,41 @@ public class Core : MelonMod
 	public override void OnApplicationQuit()
 	{
 		MelonPreferences.Save();
+	}
+
+	// 清掉旧版遗留配置项(旧键仍会留在 MelonPreferences.cfg 里; 新版不再使用)。
+	// 反射调用 DeleteEntry: 没有该 API 的 MelonLoader 上安全跳过(残留旧键无害)。
+	private static void PurgeLegacyEntries()
+	{
+		try
+		{
+			System.Reflection.MethodInfo del = typeof(MelonPreferences_Category).GetMethod("DeleteEntry", new System.Type[1] { typeof(string) });
+			if (del == null)
+			{
+				return;
+			}
+			string[] legacy = new string[14]
+			{
+				"Enabled", "KeepContainersInPlace", "SkipBarterWindows", "MinCells", "ShowBackground", "OnlyNamedBackground",
+				"DisplayCaseSizes", "MainStorageSizes", "IgnoreBackgroundSizes", "GroupByTag", "GroupByTagDefaulted",
+				"UseNativeUI", "MaxRows", "BandedToleranceRatio"
+			};
+			foreach (string id in legacy)
+			{
+				try
+				{
+					del.Invoke(Cfg, new object[1] { id });
+				}
+				catch
+				{
+					// 该项本就不存在, 忽略
+				}
+			}
+		}
+		catch
+		{
+			// ponytail: 反射探测, 静默回退
+		}
 	}
 
 	public override void OnUpdate()
@@ -169,10 +184,12 @@ public class Core : MelonMod
 				if (Input.GetKeyDown((KeyCode)287))
 				{
 					ButtonsVisible = !ButtonsVisible;
-					if (UseNativeUI.Value)
-					{
-						_nativeDirty = true;
-					}
+					_nativeDirty = true;
+				}
+				// 快捷键: 排序「最后打开的容器」(原生焦点戳最大的可排序窗口)
+				if (SortHotkeyPressed())
+				{
+					SortLastOpenedContainer();
 				}
 			}
 			catch
@@ -184,10 +201,6 @@ public class Core : MelonMod
 				}
 			}
 		}
-		if (!UseNativeUI.Value || !Enabled.Value)
-		{
-			return;
-		}
 		_nativeTimer += Time.deltaTime;
 		if (_nativeTimer >= 0.25f)
 		{
@@ -195,6 +208,7 @@ public class Core : MelonMod
 			try
 			{
 				RefreshNativeUI();
+				TrackOpenedContainers();
 			}
 			catch (System.Exception ex)
 			{
@@ -242,7 +256,7 @@ public class Core : MelonMod
 		{
 			// ponytail: IL2CPP native probe, silent fallback
 		}
-		if (!ButtonsVisible || !Enabled.Value)
+		if (!ButtonsVisible)
 		{
 			if (instance.IsOpen("inventory_sorter"))
 			{
@@ -275,7 +289,7 @@ public class Core : MelonMod
 			return;
 		}
 		float num = 242f;
-		float num2 = (float)Math.Max(3, MaxRows.Value) * 34f;
+		float num2 = (float)Math.Max(3, MaxRowsConst) * 34f;
 		CustomUIBuilder val = instance.CreateWindow("inventory_sorter", "Inventory Sorter", "overlay").SetDraggable(true).SetCloseOnEscape(false)
 			.SetSize(num, 50f + num2);
 		val.BeginScroll(num2);
@@ -337,110 +351,8 @@ public class Core : MelonMod
 		return false;
 	}
 
-	public override void OnGUI()
-	{
-		//IL_003f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0069: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0061: Unknown result type (might be due to invalid IL or missing references)
-		//IL_006e: Unknown result type (might be due to invalid IL or missing references)
-		//IL_01cf: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ca: Unknown result type (might be due to invalid IL or missing references)
-		//IL_020d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0117: Unknown result type (might be due to invalid IL or missing references)
-		//IL_011d: Invalid comparison between Unknown and I4
-		//IL_013d: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0143: Invalid comparison between Unknown and I4
-		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
-		//IL_028b: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0294: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00ea: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00f7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0104: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0109: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0315: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0300: Unknown result type (might be due to invalid IL or missing references)
-		//IL_014c: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0163: Unknown result type (might be due to invalid IL or missing references)
-		if (UseNativeUI.Value || !Enabled.Value || !ButtonsVisible)
-		{
-			return;
-		}
-		// 同帧缓存: GUI 事件循环(Repaint/Layout/...)同帧多次调用 OnGUI, 结果不变. 每 0.3s 重算一次.
-		float nowGui = Time.realtimeSinceStartup;
-		if (nowGui - _guiCacheTimer > 0.3f)
-		{
-			_guiCacheTimer = nowGui;
-			_guiInvs.Clear();
-			_guiLabels.Clear();
-			_guiCount = CollectSortables(_guiInvs, _guiLabels);
-		}
-		List<GameInventory> list = _guiInvs;
-		List<string> list2 = _guiLabels;
-		int value = _guiCount;
-		Event current = Event.current;
-		bool flag = current != null && (int)current.type == 0 && current.button == 0;
-		Vector2 val = (Vector2)((current != null) ? current.mousePosition : new Vector2(-1f, -1f));
-		float num = 264f;
-		float num2 = 26f;
-		float num3 = 26f;
-		float num4 = 10f;
-		int num5 = Math.Max(list.Count, 1);
-		float num6 = num2 + (float)num5 * num3 + num4 + 20f;
-		Rect val2 = default(Rect);
-		val2 = new Rect(PanelX, PanelY, num, num2);
-		if (current != null)
-		{
-			if ((int)current.type == 0 && current.button == 0 && val2.Contains(val))
-			{
-				Dragging = true;
-				DragOff = new Vector2(val.x - PanelX, val.y - PanelY);
-				current.Use();
-			}
-			else if ((int)current.type == 1 && current.button == 0 && Dragging)
-			{
-				Dragging = false;
-				current.Use();
-			}
-			else if ((int)current.type == 3 && Dragging)
-			{
-				PanelX = val.x - DragOff.x;
-				PanelY = val.y - DragOff.y;
-				current.Use();
-			}
-		}
-		PanelX = Mathf.Clamp(PanelX, 0f, (float)Screen.width - num);
-		PanelY = Mathf.Clamp(PanelY, 0f, (float)Screen.height - num6);
-		Rect val3 = default(Rect);
-		val3 = new Rect(PanelX, PanelY, num, num6);
-		GUI.Box(val3, "Inventory Sorter   (drag | F6 hide)");
-		float num7 = PanelY + num2;
-		if (list.Count == 0)
-		{
-			GUI.Label(new Rect(PanelX + 10f, num7 + 2f, num - 20f, 20f), $"No open storage detected ({value} window(s)).");
-			num7 += num3;
-		}
-		else
-		{
-			for (int i = 0; i < list.Count; i++)
-			{
-				string label = "Sort: " + Trunc(list2[i], 28);
-				if (FaceClicked(new Rect(PanelX + 8f, num7, num - 16f, 22f), label, flag, val, current))
-				{
-					SortInventory(list[i]);
-				}
-				num7 += num3;
-			}
-		}
-		if (!string.IsNullOrEmpty(LastAction) && Time.realtimeSinceStartup - _lastActionAt < 3f)
-		{
-			GUI.Label(new Rect(PanelX + 10f, num7 + 2f, num - 20f, 20f), LastAction);
-		}
-		if (flag && val3.Contains(val) && current != null)
-		{
-			current.Use();
-		}
-	}
-
+	// 原生 UI 已是唯一形态(原 UseNativeUI 配置固化 true): 旧的 IMGUI 面板与其 FaceClicked 已删除.
+	// 按钮列表由 RefreshNativeUI 渲染, 见上方.
 	private static string Trunc(string s, int max)
 	{
 		if (string.IsNullOrEmpty(s))
@@ -452,23 +364,6 @@ public class Core : MelonMod
 			return s.Substring(0, max - 1) + "…";
 		}
 		return s;
-	}
-
-	private static bool SizeInList(int cells, string csv)
-	{
-		if (string.IsNullOrEmpty(csv))
-		{
-			return false;
-		}
-		string[] array = csv.Split(',');
-		for (int i = 0; i < array.Length; i++)
-		{
-			if (int.TryParse(array[i].Trim(), out var result) && result == cells)
-			{
-				return true;
-			}
-		}
-		return false;
 	}
 
 	private static int CollectSortables(List<GameInventory> invs, List<string> labels)
@@ -496,73 +391,19 @@ public class Core : MelonMod
 					continue;
 				}
 				GameInventory val3 = ResolveInventory(val2);
-				if (val3 == null || (SkipBarter.Value && IsBarterOrChoose(val3)))
+				if (val3 == null || (SkipBarterConst && IsBarterOrChoose(val3)))
 				{
 					continue;
 				}
-				bool flag = false;
-				try
-				{
-					flag = ((Il2CppObjectBase)val3).TryCast<GameSlotInventory>() != null;
-				}
-				catch
-				{
-					// ponytail: IL2CPP native probe, silent fallback
-				}
-				if (flag)
+				if (!IsSortableInventory(val3))
 				{
 					continue;
 				}
-				string text = "";
-				try
+				// 显示名 + 可排序性统一走 WindowLabel: 有标题用标题, 无标题常驻背景存储用容量标签(不写死尺寸, 升级/新增容器自动适配)
+				string item = WindowLabel(val2, val3);
+				if (item == null)
 				{
-					text = val2.titleString;
-				}
-				catch
-				{
-					// ponytail: IL2CPP native probe, silent fallback
-				}
-				InvInfo(val3, out var _, out var cells);
-				string item;
-				if (!string.IsNullOrEmpty(text))
-				{
-					item = text;
-				}
-				else
-				{
-					if (!ShowBackground.Value || cells < Math.Max(1, MinCells.Value) || SizeInList(cells, IgnoreBackgroundSizes.Value))
-					{
-						continue;
-					}
-					bool flag2 = false;
-					try
-					{
-						flag2 = val3.IsInsertLocked();
-					}
-					catch
-					{
-						// ponytail: IL2CPP native probe, silent fallback
-					}
-					if (flag2)
-					{
-						continue;
-					}
-					if (SizeInList(cells, MainStorageSizes.Value))
-					{
-						item = "Main Storage";
-					}
-					else if (SizeInList(cells, DisplayCaseSizes.Value))
-					{
-						item = "Display Case";
-					}
-					else
-					{
-						if (OnlyNamedBackground.Value)
-						{
-							continue;
-						}
-						item = $"Storage ({cells})";
-					}
+					continue;
 				}
 				invs.Add(val3);
 				labels.Add(item);
@@ -789,7 +630,7 @@ public class Core : MelonMod
 		Dictionary<string, List<GameItem>> groups = new Dictionary<string, List<GameItem>>();
 		foreach (GameItem item in items)
 		{
-			string tag = (GroupByTag.Value ? TagKey(item) : "");
+			string tag = (GroupByTagConst ? TagKey(item) : "");
 			if (!groups.TryGetValue(tag, out var bucket))
 			{
 				bucket = (groups[tag] = new List<GameItem>());
@@ -797,7 +638,7 @@ public class Core : MelonMod
 			}
 			bucket.Add(item);
 		}
-		if (GroupByTag.Value)
+		if (GroupByTagConst)
 		{
 			tagOrder.Sort((string a, string b) => string.Compare(a, b, StringComparison.OrdinalIgnoreCase));
 		}
@@ -851,7 +692,7 @@ public class Core : MelonMod
 		List<GameItem> keptContainers = new List<GameItem>();
 		foreach (GameItem it in list)
 		{
-			if (KeepContainers.Value && HasContentWindow(it))
+			if (KeepContainersConst && HasContentWindow(it))
 			{
 				keptContainers.Add(it);
 			}
@@ -920,7 +761,7 @@ public class Core : MelonMod
 			int relocated2 = 0;
 			// 横带路径精修采纳件数(塞进缝隙的件数), 仅用于 toast 统计
 			int tucked = 0;
-			if (GroupByTag.Value)
+			if (GroupByTagConst)
 			{
 				// 同类合并: 从 tag 分组中剔除被合并件(代表件保留), 布局后重叠致放自动合并
 				if (mergeAbsorb.Count > 0)
@@ -2947,12 +2788,12 @@ public class Core : MelonMod
 		return LargestEmptyArea(occ, W, H);
 	}
 
-	// task-6: 同类聚带优先容差(占密集候选最大空矩的比例) — 取自配置 BandedToleranceRatio, 越界钳制到 [0,1]
+	// task-6: 同类聚带优先容差(占密集候选最大空矩的比例) — 原配置 BandedToleranceRatio, 现固化为常量 BandedToleranceConst
 	//   0    = 横带空矩不劣于密集才选横带(空矩严格不退化)
-	//   0.03 = 默认: 用 <=3% 空矩代价换用户可见的同类聚带
+	//   0.05 = 生产值: 用 <=5% 空矩代价换用户可见的同类聚带(实测拐点 3%; 5% 时 146/296=49.3% 会话聚带, 面积代价 0.22%)
 	//   1    = 只要横带能全放就强制聚带
 	// 曲线与实测: InventorySorter/tscripts/bench_banded.py
-	private static double BandedToleranceRatio => Math.Clamp((double)CfgBandedTolerance.Value, 0.0, 1.0);
+	private static double BandedToleranceRatio => BandedToleranceConst;
 
 	// task-6 自支撑版支撑判据(仅横带路径使用; 密集路径仍用上面的 HasSupport, 不改其行为):
 	// 每格需「贴首行/首列」或「邻格(左/上/下)已占」或「邻格属于本件自身」.
@@ -3439,24 +3280,377 @@ public class Core : MelonMod
 		_lastActionAt = Time.realtimeSinceStartup;
 	}
 
-	private static bool FaceClicked(Rect r, string label, bool mdown, Vector2 mp, Event e)
+	// ==================== 快捷键 / 最后打开的容器 / 自动排序 ====================
+
+	// 「最后打开的容器」= visibleWindows 中 focusStamp 最大者(原生自增焦点戳, 打开/提权即刷新);
+	// 返回值可能不是可排序容器(例如系统 UI), 由 SortableWindowInventory 再过滤。
+	private static PixelWindow LastFocusedWindow()
 	{
-		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
-		GUI.Box(r, label, GUI.skin.button);
-		int num;
-		if (mdown)
+		try
 		{
-			num = (r.Contains(mp) ? 1 : 0);
-			if (num != 0 && e != null)
+			WindowsHandler wh = WindowsHandler.current;
+			if ((Object)(object)wh == (Object)null)
 			{
-				e.Use();
+				return null;
+			}
+			Il2CppSystem.Collections.Generic.List<PixelWindow> list = wh.visibleWindows;
+			if (list == null || list.Count == 0)
+			{
+				return null;
+			}
+			PixelWindow best = null;
+			long bestStamp = long.MinValue;
+			for (int i = 0; i < list.Count; i++)
+			{
+				PixelWindow w = null;
+				try
+				{
+					w = list[i];
+				}
+				catch
+				{
+					// ponytail: IL2CPP native probe, silent fallback
+				}
+				if (w == null)
+				{
+					continue;
+				}
+				long s;
+				try
+				{
+					s = w.focusStamp;
+				}
+				catch
+				{
+					continue;
+				}
+				if (s >= bestStamp)
+				{
+					bestStamp = s;
+					best = w;
+				}
+			}
+			return best;
+		}
+		catch
+		{
+			// ponytail: IL2CPP native probe, silent fallback
+			return null;
+		}
+	}
+
+	// 可排序性判定(与按钮列表同口径): 非槽位 inventory
+	private static bool IsSortableInventory(GameInventory inv)
+	{
+		if (inv == null)
+		{
+			return false;
+		}
+		try
+		{
+			return ((Il2CppObjectBase)inv).TryCast<GameSlotInventory>() == null;
+		}
+		catch
+		{
+			return true;
+		}
+	}
+
+	// 窗口显示名: 有标题用标题; 无标题的常驻背景存储(主仓库/展示柜等)用容量做标签。
+	// 不写死任何容量尺寸 —— 容器升级/游戏新增容器都自动适配。返回 null = 此窗口不该出现在列表里。
+	private static string WindowLabel(PixelWindow win, GameInventory inv)
+	{
+		if (win == null || inv == null)
+		{
+			return null;
+		}
+		string text = "";
+		try
+		{
+			text = win.titleString;
+		}
+		catch
+		{
+			// ponytail: IL2CPP native probe, silent fallback
+		}
+		if (!string.IsNullOrEmpty(text))
+		{
+			return text;
+		}
+		int cells;
+		try
+		{
+			InvInfo(inv, out var _, out cells);
+		}
+		catch
+		{
+			return null;
+		}
+		if (cells < MinCellsConst)
+		{
+			return null;
+		}
+		try
+		{
+			if (inv.IsInsertLocked())
+			{
+				return null;
 			}
 		}
-		else
+		catch
 		{
-			num = 0;
+			// ponytail: IL2CPP native probe, silent fallback
 		}
-		return (byte)num != 0;
+		return $"Storage ({cells})";
+	}
+
+	// 窗口 -> 可排序 inventory(null = 不是可排序容器)
+	private static GameInventory SortableWindowInventory(PixelWindow win)
+	{
+		if (win == null)
+		{
+			return null;
+		}
+		GameInventory inv = ResolveInventory(win);
+		if (inv == null || (SkipBarterConst && IsBarterOrChoose(inv)) || !IsSortableInventory(inv))
+		{
+			return null;
+		}
+		if (WindowLabel(win, inv) == null)
+		{
+			return null;
+		}
+		return inv;
+	}
+
+	// 快捷键动作: 排序最后打开的那个容器
+	private static void SortLastOpenedContainer()
+	{
+		PixelWindow win = LastFocusedWindow();
+		GameInventory inv = SortableWindowInventory(win);
+		if (inv == null)
+		{
+			Toast("no container open to sort");
+			return;
+		}
+		SortInventory(inv);
+	}
+
+	// 自动排序(开关默认关): 只在窗口「从无到有」出现时排一次, 且延后一个 tick(等窗口内容就绪)
+	private static void TrackOpenedContainers()
+	{
+		List<PixelWindow> wins = new List<PixelWindow>();
+		try
+		{
+			WindowsHandler wh = WindowsHandler.current;
+			Il2CppSystem.Collections.Generic.List<PixelWindow> list = (((Object)(object)wh != (Object)null) ? wh.visibleWindows : null);
+			int n = ((list != null) ? list.Count : 0);
+			for (int i = 0; i < n; i++)
+			{
+				try
+				{
+					PixelWindow w = list[i];
+					if (w != null)
+					{
+						wins.Add(w);
+					}
+				}
+				catch
+				{
+					// ponytail: IL2CPP native probe, silent fallback
+				}
+			}
+		}
+		catch
+		{
+			// ponytail: IL2CPP native probe, silent fallback
+		}
+		if (_autoWarmup)
+		{
+			// 首轮: 开游戏时已有一堆常驻窗口, 只登记, 不能当成「刚打开」
+			_autoWarmup = false;
+			_seenWindows.Clear();
+			foreach (PixelWindow w0 in wins)
+			{
+				_seenWindows.Add(WindowPtr(w0));
+			}
+			return;
+		}
+		// 1) 先执行上一 tick 记下的「刚打开的容器」
+		PixelWindow pending = _pendingAuto;
+		_pendingAuto = null;
+		if (pending != null && AutoSortLastOpened != null && AutoSortLastOpened.Value)
+		{
+			GameInventory pinv = SortableWindowInventory(pending);
+			if (pinv != null)
+			{
+				SortInventory(pinv);
+			}
+		}
+		// 2) 再 diff 出本 tick 新出现的窗口 ⇒ 记为下一 tick 的自动排序目标(取焦点戳最大者 = 最后打开的那个)
+		HashSet<long> now = new HashSet<long>();
+		PixelWindow newest = null;
+		long newestStamp = long.MinValue;
+		foreach (PixelWindow w in wins)
+		{
+			long ptr = WindowPtr(w);
+			now.Add(ptr);
+			if (_seenWindows.Contains(ptr))
+			{
+				continue;
+			}
+			long s = 0L;
+			try
+			{
+				s = w.focusStamp;
+			}
+			catch
+			{
+				// ponytail: IL2CPP native probe, silent fallback
+			}
+			if (newest == null || s >= newestStamp)
+			{
+				newestStamp = s;
+				newest = w;
+			}
+		}
+		_seenWindows.Clear();
+		foreach (long v in now)
+		{
+			_seenWindows.Add(v);
+		}
+		_pendingAuto = newest;
+	}
+
+	// IL2CPP 对象身份(用于 diff 窗口集合)
+	private static long WindowPtr(PixelWindow w)
+	{
+		if (w == null)
+		{
+			return 0L;
+		}
+		try
+		{
+			return ((Il2CppObjectBase)w).Pointer.ToInt64();
+		}
+		catch
+		{
+			return 0L;
+		}
+	}
+
+	// 快捷键是否按下(配置字符串解析失败则回退 F7, 见 ResolveHotkey)
+	private static bool SortHotkeyPressed()
+	{
+		ResolveHotkey();
+		if (_hkKey < 0)
+		{
+			return false;
+		}
+		for (int i = 0; i < _hkMods.Length; i++)
+		{
+			if (!Input.GetKey((KeyCode)_hkMods[i]))
+			{
+				return false;
+			}
+		}
+		return Input.GetKeyDown((KeyCode)_hkKey);
+	}
+
+	// 解析 SortHotkey 配置("LeftShift+LeftControl+G" 形式); 只在字符串变化时重解析, 失败回退 F7 并记日志
+	private static void ResolveHotkey()
+	{
+		string sig = ((SortHotkey != null) ? SortHotkey.Value : null);
+		if (sig == _hkSig)
+		{
+			return;
+		}
+		_hkSig = sig;
+		_hkKey = -1;
+		_hkMods = new int[0];
+		if (string.IsNullOrWhiteSpace(sig))
+		{
+			MelonLogger.Warning("[InvSorter] SortHotkey 为空, 回退 F7");
+			sig = "F7";
+		}
+		string[] parts = sig.Split('+');
+		int key = ParseKeyName(parts[parts.Length - 1]);
+		if (key < 0)
+		{
+			MelonLogger.Warning("[InvSorter] SortHotkey 无法识别: " + sig + " —— 回退 F7");
+			key = 288;
+			parts = new string[1] { "F7" };
+		}
+		List<int> mods = new List<int>();
+		for (int i = 0; i < parts.Length - 1; i++)
+		{
+			int m = ParseKeyName(parts[i]);
+			if (m < 0)
+			{
+				MelonLogger.Warning("[InvSorter] SortHotkey 修饰键无法识别: " + parts[i] + " (已忽略)");
+				continue;
+			}
+			mods.Add(m);
+		}
+		_hkKey = key;
+		_hkMods = mods.ToArray();
+		MelonLogger.Msg("[InvSorter] 排序快捷键: " + sig + " -> KeyCode " + key + " (+ " + _hkMods.Length + " 个修饰键)");
+	}
+
+	// Unity KeyCode 名字表(不依赖 Enum.Parse, 避免 IL2CPP 枚举解析坑; 返回 -1 = 不认识)
+	private static int ParseKeyName(string raw)
+	{
+		if (string.IsNullOrWhiteSpace(raw))
+		{
+			return -1;
+		}
+		string n = raw.Trim().ToUpperInvariant();
+		if (n.Length == 1)
+		{
+			char c = n[0];
+			if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+			{
+				return c; // KeyCode.A=65, KeyCode.Alpha0=48
+			}
+		}
+		if (n.Length >= 2 && n[0] == 'F' && int.TryParse(n.Substring(1), out var fn) && fn >= 1 && fn <= 15)
+		{
+			return 281 + fn; // KeyCode.F1=282 .. KeyCode.F15=296
+		}
+		switch (n)
+		{
+			case "SPACE": return 32;
+			case "TAB": return 9;
+			case "RETURN":
+			case "ENTER": return 13;
+			case "ESCAPE":
+			case "ESC": return 27;
+			case "BACKSPACE": return 8;
+			case "DELETE": return 127;
+			case "INSERT": return 277;
+			case "HOME": return 278;
+			case "END": return 279;
+			case "PAGEUP": return 280;
+			case "PAGEDOWN": return 281;
+			case "UP":
+			case "UPARROW": return 273;
+			case "DOWN":
+			case "DOWNARROW": return 274;
+			case "RIGHT":
+			case "RIGHTARROW": return 275;
+			case "LEFT":
+			case "LEFTARROW": return 276;
+			case "LEFTSHIFT": return 304;
+			case "RIGHTSHIFT": return 303;
+			case "LEFTCONTROL":
+			case "LEFTCTRL": return 306;
+			case "RIGHTCONTROL":
+			case "RIGHTCTRL": return 305;
+			case "LEFTALT": return 308;
+			case "RIGHTALT": return 307;
+			case "MOUSE0": return 323;
+			case "MOUSE1": return 324;
+			default: return -1;
+		}
 	}
 }

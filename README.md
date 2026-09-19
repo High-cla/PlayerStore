@@ -10,7 +10,7 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 | 模块 | 路径 | 功能 |
 | --- | --- | --- |
 | **ProgressMod** | `PlayerStore/ProgressMod.cs` | 机械加工增强 + 网页生成物品：进度强制完成、免耐久、净化必纯、模块加成、永不受伤、无限拾荒、HTTP 物品生成服务器 |
-| **InventorySorter** | `InventorySorter/InventorySorter/Core.cs` | 背包一键整理：大件最优布局 + 小件统一塞缝（5 候选同池择优、同类聚带、残局降级），最大化剩余连续空矩 |
+| **InventorySorter** | `InventorySorter/InventorySorter/Core.cs` | 背包一键整理：大件最优布局 + 小件统一塞缝（5 候选同池择优、同类聚带、残局降级），最大化剩余连续空矩；快捷键排序「最后打开的容器」+ 可开关的自动排序 |
 | **NetworkUnlockMod** | `NetworkUnlockMod/NetworkUnlockMod.cs` | 解锁 demo 锁定内容：Harmony 接管 `NetworkUpgrade.IsLockedInDemo`（默认 10 个网络升级条目），不改 `GameAssembly.dll`、不随游戏更新失效 |
 
 > 版本事实以 git tag 为准（Assembly 里的 `1.12.1` 是历史静态值，未随 tag 更新）。
@@ -100,6 +100,35 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 
 ---
 
+## InventorySorter 快捷键与配置
+
+**排序快捷键**（默认 `F7`）：整理**你最后打开的那个容器**，不用在按钮列表里找。
+
+- **「最后打开」用游戏原生判据**：`PixelWindow.focusStamp` 是全局自增焦点戳，每次 `ToFront`/提权 +1（转储 `dump/cpp2il_isil/IsilDump/Assembly-CSharp/PixelWindow.txt` 里的 `NextFocusStamp` / `ToFront`，写入点 `mov [rbx+0B0h],rax`）。于是 `WindowsHandler.current.visibleWindows` 中 focusStamp 最大的可排序窗口，就是玩家最后打开的那个。
+- **支持组合键**：配置值可写 `F7` / `G` / `LeftControl+F7` / `LeftShift+LeftAlt+G`（修饰键名 `LeftShift` `RightShift` `LeftControl` `RightControl` `LeftAlt` `RightAlt`）；写错或留空自动回退 `F7`，并在 `MelonLoader\Latest.log` 写一行 warning。
+- **自动排序**（`AutoSortLastOpened`，默认 `false`）：打开容器时自动整理那一个容器。触发口径是「窗口从无到有出现」（0.25s tick 快照 diff），**不是**每次点击聚焦 —— 免得玩家在容器里拿东西时被重排；执行再延后一个 tick，等窗口内容就绪。
+- `F6` 仍是隐藏/显示排序面板。
+
+**配置只有两项**（`AutoSortLastOpened` + `SortHotkey`；另有 2 个 `is_hidden` 内部项只记原生窗口位置）。其余原配置项按默认最优解**固化成 `Core.cs` 顶部常量**（分支保留，便于日后回调）：
+
+| 原配置 | 固化值 | 常量 |
+| --- | --- | --- |
+| `Enabled` | `true`（恒开） | — |
+| `KeepContainersInPlace` | `false`（容器也参与排序） | `KeepContainersConst` |
+| `SkipBarterWindows` | `true` | `SkipBarterConst` |
+| `MinCells` | `10` | `MinCellsConst` |
+| `ShowBackground` | `true` | — |
+| `GroupByTag` | `true` | `GroupByTagConst` |
+| `MaxRows` | `7` | `MaxRowsConst` |
+| `BandedToleranceRatio` | `0.05` | `BandedToleranceConst` |
+| `UseNativeUI` | `true`（原生 UI 为唯一形态） | — |
+
+- 旧键由 `PurgeLegacyEntries()` 在启动时（反射调 `DeleteEntry`）从 `MelonPreferences.cfg` 移除。
+- 尺寸白名单三项一并删除，改为动态判断：无标题常驻存储一律标 `Storage (N)`（N = 格数）⇒ 容器升级/游戏新增容器自动适配；系统垃圾网格改由 `IsInsertLocked()` + `MinCellsConst` 过滤。
+- 旧 IMGUI 面板（含 `FaceClicked` / `SizeInList`）随 `UseNativeUI` 固化而删除。
+
+---
+
 ## InventorySorter 算法细节
 
 **目标**：最大化剩余连续矩形空间（能放下更大物品）。
@@ -117,10 +146,10 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 - **同一精修层比较**：每个候选先各自过 `TryFillRefine`（小件塞缝），再按最大连续空矩择优 —— 否则"候选是否被精修过"会左右胜负。
 - **严格采纳口径**：原生候选排在自研候选之后，**空矩持平则保留自研结果**（原生须严格更优才顶替）。实测原生只在 30/296 会话胜出、贡献空矩 +217，而平手也采纳会把 churn 从 15% 抬到 42%。
 - **残局降级**（`TryResidualLayout`）：候选全失败时不再整包放弃 —— 大件先放，放不下的小件留在原位（其原格作为障碍），迭代至不动点，落地不与未动件重叠。
-- **横带（同类聚带）路径**（`GroupByTag` 默认 `true`）：`LayoutBanded` 成功后同样过精修再采纳；横带与密集候选**同池定夺** —— 横带空矩 ≥ 密集空矩 − `BandedToleranceRatio`×密集空矩 时选横带（保「同类聚带」产品目标），否则选密集。
+- **横带（同类聚带）路径**（`GroupByTagConst` 恒 `true`）：`LayoutBanded` 成功后同样过精修再采纳；横带与密集候选**同池定夺** —— 横带空矩 ≥ 密集空矩 − `BandedToleranceRatio`×密集空矩 时选横带（保「同类聚带」产品目标），否则选密集。
   - task-6 修复（原先近满包 0/93 全失败）：① 支撑改自支撑（`HasSupportSelf`：厚件/空网格首件可放）② 落位失败先重算整个 MFR 池（增量 `ShrinkRects` 切割丢空间）③ 仍失败则全网格自支撑 first-fit（`PlaceFirstFit`，实测零增量、留作安全网）。**仅横带路径启用**，密集路径 `HasSupport` 一字未改。
   - 实测（真 dump 296 会话）：grouped 成功率 **5.7% → 98.0%**，近满包 fill≥0.60 **0/93 → 87/93**。
-  - 容差曲线（`tscripts/bench_banded.py`）：0% 132/296 空矩 21030 ｜ 2% 137/21025 ｜ 3%=4% 138/21021 ｜ 5% 146/20983。默认 **0.05**（空矩成本实测 0.22%）；`0` = 空矩严格不退化，`1` = 强制聚带。
+  - 容差曲线（`tscripts/bench_banded.py`）：0% 132/296 空矩 21030 ｜ 2% 137/21025 ｜ 3%=4% 138/21021 ｜ 5% 146/20983。固化常量 **`BandedToleranceConst = 0.05`**（空矩成本实测 0.22%）；`0` = 空矩严格不退化，`1` = 强制聚带。
 - 大网格（≥4000，理论边界）用落地堆积兜底（`TryPlaceUnits` 配对 + 单件）。
 
 **择优判据**：剩余最大连续空矩最大者。验证：非堆叠全空格 / 堆叠 ≥1 新格可见。
@@ -132,7 +161,7 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 - **小件精修（塞缝）**：仅对非堆叠件，小件优先；释放自身格 → 取"能容纳它的最小空矩" → 该空矩内扫全朝向取最贴邻位；**贴邻不降才采纳**（防空隙不够时把贴簇小件拆散到孤立角落）
 - **同类合并堆叠**：相同 ident+形状物品先合并计数，只布局 1 个代表格，其余重叠落到代表件（游戏堆叠自动合并）；容器（有内部格子）不参与堆叠，只移动
 - **互补配对**：L 形/缺角物品两两尝试 4×4 朝向 × 全偏移合成矩形 → 配对单元整体落地（大仓 ≥100 格才配对）
-- **容器留原位**：`KeepContainers` 开启时带内部格子的容器不参与重排
+- **容器留原位**：固化为关（`KeepContainersConst = false`）——带内部格子的容器也参与排序
 - **空间统计**：`DumpShapes` 输出 `inv_shape_dump.txt`：背包尺寸 + 占用/剩余 + 最大连续空矩形
 
 ### 验证套件（`InventorySorter/tscripts/`，纯 Python 无需游戏）
