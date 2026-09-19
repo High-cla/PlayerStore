@@ -2,6 +2,7 @@ bin/
 obj/
 *.dll
 *.user
+*.bak
 *.bak_*
 
 # Cheat Engine 离线脚本（逆向分析用，非 mod 源码；曾误入库，已从索引移除）
