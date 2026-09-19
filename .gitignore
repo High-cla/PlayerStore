@@ -3,9 +3,22 @@ obj/
 *.dll
 *.user
 *.bak_*
-dump/*
-!dump/ascs/
-!dump/cpp2il_isil/
+
+# Cheat Engine 离线脚本（逆向分析用，非 mod 源码；曾误入库，已从索引移除）
+*.ct
+*.lua
+
+# 本地代码索引数据库（可随时重建，体积大）
+.codebase-memory/
+.codegraph/
+
+# 第三方 mod 反编译物 / 解包产物（本地分析材料）
+mod/
+unlock/
+
+# 反编译转储（数百 MB，仅作只读证据引用，不入库）
+dump/
+
 InventorySorter/rs_algos/target/
 InventorySorter/rs_algos/*.txt
 InventorySorter/tscripts/pool_result.txt
