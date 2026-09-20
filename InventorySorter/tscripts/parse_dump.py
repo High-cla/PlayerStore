@@ -2,9 +2,18 @@
 """基于真实 dump 的测试集: 从 inv_shape_dump.txt 解析每件物品形状
 单遍流式: == inv WxH 设当前组, === ident | name... | tag...(WxH) 开新品, 随后读 #/. 网格行
 """
+import os
 import re
 
-def parse_dump(path="D:/steam/steamapps/common/Probably Stolen Playtest/Mods/inv_shape_dump.txt"):
+# 版本化的语料快照(仓库内, 供离线回归): 优先仓库内快照, 回退游戏实时 dump.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_VENDORED = os.path.join(_HERE, "inv_shape_dump.bak_20260830_231609")
+_LIVE = "D:/steam/steamapps/common/Probably Stolen Playtest/Mods/inv_shape_dump.txt"
+_DEFAULT_DUMP = _VENDORED if os.path.exists(_VENDORED) else _LIVE
+
+def parse_dump(path=None):
+    if path is None:
+        path = _DEFAULT_DUMP
     """按会话分组: 每个 == inv WxH 行是一个独立排序会话(=一次背包快照), 返回 List[(W,H,items)]."""
     with open(path, encoding="utf-8") as f:
         lines = f.read().splitlines()
@@ -57,7 +66,7 @@ def merge_same_type(items):
         merged.append((rep, len(group)))
     return merged
 
-def parse_dump_merged(path="D:/steam/steamapps/common/Probably Stolen Playtest/Mods/inv_shape_dump.txt"):
+def parse_dump_merged(path=None):
     """parse_dump + 每组同类合并. 返回 List[(W,H,[(rep,unit_count)])]."""
     sessions = parse_dump(path)
     out = []
