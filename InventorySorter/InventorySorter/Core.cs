@@ -164,7 +164,10 @@ public class Core : MelonMod
 
 	private static bool _autoWarmup = true;
 
-	private static PixelWindow _pendingAuto;
+	// 上一 tick「从无到有」出现的窗口(可能有多个)。执行时再筛「可排序」者, 取 focusStamp 最大者排序。
+	// 不能只存一个: 工具提示/系统 UI 会与真容器同 tick 出现且 focusStamp 更高, 若在 diff 阶段就定死
+	// 单个目标, 真容器会被顶掉并随即被登记进 _seenWindows ⇒ 从此永不再触发(自动排序时灵时不灵)。
+	private static readonly List<PixelWindow> _pendingAuto = new List<PixelWindow>();
 
 	// 本次排序内冻结的「将成堆」件集合。同类合并的被合并件在应用阶段被搬到代表件同位, 游戏随即合并,
 	// 于是代表件在下一次排序时 unitCount>1。若不冻结, 第一次排序(自动)会让代表件参与精修, 第二次排序
@@ -3792,7 +3795,7 @@ public class Core : MelonMod
 			return;
 		}
 		RunPendingAutoSort();
-		_pendingAuto = DiffNewestWindow(wins);
+		DiffNewWindows(wins);
 	}
 
 	// 收集当前可见窗口(逐个 native 探测, 失败静默跳过); 拆出 TrackOpenedContainers 第一段
@@ -3827,34 +3830,23 @@ public class Core : MelonMod
 		return wins;
 	}
 
-	// 执行上一 tick 记下的「刚打开的容器」(延时一个 tick 等窗口内容就绪); 拆出 TrackOpenedContainers 第二段
+	// 执行上一 tick 记下的「刚打开的窗口」(延时一个 tick 等窗口内容就绪); 拆出 TrackOpenedContainers 第二段
 	private static void RunPendingAutoSort()
 	{
-		// 1) 先执行上一 tick 记下的「刚打开的容器」
-		PixelWindow pending = _pendingAuto;
-		_pendingAuto = null;
-		if (pending != null && AutoSortLastOpened != null && AutoSortLastOpened.Value)
+		// 上一次 tick 新出现的窗口可能不止一个(工具提示/系统 UI 会与真容器同 tick 出现)。
+		// 此处才筛「可排序」——延时一个 tick 后内容已就绪, 判定才可靠(见 WindowLabel 的 cells/IsInsertLocked 门槛)。
+		// 取 focusStamp 最大者 = 最后打开的那个容器; 无候选则本轮不排。
+		if (AutoSortLastOpened == null || !AutoSortLastOpened.Value)
 		{
-			GameInventory pinv = SortableWindowInventory(pending);
-			if (pinv != null)
-			{
-				SortInventory(pinv);
-			}
+			_pendingAuto.Clear();
+			return;
 		}
-	}
-
-	// diff 出本 tick 新出现的窗口 = 下一 tick 的自动排序目标(取焦点戳最大者), 并同步 _seenWindows; 拆出 TrackOpenedContainers 第三段
-	private static PixelWindow DiffNewestWindow(List<PixelWindow> wins)
-	{
-		// 2) 再 diff 出本 tick 新出现的窗口 ⇒ 记为下一 tick 的自动排序目标(取焦点戳最大者 = 最后打开的那个)
-		HashSet<long> now = new HashSet<long>();
-		PixelWindow newest = null;
-		long newestStamp = long.MinValue;
-		foreach (PixelWindow w in wins)
+		GameInventory bestInv = null;
+		long bestStamp = long.MinValue;
+		foreach (PixelWindow w in _pendingAuto)
 		{
-			long ptr = WindowPtr(w);
-			now.Add(ptr);
-			if (_seenWindows.Contains(ptr))
+			GameInventory cand = SortableWindowInventory(w);
+			if (cand == null)
 			{
 				continue;
 			}
@@ -3867,18 +3859,40 @@ public class Core : MelonMod
 			{
 				// ponytail: IL2CPP native probe, silent fallback
 			}
-			if (newest == null || s >= newestStamp)
+			if (bestInv == null || s >= bestStamp)
 			{
-				newestStamp = s;
-				newest = w;
+				bestStamp = s;
+				bestInv = cand;
 			}
+		}
+		_pendingAuto.Clear();
+		if (bestInv != null)
+		{
+			SortInventory(bestInv);
+		}
+	}
+
+	// diff 出本 tick 新出现的窗口 = 下一 tick 的自动排序候选, 并同步 _seenWindows; 拆出 TrackOpenedContainers 第三段
+	private static void DiffNewWindows(List<PixelWindow> wins)
+	{
+		// 2) 再 diff 出本 tick 新出现的窗口 ⇒ 记为下一 tick 的自动排序候选(执行时再筛可排序者)
+		HashSet<long> now = new HashSet<long>();
+		_pendingAuto.Clear();
+		foreach (PixelWindow w in wins)
+		{
+			long ptr = WindowPtr(w);
+			now.Add(ptr);
+			if (_seenWindows.Contains(ptr))
+			{
+				continue;
+			}
+			_pendingAuto.Add(w);
 		}
 		_seenWindows.Clear();
 		foreach (long v in now)
 		{
 			_seenWindows.Add(v);
 		}
-		return newest;
 	}
 
 
