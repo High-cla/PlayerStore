@@ -1361,9 +1361,7 @@ namespace ProgressMod
                     try { isMachine = machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { /* IL2CPP 异常: 保持原值 */ }
                     if (!isMachine) return true;
 
-                    var curTag = machine.GetTagReadonly("MACHINE_PROGRESS_CURRENT_TAG");
                     var tgtTag = machine.GetTagReadonly("MACHINE_PROGRESS_TARGET_TAG");
-                    int cur = curTag != null ? curTag.GetInt() : -1;
                     int tgt = tgtTag != null ? tgtTag.GetInt() : -1;
 
                     if (ForceFinish && machine != null && tgtTag != null)

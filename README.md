@@ -236,7 +236,9 @@ dotnet build InventorySorter/InventorySorter.csproj -c Release
 dotnet build NetworkUnlockMod/NetworkUnlockMod.csproj -c Release
 ```
 
-三个 csproj 通过单一属性 `<GameDir>` 定位游戏目录（改名只改一处），`OutputPath` 直写 `$(GameDir)\Mods\`（部署即生效）。Debug 构建自动本地提交（`AutoCommit` target）——**发布用的正式构建请用 `-c Release`**。
+三个 csproj 通过单一属性 `<GameDir>` 定位游戏目录（改名只改一处），`OutputPath` 直写 `$(GameDir)\Mods\`（部署即生效）。`AutoCommit` target 默认关闭，需要时显式加 `-p:AutoCommit=true`。
+
+**发布必须 `-c Release`**：`dotnet build` 不带 `-c` 时默认 `Debug`，产物带 `DebuggableAttribute`、未优化、体积明显偏大（ProgressMod Debug 73216 B / Release 68608 B）。v0.5.1–v0.5.3 三个 release 的资产曾误用 Debug 构建（源码逻辑等价，但非发布配置）——已由 v0.5.4 起改以 Release 发布。
 
 ## 许可证
 
