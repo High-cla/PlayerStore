@@ -28,3 +28,6 @@ proba.txt
 # 版本化真实语料(264K, 341 会话): 布局算法离线回归的唯一基准, 必需入库.
 # 名字里保留 .bak_20260830 以记录快照来源日期, 故此处做 *.bak_* 白名单豁免.
 !InventorySorter/tscripts/inv_shape_dump.bak_20260830_231609
+
+# 反编译/迁移临时工作区(ilspycmd 输出与源码备份), 仅本机使用
+.tmp_decomp/

@@ -438,8 +438,14 @@ namespace ProgressMod
             // 生成商品键命中, 其余 = DirectoryMaster.Item(id) 常规商品, furnace 同此且正常显示).
             if (!TrySpawnPrebuiltMachine(id, out item))
             {
-                try { item = ItemSpawner.Spawn(id); }
-                catch (Exception spawnEx) { MelonLogger.Warning($"[Spawn] ItemSpawner.Spawn({id}) 抛异常: {spawnEx.Message}"); }
+                // 容器类板条箱 (evidence_box/med_box/…): 在 ContainerItemDirectory.InitDirectory 里以惰性
+                // Func<GameItem> 工厂注册, 静态物品表查不到 → ItemSpawner.Spawn 必失败. 必须先走 native 工厂.
+                // (对齐 ProbablyStolenItemManager 0.4.7 TryCreateNativeLootCrate, ItemManager.cs:3681)
+                if (!TrySpawnNativeLootCrate(id, out item))
+                {
+                    try { item = ItemSpawner.Spawn(id); }
+                    catch (Exception spawnEx) { MelonLogger.Warning($"[Spawn] ItemSpawner.Spawn({id}) 抛异常: {spawnEx.Message}"); }
+                }
             }
             if (item == null) { MelonLogger.Warning($"[Spawn] ItemSpawner 拒绝 {id}"); return false; }
             // node/module 类模板件不带随机词条 —— 对齐原版引擎第二步: 引擎 (RandomNode/
@@ -458,6 +464,35 @@ namespace ProgressMod
             }
             catch (Exception fxEx) { MelonLogger.Warning($"[Spawn] InitRandomEffect({id}) 异常: {fxEx.Message}"); }
             return true;
+        }
+
+        // 容器类板条箱: 静态物品表 (ItemSpawner.Spawn) 查不到 —— 它们在 ContainerItemDirectory 里以
+        // 惰性 Func<GameItem> 工厂注册 (见 IL2CPP ContainerItemDirectory.InitDirectory). 只能直调 native 工厂.
+        // 5 个已确证存在 (Assembly-CSharp PreBuiltItemHelper.LootCrate*); sci/research/sup/supply_box 走反射
+        // 是 0.4.7 的向前兼容探测 —— 本游戏无此 3 名, 反射失败即回落 ItemSpawner, 无副作用.
+        // (对齐 ProbablyStolenItemManager 0.4.7 TryCreateNativeLootCrate, ItemManager.cs:3681)
+        private static bool TrySpawnNativeLootCrate(string id, out GameItem item)
+        {
+            item = null;
+            try
+            {
+                switch (id)
+                {
+                    case "evidence_box": item = PreBuiltItemHelper.LootCrateEvidence(); break;
+                    case "med_box": item = PreBuiltItemHelper.LootCrateMedical(); break;
+                    case "sec_box": item = PreBuiltItemHelper.LootCrateSecurity(); break;
+                    case "service_box": item = PreBuiltItemHelper.LootCrateService(); break;
+                    case "eng_box": item = PreBuiltItemHelper.LootCrateEngineering(); break;
+                    default: return false;
+                }
+                return item != null;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Spawn] LootCrate 工厂({id}) 异常: {ex.Message}");
+                item = null;
+                return false;
+            }
         }
 
         // 强塞主背包: MayHave 预检只警告(机器件/超大件常报无格但仍可塞), UncheckedAccept 才是裁决.
