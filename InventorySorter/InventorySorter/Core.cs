@@ -182,6 +182,10 @@ public class Core : MelonMod
 
 	private static int[] _hkMods = new int[0];
 
+	// NativeWarn 去重: OnUpdate 每 0.25s 调一次 RefreshNativeUI/TrackOpenedContainers,
+	// 若异常持续存在会每 tick 刷屏。只记「类型 + 消息」变化过的, 持续同类异常不重复打印。
+	private static string _nativeWarnSig;
+
 	public override void OnInitializeMelon()
 	{
 		Cfg = MelonPreferences.CreateCategory("InventorySorter");
@@ -268,6 +272,10 @@ public class Core : MelonMod
 			{
 				RefreshNativeUI();
 				TrackOpenedContainers();
+				// 本轮成功 ⇒ 清掉上次的异常签名, 否则「同样的故障再次发生」会被当成持续异常永久静默
+				// (例: 容器A抛NRE→告警; 关闭A恢复正常; 再开A抛同一NRE→无日志)。去重只应作用于
+				// 连续失败期间, 不该跨过中间的成功轮次。
+				_nativeWarnSig = null;
 			}
 			catch (System.Exception ex)
 			{
@@ -276,8 +284,22 @@ public class Core : MelonMod
 		}
 	}
 
+	// 刷新/自动排序链路的异常出口。原先为空函数体 ⇒ 整条 UI 刷新路径的异常被完全吞掉,
+	// 「排序不生效但毫无提示」无从排查。按类型+消息去重后落 Warning(连续失败期间不刷屏);
+	// 去重状态由调用方在成功轮次清零, 故故障再次复发仍会告警(见 OnUpdate)。
 	private static void NativeWarn(System.Exception ex)
 	{
+		if (ex == null)
+		{
+			return;
+		}
+		string sig = ex.GetType().FullName + ": " + ex.Message;
+		if (sig == _nativeWarnSig)
+		{
+			return;
+		}
+		_nativeWarnSig = sig;
+		MelonLogger.Warning("[InvSorter] native refresh failed: " + ex);
 	}
 
 	private static void RefreshNativeUI()
@@ -1957,7 +1979,14 @@ public class Core : MelonMod
 				continue;
 			}
 			long waste = (long)gw * gh - cs.Count;
-			for (int y = 0; y + gh <= H; y++)
+			// 每个朝向只扫到「首个可行 y 行」为止, 该行内取首个可行 x 即停:
+			// waste 与 (ori,x,y) 无关(四朝向 gw*gh 与 cs.Count 同值 ⇒ 全局常数), 故 key 比较实际退化为
+			// 「最小 y 再最小 x」⇒ 朝向内首个可行位就是该朝向的字典序最小可行位。
+			// 成本: 有解时 CellsFree 由约 2.05M 次降至 4~3016 次; 无解时仍需枚举完(保持等价的下界)。
+			// 警告: 早退只能做到「朝向内」—— 跨朝向早退是错的(某朝向 y 更优时会被先扫到的朝向顶掉),
+			// 四个朝向必须全部比完再取最小(见 tscripts/probe_tightest_domain.py 的对拍与反例)。
+			bool found = false;
+			for (int y = 0; y + gh <= H && !found; y++)
 			{
 				for (int x = 0; x + gw <= W; x++)
 				{
@@ -1965,7 +1994,12 @@ public class Core : MelonMod
 					{
 						continue;
 					}
-					long key = waste * 1000000L + (long)y * 100000L + x;
+					// 键按 (waste 最小 → y 最小 → x 最小) 字典序。原式 waste*1000000 + y*100000 + x 隐含
+					// y<10(100000*10 进位到 waste 位), 而 H 来自 GetGridDims 可达 4096/8192。
+					// 注意: 在本调用点 waste 实际是常数(四朝向 gw*gh 与 cs.Count 同值 ⇒ 进位路径不可达),
+					// 故旧式从未产生错误结果 —— 此处是防御性等价改写, 防止日后 waste 变成变量时静默错排。
+					// 改用 W/H 为基, 对任意 W<=128/H<=8192 严格字典序且不溢出 long。
+					long key = ((waste * H) + y) * W + x;
 					if (key < best)
 					{
 						best = key;
@@ -1973,6 +2007,8 @@ public class Core : MelonMod
 						py = y;
 						po = ori;
 					}
+					found = true;
+					break;
 				}
 			}
 		}
@@ -2692,14 +2728,36 @@ public class Core : MelonMod
 				}
 			}
 		}
-		// 去包含
+		// 去包含: 只留不被其他矩形完全覆盖的。
+		// 原为 O(R^2) 全配对; 改为「按面积降序取候选索引 + 单向剪枝」——
+		// 被包含者面积必 <= 包含者, 故只需考察面积不小于自身的那些矩形。
+		// 与 FindFreeRects(Core.cs:3002 附近)同款。输出顺序保持 next 的 i 升序
+		// (排序只作用于索引数组 byArea, kept 仍按 i 升序收集)。
+		int n = next.Count;
+		int[] byArea = new int[n];
+		for (int i = 0; i < n; i++)
+		{
+			byArea[i] = i;
+		}
+		long[] areas = new long[n];
+		for (int i = 0; i < n; i++)
+		{
+			areas[i] = (long)next[i].w * next[i].h;
+		}
+		Array.Sort(byArea, (p, q) => areas[q].CompareTo(areas[p]));
 		rects.Clear();
-		for (int i = 0; i < next.Count; i++)
+		for (int i = 0; i < n; i++)
 		{
 			var r = next[i];
+			long ra = areas[i];
 			bool covered = false;
-			for (int j = 0; j < next.Count; j++)
+			for (int k = 0; k < n; k++)
 			{
+				int j = byArea[k];
+				if (areas[j] < ra)
+				{
+					break; // 后面的面积只会更小, 不可能覆盖 r
+				}
 				if (i == j)
 				{
 					continue;
