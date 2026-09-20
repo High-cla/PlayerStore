@@ -1878,9 +1878,20 @@ public class Core : MelonMod
 		return best != long.MaxValue;
 	}
 
-	// GrowTouch: 每物品取"触摸分最大"的位(相邻已占格+贴边计分), 碎片空间利用率优于行堆积.
-	// 数据驱动: 小网格(11x14 等) GrowTouch 常胜, 与 MinHole 互补. 只处理单件(无配对).
-	private static bool TryGrowTouch(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
+	// 单件布局器共享骨架: 按体积降序 → 逐件(o→py→px)选位, 仅「选择谓词」不同.
+	//   GrowTouch  = 触摸分最大(相邻已占4向 + 贴边计分), 并列取更上(py小)再更左(px小).
+	//                数据驱动: 小网格(11x14 等)常胜, 碎片利用率优于行堆积, 与 MinHole 互补.
+	//   LeftBottom = px 最小优先, 并列取更靠底(py大). 大背包(17x10/11x14)左下锚定漏网胜, 聚左下块留右上.
+	// 两者输出在真实语料上 306/306 逐位不同(胜率 54.9% vs 30.4%), 都是候选竞争的独立布局器, 必须同时保留.
+	// 骨架的三层枚举顺序(o→py→px)与 CellsFree 短路时机必须与拆分前逐字一致, 否则 tie-break 改变;
+	// 该等价性由 tscripts 真实语料(341 会话)回归保证 — 见 verify_all.py 的 pack_grow_touch / pack_left_bottom 镜像.
+	private enum PiecePick
+	{
+		GrowTouch,
+		LeftBottom,
+	}
+
+	private static bool ScanSinglePieces(List<GameItem> singles, GridContext grid, PiecePick pick, out Dictionary<GameItem, Placement> dictionary)
 	{
 		int W = grid.W;
 		int H = grid.H;
@@ -1889,6 +1900,7 @@ public class Core : MelonMod
 		dictionary = new Dictionary<GameItem, Placement>();
 		List<GameItem> order = new List<GameItem>(singles);
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+		bool grow = pick == PiecePick.GrowTouch;
 		foreach (GameItem item in order)
 		{
 			ItemMask m = masks[item];
@@ -1917,11 +1929,20 @@ public class Core : MelonMod
 						{
 							continue;
 						}
-						// 触摸分: 每格相邻已占(4向) + 贴边计数
-						long touch = TouchCount(occ, W, H, px, py, cells);
-						if (touch > bestTouch || (touch == bestTouch && (py < bestY || (py == bestY && px < bestX))))
+						bool better;
+						long touch = 0;
+						if (grow)
 						{
-							bestTouch = touch;
+							touch = TouchCount(occ, W, H, px, py, cells);
+							better = touch > bestTouch || (touch == bestTouch && (py < bestY || (py == bestY && px < bestX)));
+						}
+						else
+						{
+							better = bestX < 0 || px < bestX || (px == bestX && py > bestY);
+						}
+						if (better)
+						{
+							if (grow) bestTouch = touch;
 							bestX = px;
 							bestY = py;
 							bestO = o;
@@ -1937,6 +1958,11 @@ public class Core : MelonMod
 			MarkCells(occ, W, H, bestX, bestY, CellsOf(m, bestO), val: true);
 		}
 		return true;
+	}
+	// 触摸分贪心: 每步选「相邻已占格数 + 贴边数」最大的落点, 并列取更上更左(聚成大块).
+	private static bool TryGrowTouch(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
+	{
+		return ScanSinglePieces(singles, grid, PiecePick.GrowTouch, out dictionary);
 	}
 
 	// Shelf: 行堆积. 按 w×h 降序, 每物品第一个可行位落在当前行基准之上. 小网格(8x8/14x21)常胜.
@@ -2074,63 +2100,11 @@ public class Core : MelonMod
 			if (covered) rects.RemoveAt(i);
 		}
 	}
-
-	// LeftBottom: 左下角锚定. 物品偏好放最左下(px 最小优先, py 最大优先), 聚成左下紧块, 留右上整块.
+	// LeftBottom: 左下角锚定(px 最小优先, py 最大优先), 聚成左下紧块留右上整块.
 	// 大背包(17x10/11x14)常胜: 左下凝聚使剩余集中在右上, 好放更大物品. 只处理单件(无配对).
 	private static bool TryLeftBottom(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
-		int W = grid.W;
-		int H = grid.H;
-		Dictionary<GameItem, ItemMask> masks = grid.masks;
-		bool[,] occ = InitOcc(grid);
-		dictionary = new Dictionary<GameItem, Placement>();
-		List<GameItem> order = new List<GameItem>(singles);
-		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
-		foreach (GameItem item in order)
-		{
-			ItemMask m = masks[item];
-			int bestX = -1;
-			int bestY = -1;
-			int bestO = 0;
-			for (int o = 0; o < 4; o++)
-			{
-				List<(int, int)> cells = CellsOf(m, o);
-				if (cells == null || cells.Count == 0)
-				{
-					continue;
-				}
-				int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
-				int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
-				if (gw > W || gh > H)
-				{
-					continue;
-				}
-				for (int py = 0; py + gh <= H; py++)
-				{
-					for (int px = 0; px + gw <= W; px++)
-					{
-						if (!CellsFree(occ, px, py, cells))
-						{
-							continue;
-						}
-						// 左下优先: px 最小优先, 并列时 py 最大(更靠底)
-						if (bestX < 0 || px < bestX || (px == bestX && py > bestY))
-						{
-							bestX = px;
-							bestY = py;
-							bestO = o;
-						}
-					}
-				}
-			}
-			if (bestX < 0)
-			{
-				return false;
-			}
-			dictionary[item] = new Placement(bestX, bestY, bestO);
-			MarkCells(occ, W, H, bestX, bestY, CellsOf(m, bestO), val: true);
-		}
-		return true;
+		return ScanSinglePieces(singles, grid, PiecePick.LeftBottom, out dictionary);
 	}
 
 	// BestFitMFR: MFR 池最小 waste 选位. 物品落在空闲矩形最小浪费处, 高密度(10x10 total=67)常胜.
