@@ -166,6 +166,12 @@ public class Core : MelonMod
 
 	private static PixelWindow _pendingAuto;
 
+	// 本次排序内冻结的「将成堆」件集合。同类合并的被合并件在应用阶段被搬到代表件同位, 游戏随即合并,
+	// 于是代表件在下一次排序时 unitCount>1。若不冻结, 第一次排序(自动)会让代表件参与精修, 第二次排序
+	// (手动)则因 Stacked 为真而跳过精修 (TryFillRefine 只处理非堆叠件) ⇒ 同一容器两次布局不同。
+	// null = 不在排序中, 按活状态判定。
+	private static HashSet<GameItem> _sortStacked;
+
 	// 排序快捷键解析缓存(配置字符串变了才重新解析)
 	private static string _hkSig;
 
@@ -824,11 +830,18 @@ public class Core : MelonMod
 			Toast("only containers here, left in place");
 			return;
 		}
+		// 排序池规范化: childItems 的遍历序是外部输入(childItems 只是游戏内部列表的拷贝), 不该参与布局决策。
+		// 但 List.Sort 是不稳定排序, 且多处比较器只比格数/边长(偏序) —— tie 的归属完全由输入序决定,
+		// 于是同一容器只要 childItems 顺序一变, 布局就可能变(离线实测: 只打乱输入序, 110/270 会话布局改变)。
+		// SizeCompare 以 uid 收尾(全序), 故按它定序后, 所有派生列表(candidate/singles/paired/order)都
+		// 成为排序池的确定函数, 布局不再吃输入序。仅当 ident/name/uid/bbox 全同才并列 —— 那两件可互换。
+		sortPool.Sort(SizeCompare);
 		// 位置快照(供失败恢复): 记录排序前每个物品的 minX/minY/orientation/flipped
 		List<(GameItem, int, int, int, bool)> original = SnapshotOriginals(sortPool);
 		// 按 TagKey 分组(排序池内的格子), 组内按 SizeCompare 排序; 拆出 SortInventory 第三段: 复杂度 -5
 		List<string> tagOrder = new List<string>();
 		Dictionary<string, List<GameItem>> tagGroups = BuildTagGroups(sortPool, tagOrder);
+		_sortStacked = null;
 		try
 		{
 			if (!GetGridDims(inv, out var w, out var h) || w <= 0 || h <= 0)
@@ -850,6 +863,7 @@ public class Core : MelonMod
 			}
 			// 应用布局(同类合并致放 -> 堆叠顺序落位 -> Validate -> toast); 拆出 SortInventory 第三段: 复杂度 -8
 			ApplyLayout(inv, sortPool, keptContainers, layout, mergeRepIdx, mergeAbsorb, mode, tucked, relocated2);
+			LogSortSignature(sortPool, mode);
 		}
 		catch (System.Exception ex2)
 		{
@@ -863,6 +877,36 @@ public class Core : MelonMod
 			}
 			MelonLogger.Error("[InvSorter] sort error: " + ex2);
 			Toast("sort error: " + ex2.Message);
+		}
+		finally
+		{
+			// 冻结状态只在本轮排序内有效(ApplyLayout 内的 Stacked 仍需看到它, 故只能在此处清)
+			_sortStacked = null;
+		}
+	}
+
+	// 幂等性可观测量: 输出本次排序的布局签名(件序 + 每件 (x,y,o)), 供实机对比
+	// 「自动排序」与「手动再点一次」是否逐位相同。行前缀 [InvSorter] sort-sig 便于 grep Latest.log。
+	// 只读已落位值, 不参与任何布局决策, 失败静默(不影响排序)。
+	private static void LogSortSignature(List<GameItem> sortPool, string mode)
+	{
+		try
+		{
+			StringBuilder sb = new StringBuilder();
+			sb.Append("[InvSorter] sort-sig ").Append(mode).Append(" n=").Append(sortPool.Count).Append(" :");
+			foreach (GameItem it in sortPool)
+			{
+				GridShape sh = ShapeOf(it);
+				int x = (sh != null) ? sh.minX : -1;
+				int y = (sh != null) ? sh.minY : -1;
+				int o = (sh != null) ? ((int)sh.orientation & 3) : -1;
+				sb.Append(' ').Append(Uid(it)).Append('@').Append(x).Append(',').Append(y).Append(':').Append(o);
+			}
+			MelonLogger.Msg(sb.ToString());
+		}
+		catch
+		{
+			// 诊断输出失败不影响排序
 		}
 	}
 
@@ -885,19 +929,14 @@ public class Core : MelonMod
 		{
 			// 容器(有内容窗口的内部格子)不参与同类合并/堆叠: 保持独立, 只移动不堆叠
 			if (HasContentWindow(sortPool[mi])) continue;
-			ItemMask mm2 = masks[sortPool[mi]];
-			StringBuilder msb = new StringBuilder();
-			foreach ((int mdx, int mdy) in mm2.C0)
-			{
-				msb.Append(mdx).Append(':').Append(mdy).Append(',');
-			}
-			string mkey = sortPool[mi].identifier + "|" + mm2.Gw0 + "x" + mm2.Gh0 + "|" + msb.ToString();
+			string mkey = MergeKeyOf(sortPool[mi], masks[sortPool[mi]]);
 			if (!mergeRepIdx.ContainsKey(mkey))
 			{
 				mergeRepIdx[mkey] = mi;
 			}
 		}
-		// 被合并件清单: 非代表件的下标
+		// 被合并件清单: 非代表件的下标。sortPool 已按 SizeCompare 规范化, 故代表件 = 同 key 的首件
+		// (uid 最小者), 与 childItems 输入序无关 —— 否则「谁是代表件」会随输入序漂移, 布局随之改变。
 		mergeAbsorb = new List<int>();
 		HashSet<int> mergeRepSet = new HashSet<int>(mergeRepIdx.Values);
 		for (int mi = 0; mi < sortPool.Count; mi++)
@@ -906,6 +945,51 @@ public class Core : MelonMod
 			{
 				mergeAbsorb.Add(mi);
 			}
+		}
+		// 冻结本次排序的「将成堆」集合: 应用阶段会把被合并件搬到代表件同位, 游戏随即合并,
+		// 使代表件在本函数返回后 unitCount>1。但此刻读活值仍是 1, 于是同一次排序内
+		// 「精修是否跳过代表件」(TryFillRefine 只看 Stacked) 会在下一次排序时翻转 ——
+		// 这正是自动排序(第一次)与手动按钮(第二次)结果不同的原因。此处按「合并后稳态」提前冻结。
+		// 判据: 本就是堆叠件, 或将被并入代表件的件, 或吸收了至少一件的代表件(单件代表不算)。
+		_sortStacked = new HashSet<GameItem>();
+		foreach (GameItem it2 in sortPool)
+		{
+			if (StackedRaw(it2))
+			{
+				_sortStacked.Add(it2);
+			}
+		}
+		foreach (int ai4 in mergeAbsorb)
+		{
+			_sortStacked.Add(sortPool[ai4]); // 将被搬去与代表件重叠
+			if (mergeRepIdx.TryGetValue(MergeKeyOf(sortPool[ai4], masks[sortPool[ai4]]), out int repIdx4))
+			{
+				_sortStacked.Add(sortPool[repIdx4]); // 代表件吸收到至少一件 ⇒ 本轮后必然成堆
+			}
+		}
+	}
+
+	// 同类合并键(与 BuildSortView 内保持一致): 容器件不参与合并, 调用方已先行过滤
+	private static string MergeKeyOf(GameItem it, ItemMask m)
+	{
+		StringBuilder sb = new StringBuilder();
+		foreach ((int dx, int dy) in m.C0)
+		{
+			sb.Append(dx).Append(':').Append(dy).Append(',');
+		}
+		return it.identifier + "|" + m.Gw0 + "x" + m.Gh0 + "|" + sb.ToString();
+	}
+
+	// 活状态判据(不做冻结), 供冻结集合构建时读一次真实 unitCount
+	private static bool StackedRaw(GameItem it)
+	{
+		try
+		{
+			return it.unitCount > 1;
+		}
+		catch
+		{
+			return false;
 		}
 	}
 
@@ -3432,8 +3516,15 @@ public class Core : MelonMod
 	}
 
 	// 堆叠物品: unitCount > 1 (多份叠在一起); 排序最后放置使其渲染在上层, 至少一格可见
+	// 排序进行中(_sortStacked != null)一律以冻结集合为准: 同类合并的代表件在本次排序结束时必然成堆,
+	// 但合并发生在应用阶段之后, 此刻活 unitCount 仍是 1 —— 若读活值, 同一容器的下一次排序会走另一条
+	// 精修分支, 自动排序与手动按钮的结果就不一致(见 _sortStacked 声明处说明)。
 	private static bool Stacked(GameItem it)
 	{
+		if (_sortStacked != null)
+		{
+			return _sortStacked.Contains(it);
+		}
 		try
 		{
 			return it.unitCount > 1;
