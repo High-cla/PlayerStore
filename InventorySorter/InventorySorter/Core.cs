@@ -863,7 +863,11 @@ public class Core : MelonMod
 			}
 			// 应用布局(同类合并致放 -> 堆叠顺序落位 -> Validate -> toast); 拆出 SortInventory 第三段: 复杂度 -8
 			ApplyLayout(inv, sortPool, keptContainers, layout, mergeRepIdx, mergeAbsorb, mode, tucked, relocated2);
-			LogSortSignature(sortPool, mode);
+			// BuildMask 读形状时清零真实物品的 minX/minY/orientation 且不还原(见 TryReadNativeCells), 故
+			// 「不入 layout 且未被同类合并吸收」的件会停在 (0,0,0) 与已落位件重叠 —— 与 TryResidualLayout
+			// 「不入 layout ⇒ 原地不动」的契约相悖。此处只把这些件按入口快照复位, 不改任何布局口径。
+			int restored = RestoreUnplaced(sortPool, layout, mergeAbsorb, original);
+			LogSortSignature(sortPool, mode, restored);
 		}
 		catch (System.Exception ex2)
 		{
@@ -888,12 +892,12 @@ public class Core : MelonMod
 	// 幂等性可观测量: 输出本次排序的布局签名(件序 + 每件 (x,y,o)), 供实机对比
 	// 「自动排序」与「手动再点一次」是否逐位相同。行前缀 [InvSorter] sort-sig 便于 grep Latest.log。
 	// 只读已落位值, 不参与任何布局决策, 失败静默(不影响排序)。
-	private static void LogSortSignature(List<GameItem> sortPool, string mode)
+	private static void LogSortSignature(List<GameItem> sortPool, string mode, int restored)
 	{
 		try
 		{
 			StringBuilder sb = new StringBuilder();
-			sb.Append("[InvSorter] sort-sig ").Append(mode).Append(" n=").Append(sortPool.Count).Append(" :");
+			sb.Append("[InvSorter] sort-sig ").Append(mode).Append(" n=").Append(sortPool.Count).Append(" restored=").Append(restored).Append(" :");
 			foreach (GameItem it in sortPool)
 			{
 				GridShape sh = ShapeOf(it);
@@ -1220,6 +1224,44 @@ public class Core : MelonMod
 			MelonLogger.Error("[InvSorter] post-layout Validate failed: " + exV.Message);
 		}
 		Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((mode == "degraded") ? $", {relocated2} tucked into gaps" : "") + ((mode == "grouped" && tucked > 0) ? $", {tucked} tucked into gaps" : "") + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
+	}
+
+	// 未落位件复位: TryReadNativeCells 在读形状前对每件真实物品调 SetTransform(0,0,flag,0) 且不还原
+	// (GameItem.modifiedShape 是自有字段而非副本) ⇒ 布局阶段所有件坐标/朝向恒为 0, 布局算法正依赖该口径
+	// (CurOri / NativeOrderCompare 位置键 / 残局原格标记), 故不还原真值; 只在应用阶段后把「未被 layout 覆盖
+	// 且未被合并吸收」的件按入口快照复位, 消除 (0,0,0) 重叠。返回复位数, 供 sort-sig 观测。
+	private static int RestoreUnplaced(
+		List<GameItem> sortPool, Dictionary<GameItem, Placement> layout, List<int> mergeAbsorb,
+		List<(GameItem it, int x, int y, int o, bool f)> original)
+	{
+		HashSet<GameItem> covered = new HashSet<GameItem>(layout.Keys);
+		foreach (int ai in mergeAbsorb)
+		{
+			covered.Add(sortPool[ai]); // 已被搬到代表件同位, 视为已落位
+		}
+		Dictionary<GameItem, (int x, int y, int o, bool f)> snap = new Dictionary<GameItem, (int x, int y, int o, bool f)>();
+		foreach (var o0 in original)
+		{
+			snap[o0.it] = (o0.x, o0.y, o0.o, o0.f);
+		}
+		int restored = 0;
+		foreach (GameItem it in sortPool)
+		{
+			if (covered.Contains(it)) continue;
+			if (!snap.TryGetValue(it, out (int x, int y, int o, bool f) s)) continue;
+			GridShapeBuilder val2 = ((ShapeOf(it) != null) ? ((Il2CppObjectBase)ShapeOf(it)).TryCast<GridShapeBuilder>() : null);
+			if (val2 == null) continue;
+			try
+			{
+				val2.SetTransform(s.x, s.y, s.f, s.o);
+				restored++;
+			}
+			catch (System.Exception exU)
+			{
+				MelonLogger.Error("[InvSorter] restore unplaced failed: " + exU.Message);
+			}
+		}
+		return restored;
 	}
 
 	private static void RestoreOriginal(GameInventory inv, List<(GameItem it, int x, int y, int o, bool f)> original)
