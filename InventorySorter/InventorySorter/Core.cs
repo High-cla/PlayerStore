@@ -866,8 +866,7 @@ public class Core : MelonMod
 			// BuildMask 读形状时清零真实物品的 minX/minY/orientation 且不还原(见 TryReadNativeCells), 故
 			// 「不入 layout 且未被同类合并吸收」的件会停在 (0,0,0) 与已落位件重叠 —— 与 TryResidualLayout
 			// 「不入 layout ⇒ 原地不动」的契约相悖。此处只把这些件按入口快照复位, 不改任何布局口径。
-			int restored = RestoreUnplaced(sortPool, layout, mergeAbsorb, original);
-			LogSortSignature(sortPool, mode, restored);
+			RestoreUnplaced(sortPool, layout, mergeAbsorb, original);
 		}
 		catch (System.Exception ex2)
 		{
@@ -889,30 +888,6 @@ public class Core : MelonMod
 		}
 	}
 
-	// 幂等性可观测量: 输出本次排序的布局签名(件序 + 每件 (x,y,o)), 供实机对比
-	// 「自动排序」与「手动再点一次」是否逐位相同。行前缀 [InvSorter] sort-sig 便于 grep Latest.log。
-	// 只读已落位值, 不参与任何布局决策, 失败静默(不影响排序)。
-	private static void LogSortSignature(List<GameItem> sortPool, string mode, int restored)
-	{
-		try
-		{
-			StringBuilder sb = new StringBuilder();
-			sb.Append("[InvSorter] sort-sig ").Append(mode).Append(" n=").Append(sortPool.Count).Append(" restored=").Append(restored).Append(" :");
-			foreach (GameItem it in sortPool)
-			{
-				GridShape sh = ShapeOf(it);
-				int x = (sh != null) ? sh.minX : -1;
-				int y = (sh != null) ? sh.minY : -1;
-				int o = (sh != null) ? ((int)sh.orientation & 3) : -1;
-				sb.Append(' ').Append(Uid(it)).Append('@').Append(x).Append(',').Append(y).Append(':').Append(o);
-			}
-			MelonLogger.Msg(sb.ToString());
-		}
-		catch
-		{
-			// 诊断输出失败不影响排序
-		}
-	}
 
 	// 建 masks 字典 + 同类合并视图(代表件下标 / 被合并件下标); 拆出 SortInventory 第一段: 复杂度 -6
 	private static void BuildSortView(
@@ -1229,8 +1204,8 @@ public class Core : MelonMod
 	// 未落位件复位: TryReadNativeCells 在读形状前对每件真实物品调 SetTransform(0,0,flag,0) 且不还原
 	// (GameItem.modifiedShape 是自有字段而非副本) ⇒ 布局阶段所有件坐标/朝向恒为 0, 布局算法正依赖该口径
 	// (CurOri / NativeOrderCompare 位置键 / 残局原格标记), 故不还原真值; 只在应用阶段后把「未被 layout 覆盖
-	// 且未被合并吸收」的件按入口快照复位, 消除 (0,0,0) 重叠。返回复位数, 供 sort-sig 观测。
-	private static int RestoreUnplaced(
+	// 且未被合并吸收」的件按入口快照复位, 消除 (0,0,0) 重叠。
+	private static void RestoreUnplaced(
 		List<GameItem> sortPool, Dictionary<GameItem, Placement> layout, List<int> mergeAbsorb,
 		List<(GameItem it, int x, int y, int o, bool f)> original)
 	{
@@ -1244,7 +1219,6 @@ public class Core : MelonMod
 		{
 			snap[o0.it] = (o0.x, o0.y, o0.o, o0.f);
 		}
-		int restored = 0;
 		foreach (GameItem it in sortPool)
 		{
 			if (covered.Contains(it)) continue;
@@ -1254,14 +1228,12 @@ public class Core : MelonMod
 			try
 			{
 				val2.SetTransform(s.x, s.y, s.f, s.o);
-				restored++;
 			}
 			catch (System.Exception exU)
 			{
 				MelonLogger.Error("[InvSorter] restore unplaced failed: " + exU.Message);
 			}
 		}
-		return restored;
 	}
 
 	private static void RestoreOriginal(GameInventory inv, List<(GameItem it, int x, int y, int o, bool f)> original)
@@ -2259,7 +2231,6 @@ public class Core : MelonMod
 		}
 		return true;
 	}
-
 
 
 	private static long LargestEmptyArea(bool[,] occ, int W, int H)
