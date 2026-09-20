@@ -1087,10 +1087,10 @@ public class Core : MelonMod
 		if (bandedLayout != null && denseLayout != null)
 		{
 			// task-6 容差定夺: 横带全放 且 横带空矩 >= 密集空矩 - tol*密集空矩 ⇒ 选横带(保「同类聚带」产品目标),
-			// 否则选密集. tol = BandedToleranceRatio, 离线曲线见 InventorySorter/tscripts/bench_banded.py
+			// 否则选密集. tol = BandedToleranceConst, 离线曲线见 InventorySorter/tscripts/bench_banded.py
 			long areaBanded = EmptyAreaOfLayout(bandedLayout, new GridContext(w, h, masks, keptContainers));
 			long areaDense = EmptyAreaOfLayout(denseLayout, new GridContext(w, h, masks, keptContainers));
-			if (areaBanded >= areaDense - (long)(areaDense * BandedToleranceRatio))
+			if (areaBanded >= areaDense - (long)(areaDense * BandedToleranceConst))
 			{
 				layout = bandedLayout;
 				mode = "grouped";
@@ -2249,6 +2249,13 @@ public class Core : MelonMod
 		}
 		int[] heights = _histBuf;
 		int[] stack = _stackBuf;
+		// 复用缓冲区必须每次清零: 直方图法要求 heights 在每个 y 循环开始时全为 0,
+		// 原来只依赖 new int[W] 的初始零值 ⇒ 第二次调用起把上一轮的残留高度在 y=0 又 +1,
+		// 返回值随调用次数单调增长(实测 30→32→56→80, 可超过网格总格数).
+		for (int x = 0; x < W; x++)
+		{
+			heights[x] = 0;
+		}
 		for (int y = 0; y < H; y++)
 		{
 			for (int x = 0; x < W; x++)
@@ -2967,38 +2974,62 @@ public class Core : MelonMod
 	{
 		List<(int, int, int, int)> rects = new List<(int, int, int, int)>();
 		int[] height = new int[W];
+		int[] stack = new int[W + 1];
 		for (int y = 0; y < H; y++)
 		{
 			for (int x = 0; x < W; x++)
 			{
 				height[x] = occ[x, y] ? 0 : height[x] + 1;
 			}
-			Stack<int> stack = new Stack<int>();
+			// 复用数组做单调栈(原每行 new Stack<int> ⇒ H 次分配)
+			int top = -1;
 			for (int x = 0; x <= W; x++)
 			{
 				int cur = (x == W) ? 0 : height[x];
-				while (stack.Count > 0 && height[stack.Peek()] >= cur)
+				while (top >= 0 && height[stack[top]] >= cur)
 				{
-					int h = height[stack.Pop()];
-					int left = (stack.Count == 0) ? 0 : stack.Peek() + 1;
+					int h = height[stack[top--]];
+					int left = (top < 0) ? 0 : stack[top] + 1;
 					int right = x - 1;
 					if (h > 0)
 					{
 						rects.Add((left, y - h + 1, right - left + 1, h));
 					}
 				}
-				stack.Push(x);
+				stack[++top] = x;
 			}
 		}
-		// 去包含: 只留不被其他矩形完全覆盖的
-		List<(int, int, int, int)> kept = new List<(int, int, int, int)>();
-		for (int i = 0; i < rects.Count; i++)
+		// 去包含: 只留不被其他矩形完全覆盖的。
+		// 原为 O(R^2) 全配对; 改为「按面积降序取候选索引 + 单向剪枝」——
+		// 被包含者面积必 <= 包含者, 故只需考察面积不小于自身的那些矩形。
+		// 注意: 输出必须保持 rects 的原始顺序(下游 TryPickPlaceSlot 在 waste/贴邻平局时依赖顺序),
+		// 因此排序只作用于索引数组, kept 仍按 i 升序收集。
+		int n = rects.Count;
+		int[] byArea = new int[n];
+		for (int i = 0; i < n; i++)
+		{
+			byArea[i] = i;
+		}
+		long[] areas = new long[n];
+		for (int i = 0; i < n; i++)
+		{
+			areas[i] = (long)rects[i].Item3 * rects[i].Item4;
+		}
+		Array.Sort(byArea, (p, q) => areas[q].CompareTo(areas[p]));
+		List<(int, int, int, int)> kept = new List<(int, int, int, int)>(n);
+		for (int i = 0; i < n; i++)
 		{
 			(int x, int y, int w, int h) r = rects[i];
+			long ra = areas[i];
 			bool covered = false;
-			for (int j = 0; j < rects.Count; j++)
+			for (int k = 0; k < n; k++)
 			{
-				if (i == j)
+				int j = byArea[k];
+				if (areas[j] < ra)
+				{
+					break; // 后面的面积只会更小, 不可能覆盖 r
+				}
+				if (j == i)
 				{
 					continue;
 				}
@@ -3122,35 +3153,36 @@ public class Core : MelonMod
 		return LargestEmptyArea(occ, W, H);
 	}
 
-	// task-6: 同类聚带优先容差(占密集候选最大空矩的比例) — 原配置 BandedToleranceRatio, 现固化为常量 BandedToleranceConst
-	//   0    = 横带空矩不劣于密集才选横带(空矩严格不退化)
-	//   0.05 = 生产值: 用 <=5% 空矩代价换用户可见的同类聚带(实测拐点 3%; 5% 时 146/296=49.3% 会话聚带, 面积代价 0.22%)
-	//   1    = 只要横带能全放就强制聚带
-	// 曲线与实测: InventorySorter/tscripts/bench_banded.py
-	private static double BandedToleranceRatio => BandedToleranceConst;
-
 	// task-6 自支撑版支撑判据(仅横带路径使用; 密集路径仍用上面的 HasSupport, 不改其行为):
 	// 每格需「贴首行/首列」或「邻格(左/上/下)已占」或「邻格属于本件自身」.
 	// 原版自身格不计支撑 ⇒ 厚件在空网格当首件时逐格互不支撑, 整件放不下(离线诊断实测).
 	// 仍非恒真: 漂浮孤立位(四邻无物且不在首行/首列)照旧不放 — 保留「聚成实心块」语义.
-	private static readonly HashSet<int> _selfCells = new HashSet<int>();
+	// 自身格判据: 原用 static HashSet<int> _selfCells 跨调用复用(每次 Clear+回填+哈希查找)。
+	// cells 规模很小(件脚印, 通常 1..6 格), 线性查找比哈希更快, 且消掉共享可变状态
+	// —— 共享缓冲是布局器并行化的硬障碍(并发会直接数据竞争)。
+	private static bool HasSelfCell(List<(int dx, int dy)> cells, int dx, int dy)
+	{
+		foreach ((int cx, int cy) in cells)
+		{
+			if (cx == dx && cy == dy)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 
 	private static bool HasSupportSelf(bool[,] occ, int x, int y, List<(int dx, int dy)> cells)
 	{
 		int h = occ.GetLength(1);
-		_selfCells.Clear();
-		foreach ((int dx0, int dy0) in cells)
-		{
-			_selfCells.Add(dx0 * 1024 + dy0);
-		}
 		foreach ((int dx, int dy) in cells)
 		{
 			int cx = x + dx;
 			int cy = y + dy;
 			bool sup = cy == 0 || cx == 0
-				|| (cx - 1 >= 0 && (occ[cx - 1, cy] || _selfCells.Contains((dx - 1) * 1024 + dy)))
-				|| (cy - 1 >= 0 && (occ[cx, cy - 1] || _selfCells.Contains(dx * 1024 + (dy - 1))))
-				|| (cy + 1 < h && (occ[cx, cy + 1] || _selfCells.Contains(dx * 1024 + (dy + 1))));
+				|| (cx - 1 >= 0 && (occ[cx - 1, cy] || HasSelfCell(cells, dx - 1, dy)))
+				|| (cy - 1 >= 0 && (occ[cx, cy - 1] || HasSelfCell(cells, dx, dy - 1)))
+				|| (cy + 1 < h && (occ[cx, cy + 1] || HasSelfCell(cells, dx, dy + 1)));
 			if (!sup)
 			{
 				return false;
