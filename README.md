@@ -196,6 +196,35 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 
 ---
 
+## 异常处理纪律（IL2CPP）
+
+IL2CPP 下读取宿主对象成员（`GameItem.*` / `GameInventory.*` / `PixelWindow.*` 等）会抛托管异常，**静默回退是正确姿势**——探测失败不该让模组崩溃或刷屏日志。但每个 `catch` 必须说清"为什么可以静默"，否则后来者无法区分它是刻意设计还是遗漏。
+
+`Core.cs` 与 `ProgressMod.cs` 共用同一约定：
+
+| 形态 | 写法 | 适用 |
+| --- | --- | --- |
+| 通用模板 | `// ponytail: IL2CPP native probe, silent fallback`<br>`/* IL2CPP 异常: 保持原值 */` | 单点探测，回退值语义自明 |
+| 具体化 | 写明**哪个成员**读失败、**静默下去会怎样** | 静默会造成数据丢失或改变功能语义 |
+| 日志 | `MelonLogger.Warning(...)` + 说明 | 失败需要留痕但不中断（HTTP 路由、物品生成） |
+
+具体化的实例（ProgressMod.cs:269，`item.uniqueId` 读失败）：
+
+> `// 静默数据丢失: 读不到 uniqueId 的物品会被当成 u == 0 丢弃, 不加入列表。`
+> `// /api/inventory 响应里缺这个物品 (网页生成器看不到)。此路径由 HTTP 请求触发,`
+> `// 不是每帧路径, 故静默优于刷屏定位。`
+
+**无需注记的自证例外**：单行访问器 `catch { return <默认值>; }`（回退值即函数签名承诺的默认值，如 `BoxW`→`1`、`PosX`→`0`、`Stacked`→`false`）；Harmony `Prefix` 的 `catch { return true; }`（放行原逻辑，不吞掉游戏行为）。
+
+**当前覆盖**（词法扫描计数，已排除注释/字符串里的 `catch` 字样）：
+
+| 文件 | catch 总数 | 带注记 | 带日志 |
+| --- | --- | --- | --- |
+| `InventorySorter/InventorySorter/Core.cs` | 65 | 38 | 6 |
+| `PlayerStore/ProgressMod.cs` | 81 | 58 | 17 |
+
+其余无注记项均为上表的自证例外。**尚无自动化检查**——新增 `catch` 时需人工对照本约定（宁可写清回退值，也不要空块）。
+
 ## 构建
 
 ```bash
