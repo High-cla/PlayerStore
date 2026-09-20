@@ -23,7 +23,57 @@ public class Core : MelonMod
 		public int O = o;
 	}
 
-		private class ItemMask
+		// 朝向已定的形状块(cells + bbox): TryFit/MakeUnit 原先 14 个裸参, 收敛为两个块 + 偏移.
+	// readonly struct = 值类型, 不产生堆分配(配对在 BuildUnits 里是 O(n^2) 热路径).
+	private readonly struct ShapeBlock
+	{
+		public readonly List<(int x, int y)> Cells;
+
+		public readonly int W;
+
+		public readonly int H;
+
+		public ShapeBlock(List<(int x, int y)> cells, int w, int h)
+		{
+			Cells = cells;
+			W = w;
+			H = h;
+		}
+	}
+
+	// 布局器共享上下文(W/H/masks/fixedItems 四件套在各布局器间反复同现); occ 仍是各布局器内独立新建的可变状态, 不入上下文.
+	private sealed class GridContext
+	{
+		public int W;
+
+		public int H;
+
+		public Dictionary<GameItem, ItemMask> masks;
+
+		public List<GameItem> fixedItems;
+
+		public GridContext(int w, int h, Dictionary<GameItem, ItemMask> masks, List<GameItem> fixedItems)
+		{
+			W = w;
+			H = h;
+			this.masks = masks;
+			this.fixedItems = fixedItems;
+		}
+	}
+
+	// 建占用图并把 fixedItems(容器原位)先占上: 各布局器 occ 起手式完全同构, 抽出来. W/H 取自 occ 自身维度,
+	// 避免「传参 W/H」与「occ.GetLength」两套口径漂移.
+	private static bool[,] InitOcc(GridContext g)
+	{
+		bool[,] occ = new bool[g.W, g.H];
+		foreach (GameItem f in g.fixedItems)
+		{
+			MarkCurrentCells(occ, g.W, g.H, f);
+		}
+		return occ;
+	}
+
+	private class ItemMask
 		{
 			public List<(int dx, int dy)> C0;
 
@@ -239,6 +289,43 @@ public class Core : MelonMod
 		{
 			return;
 		}
+		// 记录玩家拖动后的原生窗口位置(内部状态); 拆出 RefreshNativeUI 第一段
+		RememberNativePos(instance);
+		if (!ButtonsVisible)
+		{
+			if (instance.IsOpen("inventory_sorter"))
+			{
+				instance.CloseWindow("inventory_sorter");
+			}
+			_nativeSig = null;
+			return;
+		}
+		List<GameInventory> list = new List<GameInventory>();
+		List<string> list2 = new List<string>();
+		// 收集可排序窗口并生成变更签名; 拆出 RefreshNativeUI 第二段
+		string text = SortablesSignature(list, list2);
+		if (!_nativeDirty && text == _nativeSig)
+		{
+			return;
+		}
+		_nativeDirty = false;
+		_nativeSig = text;
+		if (instance.IsOpen("inventory_sorter"))
+		{
+			instance.CloseWindow("inventory_sorter");
+		}
+		_rootedActions.Clear();
+		if (list.Count == 0)
+		{
+			return;
+		}
+		// 构建并显示窗口(按钮回调闭包在此登记); 拆出 RefreshNativeUI 末段
+		ShowSortWindows(instance, list, list2);
+	}
+
+	// 记录玩家拖动后的原生窗口位置(内部状态持久化); 拆出 RefreshNativeUI 第一段: 复杂度 -4
+	private static void RememberNativePos(CustomUIManager instance)
+	{
 		try
 		{
 			CustomUIWindow window = instance.GetWindow("inventory_sorter");
@@ -256,38 +343,23 @@ public class Core : MelonMod
 		{
 			// ponytail: IL2CPP native probe, silent fallback
 		}
-		if (!ButtonsVisible)
-		{
-			if (instance.IsOpen("inventory_sorter"))
-			{
-				instance.CloseWindow("inventory_sorter");
-			}
-			_nativeSig = null;
-			return;
-		}
-		List<GameInventory> list = new List<GameInventory>();
-		List<string> list2 = new List<string>();
-		CollectSortables(list, list2);
+	}
+
+	// 收集可排序窗口并生成变更签名(数量 + 各标签); 拆出 RefreshNativeUI 第二段: 复杂度 -3
+	private static string SortablesSignature(List<GameInventory> list, List<string> labels)
+	{
+		CollectSortables(list, labels);
 		string text = list.Count.ToString();
-		for (int i = 0; i < list2.Count; i++)
+		for (int i = 0; i < labels.Count; i++)
 		{
-			text = text + "|" + list2[i];
+			text = text + "|" + labels[i];
 		}
-		if (!_nativeDirty && text == _nativeSig)
-		{
-			return;
-		}
-		_nativeDirty = false;
-		_nativeSig = text;
-		if (instance.IsOpen("inventory_sorter"))
-		{
-			instance.CloseWindow("inventory_sorter");
-		}
-		_rootedActions.Clear();
-		if (list.Count == 0)
-		{
-			return;
-		}
+		return text;
+	}
+
+	// 构建按钮窗口 + 落位/显示 + 首次位置回写; 拆出 RefreshNativeUI 末段: 复杂度 -8
+	private static void ShowSortWindows(CustomUIManager instance, List<GameInventory> list, List<string> labels)
+	{
 		float num = 242f;
 		float num2 = (float)Math.Max(3, MaxRowsConst) * 34f;
 		CustomUIBuilder val = instance.CreateWindow("inventory_sorter", "Inventory Sorter", "overlay").SetDraggable(true).SetCloseOnEscape(false)
@@ -297,7 +369,7 @@ public class Core : MelonMod
 		for (int j = 0; j < list.Count; j++)
 		{
 			GameInventory inv = list[j];
-			string text2 = Trunc(list2[j], 22);
+			string text2 = Trunc(labels[j], 22);
 						System.Action val2 = new System.Action(delegate
 						{
 							try
@@ -418,6 +490,30 @@ public class Core : MelonMod
 
 	private static GameInventory ResolveInventory(PixelWindow win)
 	{
+		// 逐条探测(顺序即优先级): child -> childElement -> children -> 动物笼; 任一步异常静默跳过下探.
+		// 拆段: 每段各自独立的 native 探测 + try/catch, 见下方四个 helper.
+		GameInventory v = ResolveFromChild(win);
+		if (v != null)
+		{
+			return v;
+		}
+		v = ResolveFromChildElement(win);
+		if (v != null)
+		{
+			return v;
+		}
+		v = ResolveFromChildren(win);
+		if (v != null)
+		{
+			return v;
+		}
+		return ResolveFromCageItems(win);
+	}
+
+
+	// ResolveInventory 探测段: ResolveFromChild(保留各自 try/catch 静默回退与原始探测顺序)
+	private static GameInventory ResolveFromChild(PixelWindow win)
+	{
 		try
 		{
 			GameInventory val = AsInventory((Il2CppObjectBase)(object)win.child);
@@ -430,6 +526,13 @@ public class Core : MelonMod
 		{
 			// ponytail: IL2CPP native probe, silent fallback
 		}
+		return null;
+	}
+
+
+	// ResolveInventory 探测段: ResolveFromChildElement(保留各自 try/catch 静默回退与原始探测顺序)
+	private static GameInventory ResolveFromChildElement(PixelWindow win)
+	{
 		try
 		{
 			GameInventory val2 = AsInventory((Il2CppObjectBase)(object)win.childElement);
@@ -442,6 +545,13 @@ public class Core : MelonMod
 		{
 			// ponytail: IL2CPP native probe, silent fallback
 		}
+		return null;
+	}
+
+
+	// ResolveInventory 探测段: ResolveFromChildren(保留各自 try/catch 静默回退与原始探测顺序)
+	private static GameInventory ResolveFromChildren(PixelWindow win)
+	{
 		try
 		{
 			Il2CppSystem.Collections.Generic.List<GraphNodeStorage> children = win.children;
@@ -462,6 +572,13 @@ public class Core : MelonMod
 		{
 			// ponytail: IL2CPP native probe, silent fallback
 		}
+		return null;
+	}
+
+
+	// ResolveInventory 探测段: ResolveFromCageItems(保留各自 try/catch 静默回退与原始探测顺序)
+	private static GameInventory ResolveFromCageItems(PixelWindow win)
+	{
 		try
 		{
 			Il2CppSystem.Collections.Generic.List<GameItem> parentItems = win.parentItems;
@@ -496,6 +613,7 @@ public class Core : MelonMod
 		}
 		return null;
 	}
+
 
 	private static GameInventory AsInventory(Il2CppObjectBase node)
 	{
@@ -720,222 +838,18 @@ public class Core : MelonMod
 			}
 			w = Math.Min(w, 128);
 			h = Math.Min(h, 8192);
-			Dictionary<GameItem, ItemMask> masks = new Dictionary<GameItem, ItemMask>();
-			foreach (GameItem it2 in sortPool)
-			{
-				masks[it2] = BuildMask(it2);
-			}
-			// 同类合并视图: 相同 ident + 相同形状(Gw0xGh0 + C0) 的多件只占一份布局(代表件),
-			// 其余在应用阶段调 StackItemUnchecked 并入代表件. 大幅减少地面占用, 释放连续空域(实测 BEST 从不劣化).
-			Dictionary<string, int> mergeRepIdx = new Dictionary<string, int>();
-			for (int mi = 0; mi < sortPool.Count; mi++)
-			{
-				// 容器(有内容窗口的内部格子)不参与同类合并/堆叠: 保持独立, 只移动不堆叠
-				if (HasContentWindow(sortPool[mi])) continue;
-				ItemMask mm2 = masks[sortPool[mi]];
-				StringBuilder msb = new StringBuilder();
-				foreach ((int mdx, int mdy) in mm2.C0)
-				{
-					msb.Append(mdx).Append(':').Append(mdy).Append(',');
-				}
-				string mkey = sortPool[mi].identifier + "|" + mm2.Gw0 + "x" + mm2.Gh0 + "|" + msb.ToString();
-				if (!mergeRepIdx.ContainsKey(mkey))
-				{
-					mergeRepIdx[mkey] = mi;
-				}
-			}
-			// 被合并件清单: 非代表件的下标
-			List<int> mergeAbsorb = new List<int>();
-			HashSet<int> mergeRepSet = new HashSet<int>(mergeRepIdx.Values);
-			for (int mi = 0; mi < sortPool.Count; mi++)
-			{
-				if (!mergeRepSet.Contains(mi) && !HasContentWindow(sortPool[mi]))
-				{
-					mergeAbsorb.Add(mi);
-				}
-			}
-			Dictionary<GameItem, Placement> layout = null;
-			// task-6: 横带(聚带)候选与密集候选同池, 按「带容差的聚带优先」定夺(见 BandedToleranceRatio)
-			Dictionary<GameItem, Placement> bandedLayout = null;
-			string mode = null;
-			int relocated2 = 0;
-			// 横带路径精修采纳件数(塞进缝隙的件数), 仅用于 toast 统计
-			int tucked = 0;
-			if (GroupByTagConst)
-			{
-				// 同类合并: 从 tag 分组中剔除被合并件(代表件保留), 布局后重叠致放自动合并
-				if (mergeAbsorb.Count > 0)
-				{
-					HashSet<GameItem> absorbSet2 = new HashSet<GameItem>();
-					foreach (int ai3 in mergeAbsorb)
-					{
-						absorbSet2.Add(sortPool[ai3]);
-					}
-					foreach (List<GameItem> group in tagGroups.Values)
-					{
-						group.RemoveAll(g => absorbSet2.Contains(g));
-					}
-				}
-				Dictionary<GameItem, Placement> layoutBanded = LayoutBanded(tagOrder, tagGroups, masks, w, h, keptContainers);
-				if (layoutBanded != null)
-				{
-					// 横带成功后也做同一精修层(以前只有 LayoutDense 会精修 ⇒ 横带成功路径零塞缝):
-					// 小件优先释放自身格 → 塞进「能容纳它的最小空矩」 → 空矩内取最贴邻位.
-					// 采纳条件(新空矩 >= 起始空矩 且 贴邻不降)在 TryFillRefine 内部, 非劣化才改位 ⇒
-					// 最大空矩单调不减, 拆散(贴邻下降)恒 0, 落地重叠/压未动件/越界 与横带原结果同(逐件用 occ 精确校验).
-					Dictionary<GameItem, Placement> refinedBanded = TryFillRefine(keptContainers, layoutBanded, masks, w, h);
-					if (refinedBanded != null)
-					{
-						foreach (KeyValuePair<GameItem, Placement> kvTuck in refinedBanded)
-						{
-							if (layoutBanded.TryGetValue(kvTuck.Key, out Placement oldTuck) && (oldTuck.X != kvTuck.Value.X || oldTuck.Y != kvTuck.Value.Y || oldTuck.O != kvTuck.Value.O))
-							{
-								tucked++;
-							}
-						}
-						layoutBanded = refinedBanded;
-					}
-					bandedLayout = layoutBanded;
-				}
-			}
-			// 密集候选: 无论横带成败都算(task-6 需两边空矩才能按容差定夺; LayoutDense 只在局部 occ 上算, 无副作用)
-			Dictionary<GameItem, Placement> denseLayout = null;
-			{
-				foreach (Comparison<GameItem> cmp in new List<Comparison<GameItem>>
-				{
-					SizeCompare,
-					(GameItem a, GameItem b) => Math.Max(BaseW(b), BaseH(b)).CompareTo(Math.Max(BaseW(a), BaseH(a))),
-					(GameItem a, GameItem b) => BaseH(b).CompareTo(BaseH(a)),
-					(GameItem a, GameItem b) => BaseW(b).CompareTo(BaseW(a))
-				})
-				{
-					List<GameItem> candidate = new List<GameItem>(sortPool);
-					if (mergeAbsorb.Count > 0)
-					{
-						// 同类合并: 被合并件不参与布局(代表件排一次即可), 应用阶段重叠致放自动合并
-						HashSet<GameItem> absorbSet = new HashSet<GameItem>();
-						foreach (int ai2 in mergeAbsorb)
-						{
-							absorbSet.Add(sortPool[ai2]);
-						}
-						candidate.RemoveAll(g => absorbSet.Contains(g));
-					}
-					candidate.Sort(cmp);
-					denseLayout = LayoutDense(candidate, masks, w, h, keptContainers);
-					if (denseLayout != null)
-					{
-						break;
-					}
-				}
-			}
-			if (bandedLayout != null && denseLayout != null)
-			{
-				// task-6 容差定夺: 横带全放 且 横带空矩 >= 密集空矩 - tol*密集空矩 ⇒ 选横带(保「同类聚带」产品目标),
-				// 否则选密集. tol = BandedToleranceRatio, 离线曲线见 InventorySorter/tscripts/bench_banded.py
-				long areaBanded = EmptyAreaOfLayout(keptContainers, bandedLayout, masks, w, h);
-				long areaDense = EmptyAreaOfLayout(keptContainers, denseLayout, masks, w, h);
-				if (areaBanded >= areaDense - (long)(areaDense * BandedToleranceRatio))
-				{
-					layout = bandedLayout;
-					mode = "grouped";
-				}
-				else
-				{
-					layout = denseLayout;
-					mode = "packed";
-				}
-			}
-			else if (bandedLayout != null)
-			{
-				layout = bandedLayout;
-				mode = "grouped";
-			}
-			else if (denseLayout != null)
-			{
-				layout = denseLayout;
-				mode = "packed";
-			}
+			// 建 masks 字典 + 同类合并视图(代表件/被合并件); 拆出 SortInventory 第一段: 复杂度 -6
+			BuildSortView(sortPool, out Dictionary<GameItem, ItemMask> masks, out Dictionary<string, int> mergeRepIdx, out List<int> mergeAbsorb);
+			// 横带/密集双候选 + 容差定夺 + 降级残局兜底; 拆出 SortInventory 第二段: 复杂度 -9
+			Dictionary<GameItem, Placement> layout = ChooseLayout(sortPool, tagOrder, tagGroups, masks, w, h, keptContainers, mergeAbsorb, out string mode, out int tucked, out int relocated2);
 			if (layout == null)
 			{
-				// 降级残局(Residual): 全放失败不再整包放弃 — 大件各选最贴合位, 小件尽力塞缝, 放不下的留原位.
-				// 严格布局器"任一放不下整候选作废"; 此处失败件留位且占位作障碍, 落地永不与未动件重叠.
-				// 超大网格坐标扫描过贵(主线程), 维持原 abort.
-				Dictionary<GameItem, Placement> degradeLayout = null;
-				if ((long)w * h < 5000)
-				{
-					List<GameItem> placePool2 = new List<GameItem>();
-					HashSet<int> absIdx2 = new HashSet<int>(mergeAbsorb);
-					for (int gi = 0; gi < sortPool.Count; gi++)
-					{
-						if (!absIdx2.Contains(gi)) placePool2.Add(sortPool[gi]);
-					}
-					degradeLayout = TryResidualLayout(keptContainers, sortPool, placePool2, masks, w, h, out relocated2);
-				}
-				// 全留原位且无同类可堆 -> 无收益, 维持原 abort 语义
-				if (degradeLayout != null && degradeLayout.Count > 0 && (relocated2 > 0 || mergeAbsorb.Count > 0))
-				{
-					layout = degradeLayout;
-					mode = "degraded";
-				}
-				else
-				{
-					RestoreOriginal(inv, original);
-					Toast("not enough room to sort cleanly, left unchanged");
-					return;
-				}
+				RestoreOriginal(inv, original);
+				Toast("not enough room to sort cleanly, left unchanged");
+				return;
 			}
-			int num = 0;
-			// 同类合并应用: 布局成功后, 被合并件致放到代表件同一位置(重叠) — 游戏堆叠机制自动合并为一格.
-			// 代表件位置 = layout[rep]; 每个被合并件找同 ident 代表, PlaceItem 到代表件的 X/Y/O.
-			if (mergeAbsorb.Count > 0)
-			{
-				foreach (int ai in mergeAbsorb)
-				{
-					GameItem absorbed = sortPool[ai];
-					GameItem rep = null;
-					foreach (KeyValuePair<string, int> mp in mergeRepIdx)
-					{
-						GameItem r = sortPool[mp.Value];
-						if (r.identifier == absorbed.identifier)
-						{
-							rep = r;
-							break;
-						}
-					}
-					if (rep != null && layout.TryGetValue(rep, out Placement rp))
-					{
-						if (!PlaceItem(absorbed, rp.X, rp.Y, rp.O))
-						{
-							MelonLogger.Error($"[InvSorter] merge place failed: absorbed {absorbed.identifier} @ {rp.X},{rp.Y} (looks unmoved)");
-						}
-					}
-					else
-					{
-						MelonLogger.Error($"[InvSorter] merge: no rep placement for {absorbed.identifier} (absorbed stays)");
-					}
-				}
-			}
-			// 堆叠物品(unitCount>1)最后放置: 游戏按放置顺序渲染, 后放的贴图在上层, 保证堆叠物至少一格视觉可见(否则被盖住看着取不出)
-			List<KeyValuePair<GameItem, Placement>> order11 = new List<KeyValuePair<GameItem, Placement>>(layout);
-			order11.Sort((a, b) => (Stacked(a.Key) ? 1 : 0).CompareTo(Stacked(b.Key) ? 1 : 0));
-			foreach (KeyValuePair<GameItem, Placement> kvp in order11)
-			{
-				Placement value3 = kvp.Value;
-				PlaceItem(kvp.Key, value3.X, value3.Y, value3.O);
-				if (value3.O == 1)
-				{
-					num++;
-				}
-			}
-			try
-			{
-				inv.Validate();
-			}
-			catch (System.Exception exV)
-			{
-				MelonLogger.Error("[InvSorter] post-layout Validate failed: " + exV.Message);
-			}
-			Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((mode == "degraded") ? $", {relocated2} tucked into gaps" : "") + ((mode == "grouped" && tucked > 0) ? $", {tucked} tucked into gaps" : "") + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
+			// 应用布局(同类合并致放 -> 堆叠顺序落位 -> Validate -> toast); 拆出 SortInventory 第三段: 复杂度 -8
+			ApplyLayout(inv, sortPool, keptContainers, layout, mergeRepIdx, mergeAbsorb, mode, tucked, relocated2);
 		}
 		catch (System.Exception ex2)
 		{
@@ -950,6 +864,278 @@ public class Core : MelonMod
 			MelonLogger.Error("[InvSorter] sort error: " + ex2);
 			Toast("sort error: " + ex2.Message);
 		}
+	}
+
+	// 建 masks 字典 + 同类合并视图(代表件下标 / 被合并件下标); 拆出 SortInventory 第一段: 复杂度 -6
+	private static void BuildSortView(
+		List<GameItem> sortPool,
+		out Dictionary<GameItem, ItemMask> masks,
+		out Dictionary<string, int> mergeRepIdx,
+		out List<int> mergeAbsorb)
+	{
+		masks = new Dictionary<GameItem, ItemMask>();
+		foreach (GameItem it2 in sortPool)
+		{
+			masks[it2] = BuildMask(it2);
+		}
+		// 同类合并视图: 相同 ident + 相同形状(Gw0xGh0 + C0) 的多件只占一份布局(代表件),
+		// 其余在应用阶段调 StackItemUnchecked 并入代表件. 大幅减少地面占用, 释放连续空域(实测 BEST 从不劣化).
+		mergeRepIdx = new Dictionary<string, int>();
+		for (int mi = 0; mi < sortPool.Count; mi++)
+		{
+			// 容器(有内容窗口的内部格子)不参与同类合并/堆叠: 保持独立, 只移动不堆叠
+			if (HasContentWindow(sortPool[mi])) continue;
+			ItemMask mm2 = masks[sortPool[mi]];
+			StringBuilder msb = new StringBuilder();
+			foreach ((int mdx, int mdy) in mm2.C0)
+			{
+				msb.Append(mdx).Append(':').Append(mdy).Append(',');
+			}
+			string mkey = sortPool[mi].identifier + "|" + mm2.Gw0 + "x" + mm2.Gh0 + "|" + msb.ToString();
+			if (!mergeRepIdx.ContainsKey(mkey))
+			{
+				mergeRepIdx[mkey] = mi;
+			}
+		}
+		// 被合并件清单: 非代表件的下标
+		mergeAbsorb = new List<int>();
+		HashSet<int> mergeRepSet = new HashSet<int>(mergeRepIdx.Values);
+		for (int mi = 0; mi < sortPool.Count; mi++)
+		{
+			if (!mergeRepSet.Contains(mi) && !HasContentWindow(sortPool[mi]))
+			{
+				mergeAbsorb.Add(mi);
+			}
+		}
+	}
+
+	// 横带/密集双候选同池 + 容差定夺 + 降级残局兜底; 拆出 SortInventory 第二段: 复杂度 -9
+	private static Dictionary<GameItem, Placement> ChooseLayout(
+		List<GameItem> sortPool, List<string> tagOrder, Dictionary<string, List<GameItem>> tagGroups,
+		Dictionary<GameItem, ItemMask> masks, int w, int h, List<GameItem> keptContainers,
+		List<int> mergeAbsorb, out string mode, out int tucked, out int relocated2)
+	{
+		// task-6: 横带(聚带)候选与密集候选同池, 按「带容差的聚带优先」定夺(见 BandedToleranceRatio); 拆四段
+		relocated2 = 0;
+		Dictionary<GameItem, Placement> bandedLayout = BuildBandedCandidate(sortPool, tagOrder, tagGroups, w, h, masks, keptContainers, mergeAbsorb, out tucked);
+		Dictionary<GameItem, Placement> denseLayout = BuildDenseCandidate(sortPool, w, h, masks, keptContainers, mergeAbsorb);
+		Dictionary<GameItem, Placement> layout = PickByTolerance(bandedLayout, denseLayout, w, h, masks, keptContainers, out mode);
+		if (layout != null)
+		{
+			return layout;
+		}
+		return ResidualFallback(sortPool, w, h, masks, keptContainers, mergeAbsorb, out mode, out relocated2);
+	}
+
+	// 横带(聚带)候选 + 同一精修层; 拆出 ChooseLayout 第一段: 复杂度 -7
+	private static Dictionary<GameItem, Placement> BuildBandedCandidate(
+		List<GameItem> sortPool, List<string> tagOrder, Dictionary<string, List<GameItem>> tagGroups,
+		int w, int h, Dictionary<GameItem, ItemMask> masks, List<GameItem> keptContainers,
+		List<int> mergeAbsorb, out int tucked)
+	{
+		Dictionary<GameItem, Placement> bandedLayout = null;
+		// 横带路径精修采纳件数(塞进缝隙的件数), 仅用于 toast 统计
+		tucked = 0;
+		if (GroupByTagConst)
+		{
+			// 同类合并: 从 tag 分组中剔除被合并件(代表件保留), 布局后重叠致放自动合并
+			if (mergeAbsorb.Count > 0)
+			{
+				HashSet<GameItem> absorbSet2 = new HashSet<GameItem>();
+				foreach (int ai3 in mergeAbsorb)
+				{
+					absorbSet2.Add(sortPool[ai3]);
+				}
+				foreach (List<GameItem> group in tagGroups.Values)
+				{
+					group.RemoveAll(g => absorbSet2.Contains(g));
+				}
+			}
+			Dictionary<GameItem, Placement> layoutBanded = LayoutBanded(tagOrder, tagGroups, new GridContext(w, h, masks, keptContainers));
+			if (layoutBanded != null)
+			{
+				// 横带成功后也做同一精修层(以前只有 LayoutDense 会精修 ⇒ 横带成功路径零塞缝):
+				// 小件优先释放自身格 → 塞进「能容纳它的最小空矩」 → 空矩内取最贴邻位.
+				// 采纳条件(新空矩 >= 起始空矩 且 贴邻不降)在 TryFillRefine 内部, 非劣化才改位 ⇒
+				// 最大空矩单调不减, 拆散(贴邻下降)恒 0, 落地重叠/压未动件/越界 与横带原结果同(逐件用 occ 精确校验).
+				Dictionary<GameItem, Placement> refinedBanded = TryFillRefine(layoutBanded, new GridContext(w, h, masks, keptContainers));
+				if (refinedBanded != null)
+				{
+					foreach (KeyValuePair<GameItem, Placement> kvTuck in refinedBanded)
+					{
+						if (layoutBanded.TryGetValue(kvTuck.Key, out Placement oldTuck) && (oldTuck.X != kvTuck.Value.X || oldTuck.Y != kvTuck.Value.Y || oldTuck.O != kvTuck.Value.O))
+						{
+							tucked++;
+						}
+					}
+					layoutBanded = refinedBanded;
+				}
+				bandedLayout = layoutBanded;
+			}
+		}
+		return bandedLayout;
+	}
+
+	// 密集候选(逐比较器重试, 首个成功即止); 拆出 ChooseLayout 第二段: 复杂度 -6
+	private static Dictionary<GameItem, Placement> BuildDenseCandidate(
+		List<GameItem> sortPool, int w, int h, Dictionary<GameItem, ItemMask> masks,
+		List<GameItem> keptContainers, List<int> mergeAbsorb)
+	{
+		Dictionary<GameItem, Placement> denseLayout = null;
+			foreach (Comparison<GameItem> cmp in new List<Comparison<GameItem>>
+			{
+				SizeCompare,
+				(GameItem a, GameItem b) => Math.Max(BaseW(b), BaseH(b)).CompareTo(Math.Max(BaseW(a), BaseH(a))),
+				(GameItem a, GameItem b) => BaseH(b).CompareTo(BaseH(a)),
+				(GameItem a, GameItem b) => BaseW(b).CompareTo(BaseW(a))
+			})
+			{
+				List<GameItem> candidate = new List<GameItem>(sortPool);
+				if (mergeAbsorb.Count > 0)
+				{
+					// 同类合并: 被合并件不参与布局(代表件排一次即可), 应用阶段重叠致放自动合并
+					HashSet<GameItem> absorbSet = new HashSet<GameItem>();
+					foreach (int ai2 in mergeAbsorb)
+					{
+						absorbSet.Add(sortPool[ai2]);
+					}
+					candidate.RemoveAll(g => absorbSet.Contains(g));
+				}
+				candidate.Sort(cmp);
+				denseLayout = LayoutDense(candidate, new GridContext(w, h, masks, keptContainers));
+				if (denseLayout != null)
+				{
+					break;
+				}
+			}
+		return denseLayout;
+	}
+
+	// 横带/密集同池容差定夺; 拆出 ChooseLayout 第三段: 复杂度 -5
+	private static Dictionary<GameItem, Placement> PickByTolerance(
+		Dictionary<GameItem, Placement> bandedLayout, Dictionary<GameItem, Placement> denseLayout,
+		int w, int h, Dictionary<GameItem, ItemMask> masks, List<GameItem> keptContainers, out string mode)
+	{
+		mode = null;
+		Dictionary<GameItem, Placement> layout = null;
+		if (bandedLayout != null && denseLayout != null)
+		{
+			// task-6 容差定夺: 横带全放 且 横带空矩 >= 密集空矩 - tol*密集空矩 ⇒ 选横带(保「同类聚带」产品目标),
+			// 否则选密集. tol = BandedToleranceRatio, 离线曲线见 InventorySorter/tscripts/bench_banded.py
+			long areaBanded = EmptyAreaOfLayout(bandedLayout, new GridContext(w, h, masks, keptContainers));
+			long areaDense = EmptyAreaOfLayout(denseLayout, new GridContext(w, h, masks, keptContainers));
+			if (areaBanded >= areaDense - (long)(areaDense * BandedToleranceRatio))
+			{
+				layout = bandedLayout;
+				mode = "grouped";
+			}
+			else
+			{
+				layout = denseLayout;
+				mode = "packed";
+			}
+		}
+		else if (bandedLayout != null)
+		{
+			layout = bandedLayout;
+			mode = "grouped";
+		}
+		else if (denseLayout != null)
+		{
+			layout = denseLayout;
+			mode = "packed";
+		}
+		return layout;
+	}
+
+	// 降级残局兜底(全放失败不再整包放弃); 拆出 ChooseLayout 第四段: 复杂度 -6
+	private static Dictionary<GameItem, Placement> ResidualFallback(
+		List<GameItem> sortPool, int w, int h, Dictionary<GameItem, ItemMask> masks,
+		List<GameItem> keptContainers, List<int> mergeAbsorb, out string mode, out int relocated2)
+	{
+		mode = null;
+		relocated2 = 0;
+		// 降级残局(Residual): 全放失败不再整包放弃 — 大件各选最贴合位, 小件尽力塞缝, 放不下的留原位.
+		// 严格布局器"任一放不下整候选作废"; 此处失败件留位且占位作障碍, 落地永不与未动件重叠.
+		// 超大网格坐标扫描过贵(主线程), 维持原 abort.
+		Dictionary<GameItem, Placement> degradeLayout = null;
+		if ((long)w * h < 5000)
+		{
+			List<GameItem> placePool2 = new List<GameItem>();
+			HashSet<int> absIdx2 = new HashSet<int>(mergeAbsorb);
+			for (int gi = 0; gi < sortPool.Count; gi++)
+			{
+				if (!absIdx2.Contains(gi)) placePool2.Add(sortPool[gi]);
+			}
+			degradeLayout = TryResidualLayout(sortPool, placePool2, new GridContext(w, h, masks, keptContainers), out relocated2);
+		}
+		// 全留原位且无同类可堆 -> 无收益, 维持原 abort 语义
+		if (degradeLayout != null && degradeLayout.Count > 0 && (relocated2 > 0 || mergeAbsorb.Count > 0))
+		{
+			mode = "degraded";
+			return degradeLayout;
+		}
+		return null;
+	}
+
+	// 应用布局: 同类合并致放 -> 堆叠件最后落位(保证可见) -> Validate -> toast; 拆出 SortInventory 第三段: 复杂度 -8
+	private static void ApplyLayout(
+		GameInventory inv, List<GameItem> sortPool, List<GameItem> keptContainers,
+		Dictionary<GameItem, Placement> layout, Dictionary<string, int> mergeRepIdx, List<int> mergeAbsorb,
+		string mode, int tucked, int relocated2)
+	{
+		int num = 0;
+		// 同类合并应用: 布局成功后, 被合并件致放到代表件同一位置(重叠) — 游戏堆叠机制自动合并为一格.
+		// 代表件位置 = layout[rep]; 每个被合并件找同 ident 代表, PlaceItem 到代表件的 X/Y/O.
+		if (mergeAbsorb.Count > 0)
+		{
+			foreach (int ai in mergeAbsorb)
+			{
+				GameItem absorbed = sortPool[ai];
+				GameItem rep = null;
+				foreach (KeyValuePair<string, int> mp in mergeRepIdx)
+				{
+					GameItem r = sortPool[mp.Value];
+					if (r.identifier == absorbed.identifier)
+					{
+						rep = r;
+						break;
+					}
+				}
+				if (rep != null && layout.TryGetValue(rep, out Placement rp))
+				{
+					if (!PlaceItem(absorbed, rp.X, rp.Y, rp.O))
+					{
+						MelonLogger.Error($"[InvSorter] merge place failed: absorbed {absorbed.identifier} @ {rp.X},{rp.Y} (looks unmoved)");
+					}
+				}
+				else
+				{
+					MelonLogger.Error($"[InvSorter] merge: no rep placement for {absorbed.identifier} (absorbed stays)");
+				}
+			}
+		}
+		// 堆叠物品(unitCount>1)最后放置: 游戏按放置顺序渲染, 后放的贴图在上层, 保证堆叠物至少一格视觉可见(否则被盖住看着取不出)
+		List<KeyValuePair<GameItem, Placement>> order11 = new List<KeyValuePair<GameItem, Placement>>(layout);
+		order11.Sort((a, b) => (Stacked(a.Key) ? 1 : 0).CompareTo(Stacked(b.Key) ? 1 : 0));
+		foreach (KeyValuePair<GameItem, Placement> kvp in order11)
+		{
+			Placement value3 = kvp.Value;
+			PlaceItem(kvp.Key, value3.X, value3.Y, value3.O);
+			if (value3.O == 1)
+			{
+				num++;
+			}
+		}
+		try
+		{
+			inv.Validate();
+		}
+		catch (System.Exception exV)
+		{
+			MelonLogger.Error("[InvSorter] post-layout Validate failed: " + exV.Message);
+		}
+		Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((mode == "degraded") ? $", {relocated2} tucked into gaps" : "") + ((mode == "grouped" && tucked > 0) ? $", {tucked} tucked into gaps" : "") + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
 	}
 
 	private static void RestoreOriginal(GameInventory inv, List<(GameItem it, int x, int y, int o, bool f)> original)
@@ -984,13 +1170,12 @@ public class Core : MelonMod
 	// task-6 修复(近满包原先 0/93 全失败): ①支撑改自支撑(HasSupportSelf, 厚件/首件可放)
 	// ②落位失败先重算 MFR 池(增量 ShrinkRects 切块会丢空间) ③仍失败则全网格自支撑 first-fit(带底压缩/回退).
 	// 逐 tag 连续带语义不变(同 tag 件不跨带交错): 只有整件在带区放不下时才允许落到带外空位; 任一件彻底无处可放 ⇒ 整次返回 null.
-	private static Dictionary<GameItem, Placement> LayoutBanded(List<string> order, Dictionary<string, List<GameItem>> buckets, Dictionary<GameItem, ItemMask> masks, int W, int H, List<GameItem> fixedItems)
+	private static Dictionary<GameItem, Placement> LayoutBanded(List<string> order, Dictionary<string, List<GameItem>> buckets, GridContext grid)
 	{
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem fixedItem in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, fixedItem);
-		}
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
 		Dictionary<GameItem, Placement> dictionary = new Dictionary<GameItem, Placement>();
 		// MFR 增量缓存: 首次全扫, 每次放置后 ShrinkRects 增量切块(避免逐件全扫)
 		List<(int x, int y, int w, int h)> rects = FindFreeRects(occ, W, H);
@@ -1001,13 +1186,13 @@ public class Core : MelonMod
 			foreach (GameItem item2 in buckets[item])
 			{
 				// ① 带内(带底 num)落位; 支撑用自支撑版(自身格互撑 ⇒ 厚件/空网格首件可放)
-				bool ok = PlaceInto(occ, W, H, masks[item2], num, out int bx, out int by, out int bo, out int bottom, rects, selfSupport: true);
+				bool ok = PlaceInto(occ, grid, masks[item2], num, out int bx, out int by, out int bo, out int bottom, rects, selfSupport: true);
 				bool fromFallback = false;
 				if (!ok)
 				{
 					// ② 增量 ShrinkRects 切块会丢可用空间(近满包尤甚) ⇒ 重算整个 MFR 池再试
 					rects = FindFreeRects(occ, W, H);
-					ok = PlaceInto(occ, W, H, masks[item2], num, out bx, out by, out bo, out bottom, rects, selfSupport: true);
+					ok = PlaceInto(occ, grid, masks[item2], num, out bx, out by, out bo, out bottom, rects, selfSupport: true);
 				}
 				if (!ok)
 				{
@@ -1053,8 +1238,20 @@ public class Core : MelonMod
 		public ItemMask M;  // 单元 mask(并集 cells)
 	}
 
-	private static Dictionary<GameItem, Placement> LayoutDense(List<GameItem> flat, Dictionary<GameItem, ItemMask> masks, int W, int H, List<GameItem> fixedItems)
+	private static Dictionary<GameItem, Placement> LayoutDense(List<GameItem> flat, GridContext grid)
 	{
+		// 算法组合: 并行跑多个独立布局器, 各返回完整 Placement 字典, 取"剩余最大连续空矩"最大者.
+		// 拆段: 候选收集 / 同精修层 + 择优, 各为独立阶段方法(见下).
+		List<Dictionary<GameItem, Placement>> candidates = CollectDenseCandidates(flat, grid);
+		return PickBestPolished(candidates, grid);
+	}
+
+	// 收集全部布局候选(数据驱动保留的组合); 拆出 LayoutDense 第一段: 复杂度 -11
+	private static List<Dictionary<GameItem, Placement>> CollectDenseCandidates(List<GameItem> flat, GridContext grid)
+	{
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
 		// 算法组合: 并行跑多个独立布局器, 各返回完整 Placement 字典, 取"剩余最大连续空矩"最大者.
 		// 数据驱动(verify_all 胜出统计): PairGrounded/GreedyBottom 从不胜出(0/12)已删除;
 		// MinHole(胜6) + GrowTouch(胜5) + Shelf(胜5) 互补覆盖全部组, 组合零损失.
@@ -1071,50 +1268,12 @@ public class Core : MelonMod
 		// 与旧 4 布局器候选**同池 + 同精修层**择优: 取两者最优, 只在原生真正胜出时才承担它的位移代价.
 		// 入选条件 = 原生全放(leftover==0), 否则作废(与原生"放不下即中止"一致, 也不引入部分布局).
 		// 候选顺序 = 追加到旧候选之后 ⇒ 空矩持平时优先保留旧布局器结果(原生须严格更优才顶替, churn 更小).
-		LayoutNativeFirstFit(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictNative, out int nativeLeftover);
+		LayoutNativeFirstFit(flat, grid, out Dictionary<GameItem, Placement> dictNative, out int nativeLeftover);
 		bool hasNative = dictNative != null && nativeLeftover == 0;
 		long gridCells = (long)W * H;
 		if (gridCells < 4000)
 		{
-			// 数据驱动(修复MinHole模拟bug后重扫描): MinHole 单算法胜0/空矩3239 已被包围, 删除(省算力 O(W^2H^2) 最贵).
-			// GrowTouch + Guillotine(死洞惩罚) + LeftBottom + MFR: 组合 120/120 全胜 空矩9964.
-			if (TryGrowTouch(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictGT))
-			{
-				candidates.Add(dictGT);
-			}
-			if (TryGuillotine(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictG))
-			{
-				candidates.Add(dictG);
-			}
-			// LeftBottom: 大背包左下锚定(17x10/11x14 漏网胜), 聚左下块留右上
-			if (TryLeftBottom(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictLB))
-			{
-				candidates.Add(dictLB);
-			}
-			// BestFitMFR: MFR 池最小 waste, 高密度(10x10 total=67)胜
-			if (TryPlaceMFR(fixedItems, flat, masks, W, H, out Dictionary<GameItem, Placement> dictMFR))
-			{
-				candidates.Add(dictMFR);
-			}
-			// 配对落地(PGSplit 思路): 互补配对单元整体落地, 数据驱动 9x7/10x10/14x21 胜出.
-			// paired 已在 W*H>=100 构建(1134). 配对失败→SplitFailedUnit 拆死锁单元(配对拆两单件)重试,
-			// 等价测试 pack_pg_split 的"配对失败拆单件救回"逻辑. 单件也放不下则丢弃候选, 由单件算法兜底.
-			if (paired != null)
-			{
-				paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
-				if (TryPlaceUnits(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dictPair))
-				{
-					candidates.Add(dictPair);
-				}
-				else
-				{
-					List<object> repair = SplitFailedUnit(fixedItems, paired, masks, W, H);
-					if (repair != null && TryPlaceUnits(fixedItems, repair, masks, W, H, out Dictionary<GameItem, Placement> dictRepair))
-					{
-						candidates.Add(dictRepair);
-					}
-				}
-			}
+			CollectSmallGridCandidates(candidates, flat, grid, paired, masks);
 		}
 		else
 		{
@@ -1122,12 +1281,12 @@ public class Core : MelonMod
 			if (paired != null)
 			{
 				paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
-				if (TryPlaceUnits(fixedItems, paired, masks, W, H, out Dictionary<GameItem, Placement> dict))
+				if (TryPlaceUnits(paired, grid, out Dictionary<GameItem, Placement> dict))
 				{
 					candidates.Add(dict);
 				}
 			}
-			if (TryPlaceUnits(fixedItems, singles, masks, W, H, out Dictionary<GameItem, Placement> dict2))
+			if (TryPlaceUnits(singles, grid, out Dictionary<GameItem, Placement> dict2))
 			{
 				candidates.Add(dict2);
 			}
@@ -1136,76 +1295,76 @@ public class Core : MelonMod
 		{
 			candidates.Add(dictNative); // 原生候选追加在末尾: 空矩持平则旧布局器优先(原生须严格更优才顶替)
 		}
+		return candidates;
+	}
+
+	// 小网格(<=4000 格)多布局器候选收集; 拆出 CollectDenseCandidates 第一段
+	private static void CollectSmallGridCandidates(
+		List<Dictionary<GameItem, Placement>> candidates, List<GameItem> flat, GridContext grid,
+		List<object> paired, Dictionary<GameItem, ItemMask> masks)
+	{
+		// 数据驱动(修复MinHole模拟bug后重扫描): MinHole 单算法胜0/空矩3239 已被包围, 删除(省算力 O(W^2H^2) 最贵).
+		// GrowTouch + Guillotine(死洞惩罚) + LeftBottom + MFR: 组合 120/120 全胜 空矩9964.
+		if (TryGrowTouch(flat, grid, out Dictionary<GameItem, Placement> dictGT))
+		{
+			candidates.Add(dictGT);
+		}
+		if (TryGuillotine(flat, grid, out Dictionary<GameItem, Placement> dictG))
+		{
+			candidates.Add(dictG);
+		}
+		// LeftBottom: 大背包左下锚定(17x10/11x14 漏网胜), 聚左下块留右上
+		if (TryLeftBottom(flat, grid, out Dictionary<GameItem, Placement> dictLB))
+		{
+			candidates.Add(dictLB);
+		}
+		// BestFitMFR: MFR 池最小 waste, 高密度(10x10 total=67)胜
+		if (TryPlaceMFR(flat, grid, out Dictionary<GameItem, Placement> dictMFR))
+		{
+			candidates.Add(dictMFR);
+		}
+		// 配对落地(PGSplit 思路): 互补配对单元整体落地, 数据驱动 9x7/10x10/14x21 胜出.
+		// paired 已在 W*H>=100 构建(1134). 配对失败→SplitFailedUnit 拆死锁单元(配对拆两单件)重试,
+		// 等价测试 pack_pg_split 的"配对失败拆单件救回"逻辑. 单件也放不下则丢弃候选, 由单件算法兜底.
+		if (paired != null)
+		{
+			paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
+			if (TryPlaceUnits(paired, grid, out Dictionary<GameItem, Placement> dictPair))
+			{
+				candidates.Add(dictPair);
+			}
+			else
+			{
+				List<object> repair = SplitFailedUnit(paired, grid);
+				if (repair != null && TryPlaceUnits(repair, grid, out Dictionary<GameItem, Placement> dictRepair))
+				{
+					candidates.Add(dictRepair);
+				}
+			}
+		}
+	}
+
+
+	// 同精修层 + 按最大连续空矩择优; 拆出 LayoutDense 第二段: 复杂度 -10
+	private static Dictionary<GameItem, Placement> PickBestPolished(List<Dictionary<GameItem, Placement>> candidates, GridContext grid)
+	{
 		// 同一精修层比较: 每个候选先各自 TryFillRefine(小件塞缝; 采纳条件保证各自非劣化), 再按最大连续空矩择优.
 		// 否则"该候选是否被精修过"会左右胜负, 比较不公平. 代价 = 候选数(<=6)次精修; W*H>5000 时 TryFillRefine 原样返回.
 		List<Dictionary<GameItem, Placement>> polished = new List<Dictionary<GameItem, Placement>>(candidates.Count);
 		foreach (Dictionary<GameItem, Placement> raw in candidates)
 		{
-			polished.Add(TryFillRefine(fixedItems, raw, masks, W, H) ?? raw);
+			polished.Add(TryFillRefine(raw, grid) ?? raw);
 		}
 		// 择优: 剩余最大连续空矩最大者
 		Dictionary<GameItem, Placement> best = null;
 		long bestArea = -1;
 		foreach (Dictionary<GameItem, Placement> cand in polished)
 		{
-			bool[,] occ = new bool[W, H];
-			foreach (GameItem fixedItem in fixedItems)
+			long area = CandidateEmptyArea(cand, grid);
+			if (area < 0)
 			{
-				MarkCurrentCells(occ, W, H, fixedItem);
+				continue; // 布局不合法(越界/压未动件/堆叠零可见格)
 			}
-			bool ok = true;
-			foreach (KeyValuePair<GameItem, Placement> kv in cand)
-			{
-				if (!masks.TryGetValue(kv.Key, out ItemMask mm))
-				{
-					ok = false;
-					break;
-				}
-				List<(int, int)> cs = CellsOf(mm, kv.Value.O);
-				if (cs == null || cs.Count == 0)
-				{
-					cs = mm.C0;
-				}
-				// 堆叠物品在堆叠叠放候选中允许与已占格重叠(叠上去), 只标新空格; 其余物品必须全空格(不重叠)
-				bool stackable = Stacked(kv.Key);
-				int freshCells = 0;
-				foreach ((int dx, int dy) in cs)
-				{
-					int cx = kv.Value.X + dx;
-					int cy = kv.Value.Y + dy;
-					if (cx < 0 || cy < 0 || cx >= W || cy >= H)
-					{
-						ok = false;
-						break;
-					}
-					if (occ[cx, cy])
-					{
-						if (!stackable)
-						{
-							ok = false;
-							break;
-						}
-						continue; // 堆叠物压已占格: 不重复标记
-					}
-					occ[cx, cy] = true;
-					freshCells++;
-				}
-				// 堆叠物至少 1 格可见约束
-				if (stackable && freshCells == 0)
-				{
-					ok = false;
-					break;
-				}
-				if (!ok)
-				{
-					break;
-				}
-			}
-			if (!ok)
-			{
-				continue;
-			}
-			long area = LargestEmptyArea(occ, W, H);
 			if (area > bestArea)
 			{
 				bestArea = area;
@@ -1215,6 +1374,69 @@ public class Core : MelonMod
 		// 精修已在择优前对每个候选完成(见上"同一精修层比较"), 胜出布局本身即精修结果, 此处不再重复精修.
 		return best;
 	}
+
+	// 校验候选布局并返回其最大连续空矩; 不合法返回 -1; 拆出 PickBestPolished 第一段
+	private static long CandidateEmptyArea(Dictionary<GameItem, Placement> cand, GridContext grid)
+	{
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
+		bool ok = true;
+		foreach (KeyValuePair<GameItem, Placement> kv in cand)
+		{
+			if (!masks.TryGetValue(kv.Key, out ItemMask mm))
+			{
+				ok = false;
+				break;
+			}
+			List<(int, int)> cs = CellsOf(mm, kv.Value.O);
+			if (cs == null || cs.Count == 0)
+			{
+				cs = mm.C0;
+			}
+			// 堆叠物品在堆叠叠放候选中允许与已占格重叠(叠上去), 只标新空格; 其余物品必须全空格(不重叠)
+			bool stackable = Stacked(kv.Key);
+			int freshCells = 0;
+			foreach ((int dx, int dy) in cs)
+			{
+				int cx = kv.Value.X + dx;
+				int cy = kv.Value.Y + dy;
+				if (cx < 0 || cy < 0 || cx >= W || cy >= H)
+				{
+					ok = false;
+					break;
+				}
+				if (occ[cx, cy])
+				{
+					if (!stackable)
+					{
+						ok = false;
+						break;
+					}
+					continue; // 堆叠物压已占格: 不重复标记
+				}
+				occ[cx, cy] = true;
+				freshCells++;
+			}
+			// 堆叠物至少 1 格可见约束
+			if (stackable && freshCells == 0)
+			{
+				ok = false;
+				break;
+			}
+			if (!ok)
+			{
+				break;
+			}
+		}
+		if (!ok)
+		{
+			return -1;
+		}
+		return LargestEmptyArea(occ, W, H);
+	}
+
 
 	// ===== 原生首选落位(LayoutNativeFirstFit): 对齐游戏原生 InventorySortHelper.Sort 的落位语义 =====
 	// 语义证据 docs/NATIVE_SORT_SPEC.md, 逐条对应: §7 排序键 / §3.2 控制流 / §5.2-5.3 层掩码 / §6 CellCount / §9 伪代码.
@@ -1231,16 +1453,15 @@ public class Core : MelonMod
 	// 安全不变量(与旧候选同口径): occ 起手只标 fixedItems(容器原位), 每件落位前 CellsFree 校验 + 界内夹取 →
 	//   布局必然满足既有校验(不重叠、不压容器、界内); leftover>0 时调用方整次弃用, 不存在压住未移动件的泄漏.
 	private static void LayoutNativeFirstFit(
-		List<GameItem> fixedItems, List<GameItem> allItems, Dictionary<GameItem, ItemMask> masks,
-		int W, int H, out Dictionary<GameItem, Placement> layout, out int leftover)
+		List<GameItem> allItems, GridContext grid,
+		out Dictionary<GameItem, Placement> layout, out int leftover)
 	{
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
 		layout = new Dictionary<GameItem, Placement>();
 		leftover = 0;
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem f in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, f);
-		}
+		bool[,] occ = InitOcc(grid);
 		List<GameItem> order = new List<GameItem>(allItems);
 		order.Sort((GameItem a, GameItem b) => NativeOrderCompare(a, b, masks, W));
 		foreach (GameItem it in order)
@@ -1354,18 +1575,90 @@ public class Core : MelonMod
 	// 释放自身格 → 找"能容纳它的最小空矩"(塞最小洞) → 在该空矩内取"贴邻已占物/壁最多"的位(贴邻),
 	// 全局最大连续空矩不降才采纳(否则维持原位). 复用精确格, 逐件用 occ 校验不重叠, 安全不变量与残局一致.
 	private static Dictionary<GameItem, Placement> TryFillRefine(
-		List<GameItem> fixedItems, Dictionary<GameItem, Placement> placed,
-		Dictionary<GameItem, ItemMask> masks, int W, int H)
+		Dictionary<GameItem, Placement> placed, GridContext grid)
 	{
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
 		if ((long)W * H > 5000)
 		{
 			return placed; // 超大网格全位扫描过贵, 跳过精修(维持原布局)
 		}
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem f in fixedItems)
+		// 建 occ + 校验已有落位 + 起始最大空矩; 拆出 TryFillRefine 第一段: 复杂度 -8
+		if (!BuildRefineOcc(placed, grid, out bool[,] occ, out long originalArea))
 		{
-			MarkCurrentCells(occ, W, H, f);
+			return placed; // 不应发生; 保守原样
 		}
+		// 仅处理非堆叠件(独占格), 小件优先(脚印小者先)
+		List<GameItem> order = new List<GameItem>();
+		foreach (KeyValuePair<GameItem, Placement> kv in placed)
+		{
+			if (!Stacked(kv.Key))
+			{
+				order.Add(kv.Key);
+			}
+		}
+		if (order.Count <= 1)
+		{
+			return placed;
+		}
+		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)));
+		Dictionary<GameItem, Placement> result = new Dictionary<GameItem, Placement>(placed);
+		foreach (GameItem it in order)
+		{
+			if (!result.TryGetValue(it, out Placement cur))
+			{
+				continue;
+			}
+			if (!masks.TryGetValue(it, out ItemMask m))
+			{
+				continue;
+			}
+			List<(int, int)> curCells = CellsOf(m, cur.O);
+			if (curCells == null || curCells.Count == 0)
+			{
+				curCells = m.C0;
+			}
+			// 释放自身格(独占, 安全)
+			MarkCells(occ, W, H, cur.X, cur.Y, curCells, false);
+			// 释放后当前位贴邻数(不含自身); 采纳守卫要求候选位贴邻不低于当前位, 防 FillRefine 把贴簇小件拆散进孤立袋
+			long curTouch = TouchCount(occ, W, H, cur.X, cur.Y, curCells);
+			bool found = FindRefineCandidate(occ, W, H, m, cur, out Placement cand, out long candTouch);
+			if (!found || (cand.X == cur.X && cand.Y == cur.Y && cand.O == cur.O))
+			{
+				MarkCells(occ, W, H, cur.X, cur.Y, curCells, true);
+				continue;
+			}
+			// 试放候选位
+			List<(int, int)> candCells = CellsOf(m, cand.O);
+			if (candCells == null || candCells.Count == 0)
+			{
+				candCells = m.C0;
+			}
+			MarkCells(occ, W, H, cand.X, cand.Y, candCells, true);
+			long newArea = LargestEmptyArea(occ, W, H);
+			if (newArea >= originalArea && candTouch >= curTouch)
+			{
+				result[it] = cand; // 采纳(塞更小洞/更贴邻, 且空矩不降 + 不许把贴簇小件拆散)
+			}
+			else
+			{
+				// 回退
+				MarkCells(occ, W, H, cand.X, cand.Y, candCells, false);
+				MarkCells(occ, W, H, cur.X, cur.Y, curCells, true);
+			}
+		}
+		return result;
+	}
+
+	// 建精修用占用图: fixedItems 先占, 再逐件校验落位(堆叠件允许压已占格); 拆出 TryFillRefine 第一段: 复杂度 -8
+	private static bool BuildRefineOcc(
+		Dictionary<GameItem, Placement> placed, GridContext grid, out bool[,] occ, out long originalArea)
+	{
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		occ = InitOcc(grid);
 		bool occOk = true;
 		foreach (KeyValuePair<GameItem, Placement> kv in placed)
 		{
@@ -1413,135 +1706,76 @@ public class Core : MelonMod
 		}
 		if (!occOk)
 		{
-			return placed; // 不应发生; 保守原样
+			originalArea = 0;
+			return false; // 不应发生; 保守原样
 		}
-		long originalArea = LargestEmptyArea(occ, W, H);
-		// 仅处理非堆叠件(独占格), 小件优先(脚印小者先)
-		List<GameItem> order = new List<GameItem>();
-		foreach (KeyValuePair<GameItem, Placement> kv in placed)
+		originalArea = LargestEmptyArea(occ, W, H);
+		return true;
+	}
+
+	// 在最小可容纳空矩内取贴邻最多位(面积升序命中即定); 拆出 TryFillRefine 第二段: 复杂度 -9
+	private static bool FindRefineCandidate(
+		bool[,] occ, int W, int H, ItemMask m, Placement cur, out Placement cand, out long candTouch)
+	{
+		cand = default;
+		candTouch = -1;
+		// 候选: 找最小可容纳空矩(FindFreeRects 面积升序), 命中即在该空矩内取贴邻最多位
+		List<(int x, int y, int w, int h)> rects = FindFreeRects(occ, W, H);
+		rects.Sort((p, q) => ((long)p.w * p.h).CompareTo((long)q.w * q.h));
+		bool found = false;
+		foreach (var R in rects)
 		{
-			if (!Stacked(kv.Key))
+			long bestTouch = -1;
+			Placement bestP = default;
+			bool bestFound = false;
+			for (int o = 0; o < 4; o++)
 			{
-				order.Add(kv.Key);
-			}
-		}
-		if (order.Count <= 1)
-		{
-			return placed;
-		}
-		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)));
-		Dictionary<GameItem, Placement> result = new Dictionary<GameItem, Placement>(placed);
-		foreach (GameItem it in order)
-		{
-			if (!result.TryGetValue(it, out Placement cur))
-			{
-				continue;
-			}
-			if (!masks.TryGetValue(it, out ItemMask m))
-			{
-				continue;
-			}
-			List<(int, int)> curCells = CellsOf(m, cur.O);
-			if (curCells == null || curCells.Count == 0)
-			{
-				curCells = m.C0;
-			}
-			// 释放自身格(独占, 安全)
-			MarkCells(occ, W, H, cur.X, cur.Y, curCells, false);
-			// 释放后当前位贴邻数(不含自身); 采纳守卫要求候选位贴邻不低于当前位, 防 FillRefine 把贴簇小件拆散进孤立袋
-			long curTouch = TouchCount(occ, W, H, cur.X, cur.Y, curCells);
-			// 候选: 找最小可容纳空矩(FindFreeRects 面积升序), 命中即在该空矩内取贴邻最多位
-			List<(int x, int y, int w, int h)> rects = FindFreeRects(occ, W, H);
-			rects.Sort((p, q) => ((long)p.w * p.h).CompareTo((long)q.w * q.h));
-			bool found = false;
-			Placement cand = default;
-			long candTouch = -1;
-			foreach (var R in rects)
-			{
-				long bestTouch = -1;
-				Placement bestP = default;
-				bool bestFound = false;
-				for (int o = 0; o < 4; o++)
+				List<(int, int)> cs = CellsOf(m, o);
+				if (cs == null || cs.Count == 0)
 				{
-					List<(int, int)> cs = CellsOf(m, o);
-					if (cs == null || cs.Count == 0)
+					continue;
+				}
+				int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+				int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+				if (gw > R.w || gh > R.h)
+				{
+					continue;
+				}
+				for (int py = R.y; py + gh <= R.y + R.h; py++)
+				{
+					for (int px = R.x; px + gw <= R.x + R.w; px++)
 					{
-						continue;
-					}
-					int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
-					int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
-					if (gw > R.w || gh > R.h)
-					{
-						continue;
-					}
-					for (int py = R.y; py + gh <= R.y + R.h; py++)
-					{
-						for (int px = R.x; px + gw <= R.x + R.w; px++)
+						if (!CellsFree(occ, px, py, cs))
 						{
-							if (!CellsFree(occ, px, py, cs))
-							{
-								continue;
-							}
-							long touch = 0;
-							foreach ((int dx, int dy) in cs)
-							{
-								int cx2 = px + dx;
-								int cy2 = py + dy;
-								if (cx2 == 0 || cx2 == W - 1) touch++;
-								if (cy2 == 0 || cy2 == H - 1) touch++;
-								if (cx2 > 0 && occ[cx2 - 1, cy2]) touch++;
-								if (cx2 < W - 1 && occ[cx2 + 1, cy2]) touch++;
-								if (cy2 > 0 && occ[cx2, cy2 - 1]) touch++;
-								if (cy2 < H - 1 && occ[cx2, cy2 + 1]) touch++;
-							}
-							if (!bestFound || touch > bestTouch || (touch == bestTouch && (py < bestP.Y || (py == bestP.Y && px < bestP.X))))
-							{
-								bestTouch = touch;
-								bestP = new Placement(px, py, o);
-								bestFound = true;
-							}
+							continue;
+						}
+						long touch = TouchCount(occ, W, H, px, py, cs);
+						if (!bestFound || touch > bestTouch || (touch == bestTouch && (py < bestP.Y || (py == bestP.Y && px < bestP.X))))
+						{
+							bestTouch = touch;
+							bestP = new Placement(px, py, o);
+							bestFound = true;
 						}
 					}
 				}
-				if (bestFound)
-				{
-					cand = bestP;
-					candTouch = bestTouch;
-					found = true;
-					break; // 最小可容纳空矩命中即定
-				}
 			}
-			if (!found || (cand.X == cur.X && cand.Y == cur.Y && cand.O == cur.O))
+			if (bestFound)
 			{
-				MarkCells(occ, W, H, cur.X, cur.Y, curCells, true);
-				continue;
-			}
-			// 试放候选位
-			List<(int, int)> candCells = CellsOf(m, cand.O);
-			if (candCells == null || candCells.Count == 0)
-			{
-				candCells = m.C0;
-			}
-			MarkCells(occ, W, H, cand.X, cand.Y, candCells, true);
-			long newArea = LargestEmptyArea(occ, W, H);
-			if (newArea >= originalArea && candTouch >= curTouch)
-			{
-				result[it] = cand; // 采纳(塞更小洞/更贴邻, 且空矩不降 + 不许把贴簇小件拆散)
-			}
-			else
-			{
-				// 回退
-				MarkCells(occ, W, H, cand.X, cand.Y, candCells, false);
-				MarkCells(occ, W, H, cur.X, cur.Y, curCells, true);
+				cand = bestP;
+				candTouch = bestTouch;
+				found = true;
+				break; // 最小可容纳空矩命中即定
 			}
 		}
-		return result;
+		return found;
 	}
 
 	private static Dictionary<GameItem, Placement> TryResidualLayout(
-		List<GameItem> fixedItems, List<GameItem> allItems, List<GameItem> placeItems,
-		Dictionary<GameItem, ItemMask> masks, int W, int H, out int relocated)
+		List<GameItem> allItems, List<GameItem> placeItems, GridContext grid, out int relocated)
 	{
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
 		relocated = 0;
 		// 当前精确格: BuildMask 按当前 flip 快照 C0, C1..C3 = C0 的 0/90/180/270 旋转;
 		// 世界朝向 = ShapeOf.orientation, 精确格 = CellsOf(m, orientation)
@@ -1553,15 +1787,14 @@ public class Core : MelonMod
 				GridShape sh = ShapeOf(it);
 				if (sh != null) o = (int)sh.orientation;
 			}
-			catch { }
+			catch
+			{
+				// ponytail: IL2CPP native probe, silent fallback
+			}
 			List<(int, int)> cs = CellsOf(mm, o);
 			return (cs != null && cs.Count > 0) ? cs : mm.C0;
 		}
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem f in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, f);
-		}
+		bool[,] occ = InitOcc(grid);
 		// 预订全部物品(含 absorbed)当前精确格: 未处理件/留位件/吸收件原格永不被压.
 		// 必须用精确格而非 bbox: bbox 覆盖邻件实占格, 误清后会让后续件落位重叠.
 		foreach (GameItem it in allItems)
@@ -1647,13 +1880,12 @@ public class Core : MelonMod
 
 	// GrowTouch: 每物品取"触摸分最大"的位(相邻已占格+贴边计分), 碎片空间利用率优于行堆积.
 	// 数据驱动: 小网格(11x14 等) GrowTouch 常胜, 与 MinHole 互补. 只处理单件(无配对).
-	private static bool TryGrowTouch(List<GameItem> fixedItems, List<GameItem> singles, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	private static bool TryGrowTouch(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem fixedItem in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, fixedItem);
-		}
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
 		dictionary = new Dictionary<GameItem, Placement>();
 		List<GameItem> order = new List<GameItem>(singles);
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
@@ -1686,24 +1918,7 @@ public class Core : MelonMod
 							continue;
 						}
 						// 触摸分: 每格相邻已占(4向) + 贴边计数
-						long touch = 0;
-						foreach ((int dx, int dy) in cells)
-						{
-							int cx = px + dx;
-							int cy = py + dy;
-							if (cx == 0 || cx == W - 1)
-							{
-								touch++;
-							}
-							if (cy == 0 || cy == H - 1)
-							{
-								touch++;
-							}
-							if (cx > 0 && occ[cx - 1, cy]) touch++;
-							if (cx < W - 1 && occ[cx + 1, cy]) touch++;
-							if (cy > 0 && occ[cx, cy - 1]) touch++;
-							if (cy < H - 1 && occ[cx, cy + 1]) touch++;
-						}
+						long touch = TouchCount(occ, W, H, px, py, cells);
 						if (touch > bestTouch || (touch == bestTouch && (py < bestY || (py == bestY && px < bestX))))
 						{
 							bestTouch = touch;
@@ -1729,13 +1944,12 @@ public class Core : MelonMod
 
 	// Guillotine 切割(GuillotineCut): Free rects 池, 每次选 waste 最小的候选放置, 放置后按割线切碎剩余空间为子矩形.
 	// 碎片池能复用更多细小空间(比 Shelf 行堆积质量高约 60%), 代价是碎片矩形数略多. 只处理单件.
-	private static bool TryGuillotine(List<GameItem> fixedItems, List<GameItem> singles, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	private static bool TryGuillotine(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem fixedItem in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, fixedItem);
-		}
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
 		dictionary = new Dictionary<GameItem, Placement>();
 		List<GameItem> order = new List<GameItem>(singles);
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
@@ -1757,64 +1971,83 @@ public class Core : MelonMod
 		{
 			ItemMask m = masks[item];
 			// 选 评分最小候选 (free rect + 朝向): waste + 0.1*死洞面积
-			int bestFi = -1;
-			int bestO = 0;
-			long bestScore = long.MaxValue;
-			for (int fi = 0; fi < freerects.Count; fi++)
-			{
-				(var frx, var fry, var frw, var frh) = freerects[fi];
-				for (int o = 0; o < 4; o++)
-				{
-					List<(int, int)> cells = CellsOf(m, o);
-					if (cells == null || cells.Count == 0) continue;
-					int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
-					int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
-					if (gw > frw || gh > frh) continue;
-					int waste = frw * frh - gw * gh;
-					// 死洞: 割裂产生的碎片中放不下任意物品(旋转后)的碎片面积
-					long dead = 0;
-					int dRight = frw - gw;
-					int dBelow = frh - gh;
-					if (dBelow > 0)
-					{
-						int mn = Math.Min(frw, dBelow), mx = Math.Max(frw, dBelow);
-						if (mn < minSide || mx < maxSide) dead += (long)frw * dBelow;
-					}
-					if (dRight > 0)
-					{
-						int mn = Math.Min(dRight, frh), mx = Math.Max(dRight, frh);
-						if (mn < minSide || mx < maxSide) dead += (long)dRight * frh;
-					}
-					long score = waste * 10 + dead; // 等价 waste + 0.1*dead (整型避免浮点)
-					if (score < bestScore)
-					{
-						bestScore = score;
-						bestFi = fi;
-						bestO = o;
-					}
-				}
-			}
-			if (bestFi < 0)
+			int bestFi;
+			int bestO;
+			if (!TryPickGuillotineSlot(m, freerects, minSide, maxSide, out bestFi, out bestO))
 			{
 				return false;
 			}
-			(var bx, var by, var bw, var bh) = freerects[bestFi];
-			List<(int, int)> useCells = CellsOf(m, bestO);
-			// 物品落在 free rect 左上角
-			dictionary[item] = new Placement(bx, by, bestO);
-			MarkCells(occ, W, H, bx, by, useCells, val: true);
-						// 割裂: 下碎片(整宽) + 右碎片(底部, 高度=该rect高)
-			int itemGw = (bestO == 1 || bestO == 3) ? m.Gh0 : m.Gw0;
-			int itemGh = (bestO == 1 || bestO == 3) ? m.Gw0 : m.Gh0;
-			int right = bw - itemGw;
-			int below = bh - itemGh;
-			freerects.RemoveAt(bestFi);
-			if (below > 0) freerects.Add((bx, by + itemGh, bw, below));
-			if (right > 0) freerects.Add((bx + itemGw, by, right, bh));
-			// 去包含: 去除被更大矩形覆盖的碎片
-			FreerectDedup(freerects);
+			GuillotinePlace(item, m, bestO, bestFi, freerects, occ, W, H, dictionary);
 		}
 		return true;
+	}
+
+	// 选评分最小候选(free rect + 朝向): waste + 0.1*死洞面积; 拆出 TryGuillotine 第一段
+	private static bool TryPickGuillotineSlot(
+		ItemMask m, List<(int x, int y, int w, int h)> freerects, int minSide, int maxSide,
+		out int bestFi, out int bestO)
+	{
+		bestFi = -1;
+		bestO = 0;
+		long bestScore = long.MaxValue;
+		for (int fi = 0; fi < freerects.Count; fi++)
+		{
+			(var frx, var fry, var frw, var frh) = freerects[fi];
+			for (int o = 0; o < 4; o++)
+			{
+				List<(int, int)> cells = CellsOf(m, o);
+				if (cells == null || cells.Count == 0) continue;
+				int gw = (o == 1 || o == 3) ? m.Gh0 : m.Gw0;
+				int gh = (o == 1 || o == 3) ? m.Gw0 : m.Gh0;
+				if (gw > frw || gh > frh) continue;
+				int waste = frw * frh - gw * gh;
+				// 死洞: 割裂产生的碎片中放不下任意物品(旋转后)的碎片面积
+				long dead = 0;
+				int dRight = frw - gw;
+				int dBelow = frh - gh;
+				if (dBelow > 0)
+				{
+					int mn = Math.Min(frw, dBelow), mx = Math.Max(frw, dBelow);
+					if (mn < minSide || mx < maxSide) dead += (long)frw * dBelow;
+				}
+				if (dRight > 0)
+				{
+					int mn = Math.Min(dRight, frh), mx = Math.Max(dRight, frh);
+					if (mn < minSide || mx < maxSide) dead += (long)dRight * frh;
+				}
+				long score = waste * 10 + dead; // 等价 waste + 0.1*dead (整型避免浮点)
+				if (score < bestScore)
+				{
+					bestScore = score;
+					bestFi = fi;
+					bestO = o;
+				}
+			}
+		}
+		return bestFi >= 0;
+	}
+
+	// 落位 + 割裂(free rect 池滚动) + 去包含; 拆出 TryGuillotine 第二段
+	private static void GuillotinePlace(
+		GameItem item, ItemMask m, int bestO, int bestFi,
+		List<(int x, int y, int w, int h)> freerects, bool[,] occ, int W, int H,
+		Dictionary<GameItem, Placement> dictionary)
+	{
+		(var bx, var by, var bw, var bh) = freerects[bestFi];
+		List<(int, int)> useCells = CellsOf(m, bestO);
+		// 物品落在 free rect 左上角
+		dictionary[item] = new Placement(bx, by, bestO);
+		MarkCells(occ, W, H, bx, by, useCells, val: true);
+		// 割裂: 下碎片(整宽) + 右碎片(底部, 高度=该rect高)
+		int itemGw = (bestO == 1 || bestO == 3) ? m.Gh0 : m.Gw0;
+		int itemGh = (bestO == 1 || bestO == 3) ? m.Gw0 : m.Gh0;
+		int right = bw - itemGw;
+		int below = bh - itemGh;
+		freerects.RemoveAt(bestFi);
+		if (below > 0) freerects.Add((bx, by + itemGh, bw, below));
+		if (right > 0) freerects.Add((bx + itemGw, by, right, bh));
+		// 去包含: 去除被更大矩形覆盖的碎片
+		FreerectDedup(freerects);
 	}
 
 	private static void FreerectDedup(List<(int x, int y, int w, int h)> rects)
@@ -1844,13 +2077,12 @@ public class Core : MelonMod
 
 	// LeftBottom: 左下角锚定. 物品偏好放最左下(px 最小优先, py 最大优先), 聚成左下紧块, 留右上整块.
 	// 大背包(17x10/11x14)常胜: 左下凝聚使剩余集中在右上, 好放更大物品. 只处理单件(无配对).
-	private static bool TryLeftBottom(List<GameItem> fixedItems, List<GameItem> singles, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	private static bool TryLeftBottom(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem fixedItem in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, fixedItem);
-		}
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
 		dictionary = new Dictionary<GameItem, Placement>();
 		List<GameItem> order = new List<GameItem>(singles);
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
@@ -1903,20 +2135,19 @@ public class Core : MelonMod
 
 	// BestFitMFR: MFR 池最小 waste 选位. 物品落在空闲矩形最小浪费处, 高密度(10x10 total=67)常胜.
 	// 用 FindFreeRects 算空闲矩形池, 每放一件 ShrinkRects 增量切块(免逐件全扫). 只处理单件(无配对).
-	private static bool TryPlaceMFR(List<GameItem> fixedItems, List<GameItem> singles, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	private static bool TryPlaceMFR(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem fixedItem in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, fixedItem);
-		}
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
 		dictionary = new Dictionary<GameItem, Placement>();
 		List<GameItem> order = new List<GameItem>(singles);
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
 		List<(int x, int y, int w, int h)> rects = FindFreeRects(occ, W, H);
 		foreach (GameItem item in order)
 		{
-			if (!PlaceInto(occ, W, H, masks[item], 0, out var bx, out var by, out var bo, out var bottom, rects))
+			if (!PlaceInto(occ, grid, masks[item], 0, out var bx, out var by, out var bo, out var bottom, rects))
 			{
 				return false;
 			}
@@ -1974,13 +2205,12 @@ public class Core : MelonMod
 	}
 
 	// 找出配对路径第一次死锁的单元, 若为 PairUnit 则仅拆开该对(重放至死锁点), 其余单元原样; 若死锁点非配对(单件也放不下)则返回 null
-	private static List<object> SplitFailedUnit(List<GameItem> fixedItems, List<object> units, Dictionary<GameItem, ItemMask> masks, int W, int H)
+	private static List<object> SplitFailedUnit(List<object> units, GridContext grid)
 	{
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem fixedItem in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, fixedItem);
-		}
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
 		int minRow = MinOccRow(occ, W, H);
 		List<object> replay = new List<object>();
 		foreach (object unit in units)
@@ -2024,13 +2254,12 @@ public class Core : MelonMod
 
 	// 落地凝聚堆积(自底向上 skyline): 物品从底部凝聚, 顶部剩余一整块连续矩形
 	// 返回 false 时记录失败的单元(拆件fallback用)
-	private static bool TryPlaceUnits(List<GameItem> fixedItems, List<object> units, Dictionary<GameItem, ItemMask> masks, int W, int H, out Dictionary<GameItem, Placement> dictionary)
+	private static bool TryPlaceUnits(List<object> units, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem fixedItem in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, fixedItem);
-		}
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
 		dictionary = new Dictionary<GameItem, Placement>();
 		int minRow = MinOccRow(occ, W, H);
 		foreach (object unit in units)
@@ -2240,9 +2469,9 @@ public class Core : MelonMod
 				{
 					for (int dy = -(bh - 1); dy <= ah - 1; dy++)
 					{
-						if (TryFit(ca, aw, ah, cb, bw, bh, dx, dy, out var rx, out var ry, out var rw, out var rh, out var offBx, out var offBy))
+						if (TryFit(new ShapeBlock(ca, aw, ah), new ShapeBlock(cb, bw, bh), dx, dy, out var rx, out var ry, out var rw, out var rh, out var offBx, out var offBy))
 						{
-							return MakeUnit(ca, aw, ah, oa, cb, bw, bh, ob, rx, ry, rw, rh, offBx, offBy);
+							return MakeUnit(new ShapeBlock(ca, aw, ah), oa, new ShapeBlock(cb, bw, bh), ob, rx, ry, rw, rh, offBx, offBy);
 						}
 					}
 				}
@@ -2251,24 +2480,24 @@ public class Core : MelonMod
 		return null;
 	}
 
-	private static bool TryFit(List<(int, int)> ca, int aw, int ah, List<(int, int)> cb, int bw, int bh, int dx, int dy, out int rx, out int ry, out int rw, out int rh, out int obx, out int oby)
+	private static bool TryFit(ShapeBlock A, ShapeBlock B, int dx, int dy, out int rx, out int ry, out int rw, out int rh, out int obx, out int oby)
 	{
 		// B 平移到 A 的 (dx,dy) 处, 计算并集 bb
 		int minX = 0;
 		int minY = 0;
-		int maxX = aw;
-		int maxY = ah;
+		int maxX = A.W;
+		int maxY = A.H;
 		if (dx < minX) minX = dx;
 		if (dy < minY) minY = dy;
-		if (dx + bw > maxX) maxX = dx + bw;
-		if (dy + bh > maxY) maxY = dy + bh;
+		if (dx + B.W > maxX) maxX = dx + B.W;
+		if (dy + B.H > maxY) maxY = dy + B.H;
 		rw = maxX - minX;
 		rh = maxY - minY;
 		// 并集必须填满 rw*rh 个格子(无孔)
 		bool[,] grid = new bool[rw, rh];
 		int filled = 0;
 		// A 格子全部落在并集内合法区域
-		foreach (var (cx, cy) in ca)
+		foreach (var (cx, cy) in A.Cells)
 		{
 			int gx = cx - minX;
 			int gy = cy - minY;
@@ -2279,7 +2508,7 @@ public class Core : MelonMod
 			}
 		}
 		// B 格子: 须落合法区, 且与 A 不重叠(凸出塞进内凹时 bbox 相交, 必须排除格子重叠)
-		foreach (var (cx, cy) in cb)
+		foreach (var (cx, cy) in B.Cells)
 		{
 			int gx = cx + dx - minX;
 			int gy = cy + dy - minY;
@@ -2308,7 +2537,7 @@ public class Core : MelonMod
 		return true;
 	}
 
-	private static PairUnit MakeUnit(List<(int, int)> ca, int aw, int ah, int oa, List<(int, int)> cb, int bw, int bh, int ob, int rx, int ry, int rw, int rh, int obx, int oby)
+	private static PairUnit MakeUnit(ShapeBlock A, int oa, ShapeBlock B, int ob, int rx, int ry, int rw, int rh, int obx, int oby)
 	{
 		PairUnit u = new PairUnit();
 		u.OA = oa;
@@ -2318,11 +2547,11 @@ public class Core : MelonMod
 		u.Bx = obx - rx;
 		u.By = oby - ry;
 		List<(int, int)> cells = new List<(int, int)>();
-		foreach (var (cx, cy) in ca)
+		foreach (var (cx, cy) in A.Cells)
 		{
 			cells.Add((cx - rx, cy - ry));
 		}
-		foreach (var (cx, cy) in cb)
+		foreach (var (cx, cy) in B.Cells)
 		{
 			cells.Add((cx + obx - rx, cy + oby - ry));
 		}
@@ -2408,14 +2637,28 @@ public class Core : MelonMod
 		}
 	}
 
-	private static bool PlaceInto(bool[,] occ, int W, int H, ItemMask m, int minY, out int bx, out int by, out int bo, out int bottom, List<(int x, int y, int w, int h)> cachedRects = null, bool selfSupport = false)
+	private static bool PlaceInto(bool[,] occ, GridContext grid, ItemMask m, int minY, out int bx, out int by, out int bo, out int bottom, List<(int x, int y, int w, int h)> cachedRects = null, bool selfSupport = false)
 	{
+		// out 顺序 (bx, by, bo, bottom) 与语义保持不动(4 个调用点依赖).
+		List<(int x, int y, int w, int h)> rects = cachedRects ?? FindFreeRects(occ, grid.W, grid.H);
+		if (!TryPickPlaceSlot(rects, occ, grid, m, minY, selfSupport, out bx, out by, out bo))
+		{
+			bottom = -1;
+			return false;
+		}
+		bottom = MarkPlacedCells(occ, grid, m, bx, by, bo);
+		return true;
+	}
+
+	// MFR 池内 4 朝向选位(带 minY 两轮 + Square 早退); 拆出 PlaceInto 第一段
+	private static bool TryPickPlaceSlot(
+		List<(int x, int y, int w, int h)> rects, bool[,] occ, GridContext grid, ItemMask m,
+		int minY, bool selfSupport, out int bx, out int by, out int bo)
+	{
+		int W = grid.W;
 		bx = -1;
 		by = -1;
 		bo = 0;
-		bottom = -1;
-		// MFR 池算一次(或用缓存), 4 朝向复用
-		List<(int x, int y, int w, int h)> rects = cachedRects ?? FindFreeRects(occ, W, H);
 		for (int i = 0; i < 2; i++)
 		{
 			int minY2 = ((i == 0) ? minY : 0);
@@ -2449,7 +2692,7 @@ public class Core : MelonMod
 				}
 				if (list != null && list.Count != 0)
 				{
-					if (FindFreeSpotCells(rects, occ, W, H, list, gw, gh, minY2, out var ox, out var oy, out long waste, selfSupport) && (bx < 0 || oy < by || (oy == by && ox < bx)))
+					if (FindFreeSpotCells(rects, occ, grid, list, gw, gh, minY2, out var ox, out var oy, out long waste, selfSupport) && (bx < 0 || oy < by || (oy == by && ox < bx)))
 					{
 					bx = ox;
 					by = oy;
@@ -2466,10 +2709,14 @@ public class Core : MelonMod
 				break;
 			}
 		}
-		if (bx < 0)
-		{
-			return false;
-		}
+		return bx >= 0;
+	}
+
+	// 标记落位格并返回带底(bottom = 最大 y+1); 拆出 PlaceInto 第二段
+	private static int MarkPlacedCells(bool[,] occ, GridContext grid, ItemMask m, int bx, int by, int bo)
+	{
+		int W = grid.W;
+		int H = grid.H;
 		List<(int, int)> list2;
 		switch (bo)
 		{
@@ -2479,7 +2726,7 @@ public class Core : MelonMod
 			default: list2 = m.C0; break;
 		}
 		MarkCells(occ, W, H, bx, by, list2, val: true);
-		bottom = 0;
+		int bottom = 0;
 		foreach (var item in list2)
 		{
 			if (by + item.Item2 + 1 > bottom)
@@ -2487,8 +2734,9 @@ public class Core : MelonMod
 				bottom = by + item.Item2 + 1;
 			}
 		}
-		return true;
+		return bottom;
 	}
+
 
 	private static ItemMask BuildMask(GameItem it)
 	{
@@ -2543,77 +2791,10 @@ public class Core : MelonMod
 		{
 			// ponytail: IL2CPP native probe, silent fallback
 		}
-		if (val2 != null)
+		// native 网格读取(含 SetTransform 副作用, 及抛异常时的 list.Clear 回退); 拆出 ReadMask 第一段
+		if (val2 != null && TryReadNativeCells(val, val2, list, out bw, out bh))
 		{
-			try
-			{
-				bool flag = false;
-				try
-				{
-					flag = val2.flipped;
-				}
-				catch
-				{
-					// ponytail: IL2CPP native probe, silent fallback
-				}
-				val2.SetTransform(0, 0, flag, 0);
-				int num = Math.Max(1, val.width);
-				int num2 = Math.Max(1, val.height);
-				int num3 = int.MaxValue;
-				int num4 = int.MaxValue;
-				int num5 = -1;
-				int num6 = -1;
-				List<(int, int)> list2 = new List<(int, int)>();
-				for (int i = 0; i < num; i++)
-				{
-					for (int j = 0; j < num2; j++)
-					{
-						byte b = 0;
-						try
-						{
-							b = val.GetLocal(i, j);
-						}
-						catch
-						{
-							// ponytail: IL2CPP native probe, silent fallback
-						}
-						if (b != 0)
-						{
-							list2.Add((i, j));
-							if (i < num3)
-							{
-								num3 = i;
-							}
-							if (j < num4)
-							{
-								num4 = j;
-							}
-							if (i > num5)
-							{
-								num5 = i;
-							}
-							if (j > num6)
-							{
-								num6 = j;
-							}
-						}
-					}
-				}
-				if (list2.Count > 0)
-				{
-					foreach (var (num7, num8) in list2)
-					{
-						list.Add((num7 - num3, num8 - num4));
-					}
-					bw = num5 - num3 + 1;
-					bh = num6 - num4 + 1;
-					return list;
-				}
-			}
-			catch
-			{
-				list.Clear();
-			}
+			return list;
 		}
 		int num9 = BaseW(it);
 		int num10 = BaseH(it);
@@ -2628,6 +2809,84 @@ public class Core : MelonMod
 		}
 		return list;
 	}
+
+	// native 逐格读取形状(SetTransform 先归零朝向); 成功返回 true 并给出裁剪后 bbox; 拆出 ReadMask 第一段
+	private static bool TryReadNativeCells(GridShape val, GridShapeBuilder val2, List<(int, int)> list, out int bw, out int bh)
+	{
+		bw = 1;
+		bh = 1;
+		try
+		{
+			bool flag = false;
+			try
+			{
+				flag = val2.flipped;
+			}
+			catch
+			{
+				// ponytail: IL2CPP native probe, silent fallback
+			}
+			val2.SetTransform(0, 0, flag, 0);
+			int num = Math.Max(1, val.width);
+			int num2 = Math.Max(1, val.height);
+			int num3 = int.MaxValue;
+			int num4 = int.MaxValue;
+			int num5 = -1;
+			int num6 = -1;
+			List<(int, int)> list2 = new List<(int, int)>();
+			for (int i = 0; i < num; i++)
+			{
+				for (int j = 0; j < num2; j++)
+				{
+					byte b = 0;
+					try
+					{
+						b = val.GetLocal(i, j);
+					}
+					catch
+					{
+						// ponytail: IL2CPP native probe, silent fallback
+					}
+					if (b != 0)
+					{
+						list2.Add((i, j));
+						if (i < num3)
+						{
+							num3 = i;
+						}
+						if (j < num4)
+						{
+							num4 = j;
+						}
+						if (i > num5)
+						{
+							num5 = i;
+						}
+						if (j > num6)
+						{
+							num6 = j;
+						}
+					}
+				}
+			}
+			if (list2.Count > 0)
+			{
+				foreach (var (num7, num8) in list2)
+				{
+					list.Add((num7 - num3, num8 - num4));
+				}
+				bw = num5 - num3 + 1;
+				bh = num6 - num4 + 1;
+				return true;
+			}
+		}
+		catch
+		{
+			list.Clear();
+		}
+		return false;
+	}
+
 
 	// Maximal Free Rectangles: 直方图+单调栈枚举所有不被包含的最大空闲矩形
 	private static List<(int x, int y, int w, int h)> FindFreeRects(bool[,] occ, int W, int H)
@@ -2688,8 +2947,10 @@ public class Core : MelonMod
 	// 使所有物品从左上角单向生长成实心连通块 — 剩余空间变成右下角一整块连续矩形,
 	// 好放入更大物品. 支撑约束是聚合的关键: 无支撑的物品会散开碎片化剩余空间.
 	// 候选按左上优先(最小 y 再最小 x): 聚成紧实团块.
-	private static bool FindFreeSpotCells(List<(int x, int y, int w, int h)> rects, bool[,] occ, int W, int H, List<(int dx, int dy)> cells, int gw, int gh, int minY, out int ox, out int oy, out long waste, bool selfSupport = false)
+	private static bool FindFreeSpotCells(List<(int x, int y, int w, int h)> rects, bool[,] occ, GridContext grid, List<(int dx, int dy)> cells, int gw, int gh, int minY, out int ox, out int oy, out long waste, bool selfSupport = false)
 	{
+		int W = grid.W;
+		int H = grid.H;
 		ox = 0;
 		oy = 0;
 		waste = long.MaxValue;
@@ -2751,13 +3012,12 @@ public class Core : MelonMod
 	}
 
 	// task-6 布局最大空矩(与 LayoutDense 择优循环同口径): fixedItems 用 bbox, 布局件用精确格, 堆叠件允许压已占格
-	private static long EmptyAreaOfLayout(List<GameItem> fixedItems, Dictionary<GameItem, Placement> layout, Dictionary<GameItem, ItemMask> masks, int W, int H)
+	private static long EmptyAreaOfLayout(Dictionary<GameItem, Placement> layout, GridContext grid)
 	{
-		bool[,] occ = new bool[W, H];
-		foreach (GameItem f in fixedItems)
-		{
-			MarkCurrentCells(occ, W, H, f);
-		}
+		int W = grid.W;
+		int H = grid.H;
+		Dictionary<GameItem, ItemMask> masks = grid.masks;
+		bool[,] occ = InitOcc(grid);
 		foreach (KeyValuePair<GameItem, Placement> kv in layout)
 		{
 			if (!masks.TryGetValue(kv.Key, out ItemMask mm))
@@ -2936,7 +3196,7 @@ public class Core : MelonMod
 
 	private static void MarkCurrentCells(bool[,] occ, int W, int H, GameItem it)
 	{
-		MarkBox(occ, W, H, PosX(it), PosY(it), BoxW(it), BoxH(it), val: true);
+		MarkBox(occ, PosX(it), PosY(it), BoxW(it), BoxH(it), val: true);
 	}
 
 	private static bool PlaceItem(GameItem it, int x, int y, int orient)
@@ -3210,7 +3470,7 @@ public class Core : MelonMod
 		}
 	}
 
-	private static void MarkBox(bool[,] occ, int W, int H, int x, int y, int bw, int bh, bool val)
+	private static void MarkBox(bool[,] occ, int x, int y, int bw, int bh, bool val)
 	{
 		for (int i = 0; i < bh; i++)
 		{
@@ -3218,7 +3478,7 @@ public class Core : MelonMod
 			{
 				int num = x + j;
 				int num2 = y + i;
-				if (num >= 0 && num2 >= 0 && num < W && num2 < H)
+				if (num >= 0 && num2 >= 0 && num < occ.GetLength(0) && num2 < occ.GetLength(1))
 				{
 					occ[num, num2] = val;
 				}
@@ -3439,6 +3699,27 @@ public class Core : MelonMod
 	// 自动排序(开关默认关): 只在窗口「从无到有」出现时排一次, 且延后一个 tick(等窗口内容就绪)
 	private static void TrackOpenedContainers()
 	{
+		// 拆段: 收集可见窗口 / 首轮登记 / 执行上一 tick 的 pending / diff 出下一 tick 目标.
+		// 遍历顺序与 _seenWindows 的 Clear/回填时机保持原样(transitive_loop_depth 高, 顺序敏感).
+		List<PixelWindow> wins = CollectVisibleWindows();
+		if (_autoWarmup)
+		{
+			// 首轮: 开游戏时已有一堆常驻窗口, 只登记, 不能当成「刚打开」
+			_autoWarmup = false;
+			_seenWindows.Clear();
+			foreach (PixelWindow w0 in wins)
+			{
+				_seenWindows.Add(WindowPtr(w0));
+			}
+			return;
+		}
+		RunPendingAutoSort();
+		_pendingAuto = DiffNewestWindow(wins);
+	}
+
+	// 收集当前可见窗口(逐个 native 探测, 失败静默跳过); 拆出 TrackOpenedContainers 第一段
+	private static List<PixelWindow> CollectVisibleWindows()
+	{
 		List<PixelWindow> wins = new List<PixelWindow>();
 		try
 		{
@@ -3465,17 +3746,12 @@ public class Core : MelonMod
 		{
 			// ponytail: IL2CPP native probe, silent fallback
 		}
-		if (_autoWarmup)
-		{
-			// 首轮: 开游戏时已有一堆常驻窗口, 只登记, 不能当成「刚打开」
-			_autoWarmup = false;
-			_seenWindows.Clear();
-			foreach (PixelWindow w0 in wins)
-			{
-				_seenWindows.Add(WindowPtr(w0));
-			}
-			return;
-		}
+		return wins;
+	}
+
+	// 执行上一 tick 记下的「刚打开的容器」(延时一个 tick 等窗口内容就绪); 拆出 TrackOpenedContainers 第二段
+	private static void RunPendingAutoSort()
+	{
 		// 1) 先执行上一 tick 记下的「刚打开的容器」
 		PixelWindow pending = _pendingAuto;
 		_pendingAuto = null;
@@ -3487,6 +3763,11 @@ public class Core : MelonMod
 				SortInventory(pinv);
 			}
 		}
+	}
+
+	// diff 出本 tick 新出现的窗口 = 下一 tick 的自动排序目标(取焦点戳最大者), 并同步 _seenWindows; 拆出 TrackOpenedContainers 第三段
+	private static PixelWindow DiffNewestWindow(List<PixelWindow> wins)
+	{
 		// 2) 再 diff 出本 tick 新出现的窗口 ⇒ 记为下一 tick 的自动排序目标(取焦点戳最大者 = 最后打开的那个)
 		HashSet<long> now = new HashSet<long>();
 		PixelWindow newest = null;
@@ -3519,8 +3800,9 @@ public class Core : MelonMod
 		{
 			_seenWindows.Add(v);
 		}
-		_pendingAuto = newest;
+		return newest;
 	}
+
 
 	// IL2CPP 对象身份(用于 diff 窗口集合)
 	private static long WindowPtr(PixelWindow w)

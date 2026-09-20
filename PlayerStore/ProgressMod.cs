@@ -74,6 +74,18 @@ namespace ProgressMod
         // 属性编辑 / 删除操作: (uid, 操作, 字段, 值) 走主线程. uid=item.uniqueId 存档内稳定,
         // 经 FindItemByUid 查全部库存定位任意物品 (不限本次生成)
         private enum ItemOpKind { Edit, Delete }
+        // 编辑/删除请求参数对象: ApplyItemOp 原先 4 个平铺参数 (uid/kind/field/value), 收敛为一个值对象
+        private readonly struct ItemOpRequest
+        {
+            public readonly int Uid;
+            public readonly ItemOpKind Kind;
+            public readonly string Field;
+            public readonly string Value;
+            public ItemOpRequest(int uid, ItemOpKind kind, string field, string value)
+            {
+                Uid = uid; Kind = kind; Field = field; Value = value;
+            }
+        }
         private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)> PendingItemOps =
             new System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)>();
         // DumpItem 含 native 方法调用 (GetPublicDisplay/GetActualDisplay 等), 跨线程会 AccessViolation (il2cpp_runtime_invoke).
@@ -88,6 +100,11 @@ namespace ProgressMod
         private static int _spawnTokenSeq;
         private static System.Net.HttpListener _listener;
 
+        // 本地 HTTP 生成服务器端口. 前端物品浏览器另有一份同名硬编码, 位于
+        // docs/items_browser.html:495 (`const API = 'http://localhost:26880'`) —— 改端口时需同步,
+        // 本次重构只收敛 C# 侧 (前端文件不在本任务写入域内).
+        private const int ServerPort = 26880;
+
         public override void OnUpdate()
         {
             try
@@ -98,7 +115,7 @@ namespace ProgressMod
                 }
                 while (PendingItemOps.TryDequeue(out var op))
                 {
-                    ApplyItemOp(op.Item1, op.Item2, op.Item3, op.Item4);
+                    ApplyItemOp(new ItemOpRequest(op.Item1, op.Item2, op.Item3, op.Item4));
                 }
                 while (PendingItemDumps.TryDequeue(out var dj))
                 {
@@ -119,7 +136,7 @@ namespace ProgressMod
             try
             {
                 _listener = new System.Net.HttpListener();
-                _listener.Prefixes.Add("http://localhost:26880/");
+                _listener.Prefixes.Add($"http://localhost:{ServerPort}/");
                 _listener.Start();
                 var t = new System.Threading.Thread(ServerLoop) { IsBackground = true };
                 t.Start();
@@ -147,6 +164,7 @@ namespace ProgressMod
             }
         }
 
+        // 路由分发: 只负责选路 + 统一异常/写出. 各分支行为 (状态码/错误文本) 在 RouteXxx 内逐字保留.
         private static void HandleRequest(System.Net.HttpListenerContext ctx)
         {
             try
@@ -157,156 +175,199 @@ namespace ProgressMod
                 int code = 400;
                 try
                 {
-                    if (req.Url.AbsolutePath == "/api/spawn")
-                    {
-                        var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-                        string id = q["itemId"] ?? "";
-                        int n = 1;
-                        int.TryParse(q["count"], out n);
-                        if (n < 1) n = 1;
-                        if (id == "")
-                        {
-                            resp = new { ok = false, err = "no itemId" };
-                        }
-                        else
-                        {
-                            int token = System.Threading.Interlocked.Increment(ref _spawnTokenSeq);
-                            PendingSpawns.Enqueue((token, id, n));
-                            resp = new { ok = true, token = token, queued = $"{id} x{n}" };
-                            code = 200;
-                        }
-                    }
-                    else if (req.Url.AbsolutePath == "/api/mine")
-                    {
-                        // 列出本次会话生成且仍在跟踪的物品 (token 引用)
-                        var list = new System.Collections.Generic.List<object>();
-                        foreach (var kv in SpawnedItems)
-                        {
-                            var it = kv.Value;
-                            if (it == null) continue;
-                            try
-                            {
-                            list.Add(new
-                            {
-                                token = kv.Key,
-                                uid = SafeInt(() => it.uniqueId),
-                                id = it.identifier ?? "",
-                                name = it.name ?? "",
-                                count = it.unitCount,
-                                unitValue = it.unitValue,
-                                shortDescription = (it.shortDescription ?? "")
-                            });
-                            }
-                            catch { /* IL2CPP 异常: 跳过单条 */ }
-                        }
-                        resp = new { ok = true, items = list };
-                        code = 200;
-                    }
-                    else if (req.Url.AbsolutePath == "/api/inventory")
-                    {
-                        // 枚举玩家全部库存物品 (主背包+柜台+文档+垃圾桶)
-                        var seen = new System.Collections.Generic.HashSet<int>();
-                        var list = new System.Collections.Generic.List<object>();
-                        foreach (var inv in EnumeratePlayerInventories())
-                        {
-                            if (inv == null) continue;
-                            string invName = InvLabel(inv);
-                            foreach (var it in ReadInventoryItems(inv))
-                            {
-                                if (it == null) continue;
-                                int u = 0; try { u = it.uniqueId; } catch { }
-                                if (u == 0 || !seen.Add(u)) continue;
-                                list.Add(new
-                                {
-                                    uid = u,
-                                    id = SafeStr(() => it.identifier, ""),
-                                    name = SafeStr(() => it.name, ""),
-                                    count = SafeInt(() => it.unitCount),
-                                    unitValue = SafeLong(() => it.unitValue),
-                                    inv = invName
-                                });
-                            }
-                        }
-                        resp = new { ok = true, items = list };
-                        code = 200;
-                    }
-                    else if (req.Url.AbsolutePath == "/api/item")
-                    {
-                        // DumpItem 含 native 方法调用, 必须主线程执行: 入队 (uid, seq) 后轮询 DumpResults
-                        var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-                        int uid = 0; int.TryParse(q["uid"], out uid);
-                        if (uid == 0) { resp = new { ok = false, err = "need uid" }; }
-                        else
-                        {
-                            long seq = System.Threading.Interlocked.Increment(ref _dumpSeq);
-                            PendingItemDumps.Enqueue((uid, seq));
-                            object dump = null;
-                            bool got = false;
-                            int waited = 0;
-                            while (waited < 5000)
-                            {
-                                if (DumpResults.TryRemove(seq, out dump)) { got = true; break; }
-                                System.Threading.Thread.Sleep(10);
-                                waited += 10;
-                            }
-                            if (!got)
-                                resp = new { ok = false, err = "dump timeout (主线程未响应, 是否在存档?)" };
-                            else if (dump == null) { resp = new { ok = false, err = "item not found" }; }
-                            else { resp = new { ok = true, item = dump }; code = 200; }
-                        }
-                    }
-                    else if (req.Url.AbsolutePath == "/api/edit")
-                    {
-                        var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-                        int uid = 0; int.TryParse(q["uid"], out uid);
-                        string field = q["field"] ?? "";
-                        string value = q["value"] ?? "";
-                        if (uid == 0 || field == "")
-                        {
-                            resp = new { ok = false, err = "need uid+field" };
-                        }
-                        else
-                        {
-                            PendingItemOps.Enqueue((uid, ItemOpKind.Edit, field, value));
-                            resp = new { ok = true, queued = $"uid {uid} {field}={value}" };
-                            code = 200;
-                        }
-                    }
-                    else if (req.Url.AbsolutePath == "/api/delete")
-                    {
-                        var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
-                        int uid = 0; int.TryParse(q["uid"], out uid);
-                        if (uid == 0)
-                        {
-                            resp = new { ok = false, err = "need uid" };
-                        }
-                        else
-                        {
-                            PendingItemOps.Enqueue((uid, ItemOpKind.Delete, "", ""));
-                            resp = new { ok = true, queued = $"delete uid {uid}" };
-                            code = 200;
-                        }
-                    }
-                    else if (req.Url.AbsolutePath == "/api/health")
-                    {
-                        resp = new { ok = true };
-                        code = 200;
-                    }
+                    if (req.Url.AbsolutePath == "/api/spawn") RouteSpawn(req, out resp, out code);
+                    else if (req.Url.AbsolutePath == "/api/mine") RouteMine(out resp, out code);
+                    else if (req.Url.AbsolutePath == "/api/inventory") RouteInventory(out resp, out code);
+                    else if (req.Url.AbsolutePath == "/api/item") RouteItem(req, out resp, out code);
+                    else if (req.Url.AbsolutePath == "/api/edit") RouteEdit(req, out resp, out code);
+                    else if (req.Url.AbsolutePath == "/api/delete") RouteDelete(req, out resp, out code);
+                    else if (req.Url.AbsolutePath == "/api/health") RouteHealth(out resp, out code);
                 }
                 catch (Exception e)
                 {
                     resp = new { ok = false, err = e.Message };
                     code = 500;
                 }
-                byte[] buf = System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(resp));
-                res.StatusCode = code;
-                res.ContentType = "application/json; charset=utf-8";
-                res.Headers["Access-Control-Allow-Origin"] = "*";
-                res.ContentLength64 = buf.Length;
-                res.OutputStream.Write(buf, 0, buf.Length);
-                res.OutputStream.Close();
+                WriteJson(res, code, resp);
             }
             catch { /* IL2CPP 异常: 保持原值 */ }
+        }
+
+        // 统一响应写出: 状态码 + JSON 头 + CORS + 内容长度 + 关闭输出流
+        private static void WriteJson(System.Net.HttpListenerResponse res, int code, object resp)
+        {
+            byte[] buf = System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(resp));
+            res.StatusCode = code;
+            res.ContentType = "application/json; charset=utf-8";
+            res.Headers["Access-Control-Allow-Origin"] = "*";
+            res.ContentLength64 = buf.Length;
+            res.OutputStream.Write(buf, 0, buf.Length);
+            res.OutputStream.Close();
+        }
+
+        // GET /api/spawn?itemId=xxx&count=n → 入队生成请求, 立即返回 token
+        private static void RouteSpawn(System.Net.HttpListenerRequest req, out object resp, out int code)
+        {
+            var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            string id = q["itemId"] ?? "";
+            int n = 1;
+            int.TryParse(q["count"], out n);
+            if (n < 1) n = 1;
+            if (id == "")
+            {
+                resp = new { ok = false, err = "no itemId" };
+                code = 400;
+                return;
+            }
+            int token = System.Threading.Interlocked.Increment(ref _spawnTokenSeq);
+            PendingSpawns.Enqueue((token, id, n));
+            resp = new { ok = true, token = token, queued = $"{id} x{n}" };
+            code = 200;
+        }
+
+        // GET /api/mine → 列出本次会话生成且仍在跟踪的物品 (token 引用)
+        private static void RouteMine(out object resp, out int code)
+        {
+            var list = new System.Collections.Generic.List<object>();
+            foreach (var kv in SpawnedItems)
+            {
+                var it = kv.Value;
+                if (it == null) continue;
+                try
+                {
+                    list.Add(new
+                    {
+                        token = kv.Key,
+                        uid = SafeInt(() => it.uniqueId),
+                        id = it.identifier ?? "",
+                        name = it.name ?? "",
+                        count = it.unitCount,
+                        unitValue = it.unitValue,
+                        shortDescription = (it.shortDescription ?? "")
+                    });
+                }
+                catch { /* IL2CPP 异常: 跳过单条 */ }
+            }
+            resp = new { ok = true, items = list };
+            code = 200;
+        }
+
+        // GET /api/inventory → 枚举玩家全部库存物品 (主背包+柜台+文档+垃圾桶)
+        private static void RouteInventory(out object resp, out int code)
+        {
+            var seen = new System.Collections.Generic.HashSet<int>();
+            var list = new System.Collections.Generic.List<object>();
+            foreach (var inv in EnumeratePlayerInventories())
+            {
+                if (inv == null) continue;
+                string invName = InvLabel(inv);
+                foreach (var it in ReadInventoryItems(inv))
+                {
+                    if (it == null) continue;
+                    int u = 0;
+                    try { u = it.uniqueId; }
+                    catch
+                    {
+                        // 静默数据丢失: 读不到 uniqueId 的物品会被下面 u == 0 过滤, 整条记录从
+                        // /api/inventory 响应里消失 (网页看不到该物品). 该路径由 HTTP 请求触发,
+                        // 不在每帧热路径上, 故记警告便于定位而非静默吞掉.
+                        MelonLogger.Warning("[ItemOp] inventory: 读取 item.uniqueId 失败, 跳过该物品");
+                    }
+                    if (u == 0 || !seen.Add(u)) continue;
+                    list.Add(new
+                    {
+                        uid = u,
+                        id = SafeStr(() => it.identifier, ""),
+                        name = SafeStr(() => it.name, ""),
+                        count = SafeInt(() => it.unitCount),
+                        unitValue = SafeLong(() => it.unitValue),
+                        inv = invName
+                    });
+                }
+            }
+            resp = new { ok = true, items = list };
+            code = 200;
+        }
+
+        // GET /api/item?uid=n → DumpItem 含 native 方法调用, 必须主线程执行:
+        // 入队 (uid, seq) 后轮询 DumpResults (最长 5s)
+        private static void RouteItem(System.Net.HttpListenerRequest req, out object resp, out int code)
+        {
+            var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            int uid = 0; int.TryParse(q["uid"], out uid);
+            if (uid == 0)
+            {
+                resp = new { ok = false, err = "need uid" };
+                code = 400;
+                return;
+            }
+            long seq = System.Threading.Interlocked.Increment(ref _dumpSeq);
+            PendingItemDumps.Enqueue((uid, seq));
+            object dump = null;
+            bool got = false;
+            int waited = 0;
+            while (waited < 5000)
+            {
+                if (DumpResults.TryRemove(seq, out dump)) { got = true; break; }
+                System.Threading.Thread.Sleep(10);
+                waited += 10;
+            }
+            if (!got)
+            {
+                resp = new { ok = false, err = "dump timeout (主线程未响应, 是否在存档?)" };
+                code = 400;
+            }
+            else if (dump == null)
+            {
+                resp = new { ok = false, err = "item not found" };
+                code = 400;
+            }
+            else
+            {
+                resp = new { ok = true, item = dump };
+                code = 200;
+            }
+        }
+
+        // GET /api/edit?uid=n&field=f&value=v → 入队属性编辑 (主线程执行)
+        private static void RouteEdit(System.Net.HttpListenerRequest req, out object resp, out int code)
+        {
+            var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            int uid = 0; int.TryParse(q["uid"], out uid);
+            string field = q["field"] ?? "";
+            string value = q["value"] ?? "";
+            if (uid == 0 || field == "")
+            {
+                resp = new { ok = false, err = "need uid+field" };
+                code = 400;
+                return;
+            }
+            PendingItemOps.Enqueue((uid, ItemOpKind.Edit, field, value));
+            resp = new { ok = true, queued = $"uid {uid} {field}={value}" };
+            code = 200;
+        }
+
+        // GET /api/delete?uid=n → 入队删除 (主线程执行)
+        private static void RouteDelete(System.Net.HttpListenerRequest req, out object resp, out int code)
+        {
+            var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            int uid = 0; int.TryParse(q["uid"], out uid);
+            if (uid == 0)
+            {
+                resp = new { ok = false, err = "need uid" };
+                code = 400;
+                return;
+            }
+            PendingItemOps.Enqueue((uid, ItemOpKind.Delete, "", ""));
+            resp = new { ok = true, queued = $"delete uid {uid}" };
+            code = 200;
+        }
+
+        // GET /api/health → 存活探针
+        private static void RouteHealth(out object resp, out int code)
+        {
+            resp = new { ok = true };
+            code = 200;
         }
 
         // ============ 生成物品: 机器件直调原版工厂, 落点主背包强塞 ============
@@ -328,82 +389,99 @@ namespace ProgressMod
                     MelonLogger.Warning("[Spawn] 未进入存档 (主菜单无物品资源), 先进入存档再生成");
                     return;
                 }
-                // 图纸/蓝图不能直接生成: 映射到实物 (mod 目录不含图纸, 网页目录含)
-                if (!id.StartsWith("table:") && !id.StartsWith("prebuilt:") && id.EndsWith("_instruction"))
-                {
-                    string alt = InstructionToItem(id);
-                    if (alt.StartsWith("<"))
-                    {
-                        MelonLogger.Warning($"[Spawn] {id} 是图纸(蓝图), 目录未映射实物, 跳过");
-                        return;
-                    }
-                    MelonLogger.Msg($"[Spawn] {id} 图纸 -> 实物 {alt}");
-                    id = alt;
-                }
-                GameItem item = null;
-                string detail = "";
-                if (id.StartsWith("table:") || id.StartsWith("prebuilt:"))
-                {
-                    // mod 引擎: 随机掉落表 / 预置变体
-                    if (!TryCreateGeneratedItem(id, out item, out detail))
-                    {
-                        MelonLogger.Warning($"[Spawn] mod 引擎拒绝 {id}: {detail}");
-                        return;
-                    }
-                }
-                else
-                {
-                    // 常规 stableId: 机器件先直调原版预置工厂 = 命中模板 (见 TrySpawnPrebuiltMachine);
-                    // 无工厂的非机器走 ItemSpawner.Spawn(id) (ItemManager.cs:3366 原样; Spawn 内部仅 18 个
-                    // 生成商品键命中, 其余 = DirectoryMaster.Item(id) 常规商品, furnace 同此且正常显示).
-                    if (!TrySpawnPrebuiltMachine(id, out item))
-                    {
-                        try { item = ItemSpawner.Spawn(id); }
-                        catch (Exception spawnEx) { MelonLogger.Warning($"[Spawn] ItemSpawner.Spawn({id}) 抛异常: {spawnEx.Message}"); }
-                    }
-                    if (item == null) { MelonLogger.Warning($"[Spawn] ItemSpawner 拒绝 {id}"); return; }
-                    // node/module 类模板件不带随机词条 —— 对齐原版引擎第二步: 引擎 (RandomNode/
-                    // RandomPerformanceModule) 在 DirectoryMaster.Item(base) 后调 InitRandomEffect 注入随机词条.
-                    // 直生非变体模板须在此补, 否则产物是游戏里不存在的裸态模块. (prebuilt 引擎产物已带,
-                    // 走上方 TryCreateGeneratedItem 分支, 不会二次注入)
-                    try
-                    {
-                        bool isNodeType = false, isModType = false;
-                        try { isNodeType = item.IsGameItemType("NODE"); } catch { }
-                        try { isModType = item.IsGameItemType("MODULE"); } catch { }
-                        if (isNodeType || isModType)
-                        {
-                            ModuleEffectHelper.InitRandomEffect(item);
-                        }
-                    }
-                    catch (Exception fxEx) { MelonLogger.Warning($"[Spawn] InitRandomEffect({id}) 异常: {fxEx.Message}"); }
-                }
+                if (!TryResolveInstruction(ref id)) return;
+                if (!TryCreateSpawnItem(id, out GameItem item)) return;
                 // 落点: 主背包 (EmporiumEntry.Instance.invElement, GameGridInventory). 用户裁决:
                 // 不要柜台 (PlayerStore 加权表); 无脑强塞 (MayHave 预检失败仅警告, UncheckedAccept 裁决).
                 var inv = EmporiumEntry.Instance?.invElement;
                 if (inv == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无主背包容器"); return; }
                 item.SetAmount(count);
-                try
-                {
-                    if (!((GameInventory)inv).MayHaveValidInventorySlot(item))
-                    {
-                        MelonLogger.Warning($"[Spawn] {id} 预检无有效格(机器件/超大?), 尝试强塞主背包…");
-                    }
-                }
-                catch (Exception slotEx) { MelonLogger.Warning($"[Spawn] MayHaveValidInventorySlot({id}) 异常: {slotEx.Message}"); }
-                try
-                {
-                    if (!((GameInventory)inv).UncheckedAccept(item))
-                    {
-                        MelonLogger.Warning($"[Spawn] UncheckedAccept 拒绝 {id}");
-                        return;
-                    }
-                }
-                catch (Exception accEx) { MelonLogger.Warning($"[Spawn] UncheckedAccept({id}) 异常: {accEx.Message}"); }
+                if (!TryAcceptIntoMainInventory((GameInventory)inv, item, id)) return;
                 if (token > 0) { SpawnedItems[token] = item; }
                 MelonLogger.Msg($"[Spawn] 生成到主背包 {id} x{count}");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
+        }
+
+        // 图纸/蓝图不能直接生成: 映射到实物 (mod 目录不含图纸, 网页目录含). 返回 false = 调用方中止生成
+        private static bool TryResolveInstruction(ref string id)
+        {
+            if (id.StartsWith("table:") || id.StartsWith("prebuilt:") || !id.EndsWith("_instruction")) return true;
+            string alt = InstructionToItem(id);
+            if (alt.StartsWith("<"))
+            {
+                MelonLogger.Warning($"[Spawn] {id} 是图纸(蓝图), 目录未映射实物, 跳过");
+                return false;
+            }
+            MelonLogger.Msg($"[Spawn] {id} 图纸 -> 实物 {alt}");
+            id = alt;
+            return true;
+        }
+
+        // 按 id 形态生成物品: table:/prebuilt: 走 mod 引擎, 其余 stableId 走原版预置工厂/ItemSpawner.
+        // 返回 false = 已记警告, 调用方直接中止
+        private static bool TryCreateSpawnItem(string id, out GameItem item)
+        {
+            item = null;
+            if (id.StartsWith("table:") || id.StartsWith("prebuilt:"))
+            {
+                // mod 引擎: 随机掉落表 / 预置变体
+                if (!TryCreateGeneratedItem(id, out item, out string detail))
+                {
+                    MelonLogger.Warning($"[Spawn] mod 引擎拒绝 {id}: {detail}");
+                    return false;
+                }
+                return true;
+            }
+            // 常规 stableId: 机器件先直调原版预置工厂 = 命中模板 (见 TrySpawnPrebuiltMachine);
+            // 无工厂的非机器走 ItemSpawner.Spawn(id) (ItemManager.cs:3366 原样; Spawn 内部仅 18 个
+            // 生成商品键命中, 其余 = DirectoryMaster.Item(id) 常规商品, furnace 同此且正常显示).
+            if (!TrySpawnPrebuiltMachine(id, out item))
+            {
+                try { item = ItemSpawner.Spawn(id); }
+                catch (Exception spawnEx) { MelonLogger.Warning($"[Spawn] ItemSpawner.Spawn({id}) 抛异常: {spawnEx.Message}"); }
+            }
+            if (item == null) { MelonLogger.Warning($"[Spawn] ItemSpawner 拒绝 {id}"); return false; }
+            // node/module 类模板件不带随机词条 —— 对齐原版引擎第二步: 引擎 (RandomNode/
+            // RandomPerformanceModule) 在 DirectoryMaster.Item(base) 后调 InitRandomEffect 注入随机词条.
+            // 直生非变体模板须在此补, 否则产物是游戏里不存在的裸态模块. (prebuilt 引擎产物已带,
+            // 走上方 TryCreateGeneratedItem 分支, 不会二次注入)
+            try
+            {
+                bool isNodeType = false, isModType = false;
+                try { isNodeType = item.IsGameItemType("NODE"); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+                try { isModType = item.IsGameItemType("MODULE"); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+                if (isNodeType || isModType)
+                {
+                    ModuleEffectHelper.InitRandomEffect(item);
+                }
+            }
+            catch (Exception fxEx) { MelonLogger.Warning($"[Spawn] InitRandomEffect({id}) 异常: {fxEx.Message}"); }
+            return true;
+        }
+
+        // 强塞主背包: MayHave 预检只警告(机器件/超大件常报无格但仍可塞), UncheckedAccept 才是裁决.
+        // 返回 false = 已记警告, 调用方直接中止
+        private static bool TryAcceptIntoMainInventory(GameInventory inv, GameItem item, string id)
+        {
+            try
+            {
+                if (!inv.MayHaveValidInventorySlot(item))
+                {
+                    MelonLogger.Warning($"[Spawn] {id} 预检无有效格(机器件/超大?), 尝试强塞主背包…");
+                }
+            }
+            catch (Exception slotEx) { MelonLogger.Warning($"[Spawn] MayHaveValidInventorySlot({id}) 异常: {slotEx.Message}"); }
+            try
+            {
+                if (!inv.UncheckedAccept(item))
+                {
+                    MelonLogger.Warning($"[Spawn] UncheckedAccept 拒绝 {id}");
+                    return false;
+                }
+            }
+            catch (Exception accEx) { MelonLogger.Warning($"[Spawn] UncheckedAccept({id}) 异常: {accEx.Message}"); }
+            return true;
         }
 
         // 机器件直调原版预置工厂 (命中模板 → 带纸条真机器). 无对应工厂返回 false, 由调用方回退 Spawn.
@@ -437,7 +515,13 @@ namespace ProgressMod
         // ============ 属性编辑 / 删除: 按 uid 定位任意库存物品 ============
         // 字段写回照 ProbablyStolenItemManager.ApplyBaseField, 删除照 TryExpelAndDestroy
         // (overrideLockRemove=true → inventory.Expel → item.Destroy)
-        private static void ApplyItemOp(int uid, ItemOpKind kind, string field, string value)        {
+        private static void ApplyItemOp(ItemOpRequest req)
+        {
+            // 局部解构: 保持下方 switch 分支体逐字不变 (低风险收参, 不改写行为)
+            int uid = req.Uid;
+            ItemOpKind kind = req.Kind;
+            string field = req.Field;
+            string value = req.Value;
             try
             {
                 GameItem item = FindItemByUid(uid);
@@ -452,51 +536,58 @@ namespace ProgressMod
                     return;
                 }
                 // Edit
-                var ci = System.Globalization.CultureInfo.InvariantCulture;
-                switch (field)
-                {
-                    case "name": item.SetName(value); break;
-                    case "shortDescription": item.shortDescription = value; break;
-                    case "longDescription": item.longDescription = value; break;
-                    case "flavorText": item.flavorText = value; break;
-                    case "customText": item.customText = value; break;
-                    case "unitCount":
-                        if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var uc) && uc >= 0 && uc <= 999999) item.SetUnitCount(uc);
-                        else { MelonLogger.Warning($"[ItemOp] edit unitCount invalid: {value}"); return; }
-                        break;
-                    case "unitBaseValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var ub)) item.unitBaseValue = ub; break;
-                    case "unitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var uv)) item.unitValue = uv; break;
-                    case "lateUnitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var lu)) item.lateUnitValue = lu; break;
-                    case "backupUnitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var bu)) item.backupUnitValue = bu; break;
-                    case "bonusAccuracy": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var ba)) item.bonusAccuracy = ba; break;
-                    case "modifiedXOrigin": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var mx)) item.modifiedXOrigin = mx; break;
-                    case "modifiedYOrigin": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var my)) item.modifiedYOrigin = my; break;
-                    case "spritePath": item.spritePath = value; break;
-                    case "spriteAtlasPath": item.spriteAtlasPath = value; break;
-                    // Bool 切换字段 (照原版 ToggleBaseBool ItemManager.cs:2833): value "1"/"true"→设 true, "0"/"false"→设 false, 空/其他→翻转
-                    case "activateDefault": ToggleBoolField(() => item.activateDefault, v => item.activateDefault = v, value); break;
-                    case "forceDisableActivate": ToggleBoolField(() => item.forceDisableActivate, v => item.forceDisableActivate = v, value); break;
-                    case "forceDisableUse": ToggleBoolField(() => item.forceDisableUse, v => item.forceDisableUse = v, value); break;
-                    case "canUseOutsideCombat": ToggleBoolField(() => item.canUseOutsideCombat, v => item.canUseOutsideCombat = v, value); break;
-                    case "triggerOverwatch": ToggleBoolField(() => item.triggerOverwatch, v => item.triggerOverwatch = v, value); break;
-                    case "isCombatBackpack": ToggleBoolField(() => item.isCombatBackpack, v => item.isCombatBackpack = v, value); break;
-                    case "isDebugMenu": ToggleBoolField(() => item.isDebugMenu, v => item.isDebugMenu = v, value); break;
-                    case "tagEnabled": SetItemTagEnabled(item, value, true); break;
-                    case "tagModifiedEnabled": SetItemTagEnabled(item, value, false); break;
-                    case "tagValue": SetItemTagStringValue(item, value, false); break;
-                    case "tagModifiedValue": SetItemTagStringValue(item, value, true); break;
-                    case "tagRemove": RemoveItemTag(item, value, false); break;
-                    case "tagModifiedRemove": RemoveItemTag(item, value, true); break;
-                    case "tagAdd": AddItemTag(item, value); break;
-                    case "featureAdd": AddItemFeatureByCategory(item, value); break;
-                    case "featureRemove": if (!string.IsNullOrWhiteSpace(value)) { try { item.RemoveItemFeatureByID(value); } catch { } } break;
-                    default: MelonLogger.Warning($"[ItemOp] 未知字段 {field}"); return;
-                }
-                try { item.Validate(); } catch { }
+                if (!ApplyEditField(item, field, value)) return;
+                try { item.Validate(); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
                 RefreshItemAreas();
                 MelonLogger.Msg($"[ItemOp] edited uid={uid} {field}={value}");
             }
             catch (Exception e) { MelonLogger.Error($"[ItemOp] ex: {e.Message}"); }
+        }
+
+        // 单字段写回. 返回 false = 已记警告, 调用方跳过 Validate/Refresh/edited 日志 (与拆分前 return 语义一致)
+        private static bool ApplyEditField(GameItem item, string field, string value)
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            switch (field)
+            {
+                case "name": item.SetName(value); break;
+                case "shortDescription": item.shortDescription = value; break;
+                case "longDescription": item.longDescription = value; break;
+                case "flavorText": item.flavorText = value; break;
+                case "customText": item.customText = value; break;
+                case "unitCount":
+                    if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var uc) && uc >= 0 && uc <= 999999) item.SetUnitCount(uc);
+                    else { MelonLogger.Warning($"[ItemOp] edit unitCount invalid: {value}"); return false; }
+                    break;
+                case "unitBaseValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var ub)) item.unitBaseValue = ub; break;
+                case "unitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var uv)) item.unitValue = uv; break;
+                case "lateUnitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var lu)) item.lateUnitValue = lu; break;
+                case "backupUnitValue": if (long.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var bu)) item.backupUnitValue = bu; break;
+                case "bonusAccuracy": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var ba)) item.bonusAccuracy = ba; break;
+                case "modifiedXOrigin": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var mx)) item.modifiedXOrigin = mx; break;
+                case "modifiedYOrigin": if (int.TryParse(value, System.Globalization.NumberStyles.Integer, ci, out var my)) item.modifiedYOrigin = my; break;
+                case "spritePath": item.spritePath = value; break;
+                case "spriteAtlasPath": item.spriteAtlasPath = value; break;
+                // Bool 切换字段 (照原版 ToggleBaseBool ItemManager.cs:2833): value "1"/"true"→设 true, "0"/"false"→设 false, 空/其他→翻转
+                case "activateDefault": ToggleBoolField(() => item.activateDefault, v => item.activateDefault = v, value); break;
+                case "forceDisableActivate": ToggleBoolField(() => item.forceDisableActivate, v => item.forceDisableActivate = v, value); break;
+                case "forceDisableUse": ToggleBoolField(() => item.forceDisableUse, v => item.forceDisableUse = v, value); break;
+                case "canUseOutsideCombat": ToggleBoolField(() => item.canUseOutsideCombat, v => item.canUseOutsideCombat = v, value); break;
+                case "triggerOverwatch": ToggleBoolField(() => item.triggerOverwatch, v => item.triggerOverwatch = v, value); break;
+                case "isCombatBackpack": ToggleBoolField(() => item.isCombatBackpack, v => item.isCombatBackpack = v, value); break;
+                case "isDebugMenu": ToggleBoolField(() => item.isDebugMenu, v => item.isDebugMenu = v, value); break;
+                case "tagEnabled": SetItemTagEnabled(item, value, true); break;
+                case "tagModifiedEnabled": SetItemTagEnabled(item, value, false); break;
+                case "tagValue": SetItemTagStringValue(item, value, false); break;
+                case "tagModifiedValue": SetItemTagStringValue(item, value, true); break;
+                case "tagRemove": RemoveItemTag(item, value, false); break;
+                case "tagModifiedRemove": RemoveItemTag(item, value, true); break;
+                case "tagAdd": AddItemTag(item, value); break;
+                case "featureAdd": AddItemFeatureByCategory(item, value); break;
+                case "featureRemove": if (!string.IsNullOrWhiteSpace(value)) { try { item.RemoveItemFeatureByID(value); } catch { /* ponytail: IL2CPP native probe, silent fallback */ } } break;
+                default: MelonLogger.Warning($"[ItemOp] 未知字段 {field}"); return false;
+            }
+            return true;
         }
 
         // 照原版 ToggleBaseBool 语义: value "1"/"true"/"on" → true; "0"/"false"/"off" → false; 空或其它 → 翻转当前值
@@ -508,7 +599,7 @@ namespace ProgressMod
                 if (low == "1" || low == "true" || low == "on") { setter(true); return; }
                 if (low == "0" || low == "false" || low == "off") { setter(false); return; }
             }
-            try { setter(!getter()); } catch { }
+            try { setter(!getter()); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
         }
 
         // ============ 库存枚举 / 定位 / 删除 (任意库存物品) ============
@@ -522,7 +613,7 @@ namespace ProgressMod
             {
                 if (inv != null) list.Add(inv);
             }
-            try { var p = PlayerStore.Instance; if (p != null) AddInv(p.gridInv); } catch { }
+            try { var p = PlayerStore.Instance; if (p != null) AddInv(p.gridInv); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
             try
             {
                 var e = EmporiumEntry.Instance;
@@ -539,51 +630,89 @@ namespace ProgressMod
                     AddInv(e.hirelingInv); AddInv(e.trashcanInvElement);
                 }
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             return list;
         }
 
         // 库存类型 → 中文标签 (前端展示在哪)
+        //
+        // 顺序敏感 + 惰性: 原实现是 24 个连续的 `if (inv == e.xxxElement) return "标签";`, 首次匹配即返回.
+        // 两个语义必须原样保留, 否则标签会变:
+        //   1) e.xxxElement 是 property getter (get_invElement:733 / get_showcaseElement:779 /
+        //      get_soldElement:2364 / get_trashcanInvElement:2548 ...), 不是字段读取 —— 命中项之后的
+        //      getter 在原实现里根本不会被求值 (部分 getter 未初始化时会分配对象甚至抛异常).
+        //   2) 若某两个 getter 返回同一实例, 顺序决定返回哪个标签.
+        // 故用有序的 (比较委托, 标签) 数组运行时顺序遍历, 而非预建 Dictionary: 预建表会一次性求值
+        // 全部 24 个 getter 且破坏首匹配语义. 比较式 `i == e.xxxElement` 与原文逐字一致 ——
+        // 同一静态类型 (GameInventory vs 各具体库存子类)、同一 operator== 解析, 不做抬高转换.
+        private sealed class InvLabelEntry
+        {
+            public readonly Func<GameInventory, EmporiumEntry, bool> Match;
+            public readonly string Label;
+            public InvLabelEntry(Func<GameInventory, EmporiumEntry, bool> match, string label)
+            {
+                Match = match;
+                Label = label;
+            }
+        }
+
+        private static readonly InvLabelEntry[] InvLabels =
+        {
+            new InvLabelEntry((i, e) => i == e.invElement, "柜台货架"),
+            new InvLabelEntry((i, e) => i == e.showcaseElement, "展示柜"),
+            new InvLabelEntry((i, e) => i == e.docInvElement, "文档栏"),
+            new InvLabelEntry((i, e) => i == e.trashInvElement, "垃圾桶"),
+            new InvLabelEntry((i, e) => i == e.trashcanInvElement, "垃圾桶(trashcan)"),
+            new InvLabelEntry((i, e) => i == e.backInvinvElement, "后柜台"),
+            new InvLabelEntry((i, e) => i == e.backInvinvElementCounter, "后柜台(货架)"),
+            new InvLabelEntry((i, e) => i == e.frontInvinvElement, "前柜台"),
+            new InvLabelEntry((i, e) => i == e.bazarLeftinvElement, "巴扎左侧"),
+            new InvLabelEntry((i, e) => i == e.swapBufferElement, "交换缓冲"),
+            new InvLabelEntry((i, e) => i == e.drainInvElement, "排空栏"),
+            new InvLabelEntry((i, e) => i == e.hiddenElement, "隐藏栏"),
+            new InvLabelEntry((i, e) => i == e.soldElement, "已售区"),
+            new InvLabelEntry((i, e) => i == e.responseInventory, "应召响应"),
+            new InvLabelEntry((i, e) => i == e.responseInventoryClosable, "应召响应(可关)"),
+            new InvLabelEntry((i, e) => i == e.afterhourInventory, "歇业库存"),
+            new InvLabelEntry((i, e) => i == e.faucetElement, "水龙头"),
+            new InvLabelEntry((i, e) => i == e.cassettePlayerElement, "磁带机"),
+            new InvLabelEntry((i, e) => i == e.vendingMachineElement, "售货机"),
+            new InvLabelEntry((i, e) => i == e.vendingFountainElement, "售货喷泉"),
+            new InvLabelEntry((i, e) => i == e.hirelingInv, "雇工背包"),
+            new InvLabelEntry((i, e) => i == e.afterhourPocketSlotInvLeft, "歇业口袋左"),
+            new InvLabelEntry((i, e) => i == e.afterhourPocketSlotInvBackpack, "歇业口袋包"),
+            new InvLabelEntry((i, e) => i == e.afterhourPocketSlotInvRight, "歇业口袋右"),
+        };
+
         private static string InvLabel(GameInventory inv)
         {
             try
             {
                 if (inv == null) return "";
-                try { if (inv == PlayerStore.Instance?.gridInv) return "主背包"; } catch { }
+                try { if (inv == PlayerStore.Instance?.gridInv) return "主背包"; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
                 try
                 {
                     var e = EmporiumEntry.Instance;
                     if (e != null)
                     {
-                        if (inv == e.invElement) return "柜台货架";
-                        if (inv == e.showcaseElement) return "展示柜";
-                        if (inv == e.docInvElement) return "文档栏";
-                        if (inv == e.trashInvElement) return "垃圾桶";
-                        if (inv == e.trashcanInvElement) return "垃圾桶(trashcan)";
-                        if (inv == e.backInvinvElement) return "后柜台";
-                        if (inv == e.backInvinvElementCounter) return "后柜台(货架)";
-                        if (inv == e.frontInvinvElement) return "前柜台";
-                        if (inv == e.bazarLeftinvElement) return "巴扎左侧";
-                        if (inv == e.swapBufferElement) return "交换缓冲";
-                        if (inv == e.drainInvElement) return "排空栏";
-                        if (inv == e.hiddenElement) return "隐藏栏";
-                        if (inv == e.soldElement) return "已售区";
-                        if (inv == e.responseInventory) return "应召响应";
-                        if (inv == e.responseInventoryClosable) return "应召响应(可关)";
-                        if (inv == e.afterhourInventory) return "歇业库存";
-                        if (inv == e.faucetElement) return "水龙头";
-                        if (inv == e.cassettePlayerElement) return "磁带机";
-                        if (inv == e.vendingMachineElement) return "售货机";
-                        if (inv == e.vendingFountainElement) return "售货喷泉";
-                        if (inv == e.hirelingInv) return "雇工背包";
-                        if (inv == e.afterhourPocketSlotInvLeft) return "歇业口袋左";
-                        if (inv == e.afterhourPocketSlotInvBackpack) return "歇业口袋包";
-                        if (inv == e.afterhourPocketSlotInvRight) return "歇业口袋右";
+                        foreach (var entry in InvLabels)
+                        {
+                            if (entry.Match(inv, e)) return entry.Label;
+                        }
                     }
                 }
-                catch { }
+                catch
+                {
+                    // ponytail: IL2CPP native probe, silent fallback
+                }
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             return "";
         }
 
@@ -611,7 +740,7 @@ namespace ProgressMod
                 foreach (var it in items)
                 {
                     if (it == null) continue;
-                    try { if (it.uniqueId == uid) return it; } catch { }
+                    try { if (it.uniqueId == uid) return it; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
                 }
             }
             catch { /* IL2CPP 异常: 保持原值 */ }
@@ -630,7 +759,10 @@ namespace ProgressMod
                     return list;
                 }
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             try
             {
                 if (inv.childItems != null)
@@ -638,7 +770,10 @@ namespace ProgressMod
                     foreach (var it in inv.childItems) if (it != null) list.Add(it);
                 }
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             return list;
         }
 
@@ -648,10 +783,23 @@ namespace ProgressMod
         {
             if (item == null) return;
             int uid = 0;
-            try { uid = item.uniqueId; } catch { }
+            // uid / parentInventory 读失败都不会中断删除本身, 但会显著改变删除路径与日志可读性
+            // (UID 探针只影响日志文本, 是最常被 native 异常打断的一步), 故记警告而非静默.
+            try { uid = item.uniqueId; }
+            catch
+            {
+                // 静默数据丢失: 删除日志里 uid 恒为 0, 事后无法对账到底是哪一条被删.
+                MelonLogger.Warning("[ItemOp] delete: 读取 item.uniqueId 失败 (日志将显示 uid=0)");
+            }
             // 层1: parentInventory
             GameInventory inv = null;
-            try { inv = item.parentInventory; } catch { }
+            try { inv = item.parentInventory; }
+            catch
+            {
+                // 静默数据丢失: parentInventory 读失败会静默跳过「层1」删除路径, 降级到层2/层3;
+                // 物品仍可能被删掉, 但走了非预期路径, 需要能看见.
+                MelonLogger.Warning("[ItemOp] delete: 读取 item.parentInventory 失败, 跳过层1(直连父容器)路径");
+            }
             if (inv != null && TryExpelAndDestroy(inv, item))
             {
                 RefreshItemAreas();
@@ -690,18 +838,21 @@ namespace ProgressMod
                 inventory.overrideLockRemove = true;
                 restoredLock = true;
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             try
             {
                 if (!inventory.Expel(item)) return false;
-                try { item.Destroy(); } catch { }
+                try { item.Destroy(); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
                 return true;
             }
             finally
             {
                 if (restoredLock)
                 {
-                    try { inventory.overrideLockRemove = overrideLockRemove; } catch { }
+                    try { inventory.overrideLockRemove = overrideLockRemove; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
                 }
             }
         }
@@ -714,13 +865,19 @@ namespace ProgressMod
                 var p = PlayerStore.Instance;
                 if (p != null) p.RefreshCounterItem();
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             try
             {
                 var e = EmporiumEntry.Instance;
                 if (e != null) e.Validate(false);
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
         }
 
         // 照原版 InventoryContains: grid.items + childItems (GameSlotInventory.currentItem 为 private, 经 childItems 覆盖)
@@ -730,8 +887,8 @@ namespace ProgressMod
             foreach (var it in ReadInventoryItems(inventory))
             {
                 if (it == null) continue;
-                try { if (it == item) return true; } catch { }
-                try { if (it.uniqueId != 0 && item.uniqueId != 0 && it.uniqueId == item.uniqueId) return true; } catch { }
+                try { if (it == item) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+                try { if (it.uniqueId != 0 && item.uniqueId != 0 && it.uniqueId == item.uniqueId) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
             }
             return false;
         }
@@ -748,14 +905,23 @@ namespace ProgressMod
                 {
                     if (IsSameItem(e.trashcan, item) && e.trashcanInvElement != null) return TryExpelAndDestroy(e.trashcanInvElement, item);
                 }
-                catch { }
+                catch
+                {
+                    // ponytail: IL2CPP native probe, silent fallback
+                }
                 try
                 {
                     if (IsSameItem(e.drain, item) && e.drainInvElement != null) return TryExpelAndDestroy(e.drainInvElement, item);
                 }
-                catch { }
+                catch
+                {
+                    // ponytail: IL2CPP native probe, silent fallback
+                }
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             return false;
         }
 
@@ -763,8 +929,8 @@ namespace ProgressMod
         private static bool IsSameItem(GameItem a, GameItem b)
         {
             if (a == null || b == null) return false;
-            try { if (a == b) return true; } catch { }
-            try { if (a.uniqueId != 0 && a.uniqueId == b.uniqueId) return true; } catch { }
+            try { if (a == b) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+            try { if (a.uniqueId != 0 && a.uniqueId == b.uniqueId) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
             return false;
         }
 
@@ -777,7 +943,10 @@ namespace ProgressMod
                 if (ts == null || ts.dict == null || key == null) return null;
                 if (ts.dict.TryGetValue(key, out var st)) return st;
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             return null;
         }
 
@@ -790,7 +959,7 @@ namespace ProgressMod
             if (eq > 0) { key = keyAndState.Substring(0, eq); bool.TryParse(keyAndState.Substring(eq + 1), out enable); }
             var st = FindTagState(item, key, modified);
             if (st == null) { MelonLogger.Warning($"[ItemOp] tag {key} 不存在"); return; }
-            try { st.SetEnabled(enable); } catch { }
+            try { st.SetEnabled(enable); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
         }
 
         private static void SetItemTagStringValue(GameItem item, string keyValue, bool modified)
@@ -802,7 +971,7 @@ namespace ProgressMod
             string val = keyValue.Substring(eq + 1);
             var st = FindTagState(item, key, modified);
             if (st == null) { MelonLogger.Warning($"[ItemOp] tag {key} 不存在"); return; }
-            try { st.SetString(val); } catch { }
+            try { st.SetString(val); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
         }
 
         // 照原版 RemoveTagFromItem (ItemManager.cs:2665): 只从指定 system 的 dict.Remove, 缺失报错, 不做跨 system fallback
@@ -814,7 +983,10 @@ namespace ProgressMod
                 if (ts == null || ts.dict == null || !ts.dict.Remove(key))
                     MelonLogger.Warning($"[ItemOp] tag 未找到: {key}");
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
         }
 
         private static void AddItemTag(GameItem item, string keyLabel)
@@ -833,7 +1005,10 @@ namespace ProgressMod
                 st.SetEnabled(true);
                 ts.dict.Add(key, st);
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
         }
 
         // 照原版 AddPresetFeature/AddFeatureObject (ItemManager.cs:2691/2725): category 命中 preset → 调 ItemFeatureList 工厂得到完整 feature
@@ -859,12 +1034,18 @@ namespace ProgressMod
                         return;
                     }
                 }
-                catch { }
-                try { f.parentItemUniqueId = item.uniqueId; } catch { }
+                catch
+                {
+                    // ponytail: IL2CPP native probe, silent fallback
+                }
+                try { f.parentItemUniqueId = item.uniqueId; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
                 item.AddItemFeature(f);
                 MelonLogger.Msg($"[ItemOp] feature added: {category.Trim()}");
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
         }
 
         // 原版 FeaturePresets (ItemManager.cs:206-219) 的 12 个预设: 按 preset key / 规范 category 双键 → ItemFeatureList 工厂
@@ -900,7 +1081,10 @@ namespace ProgressMod
                     case "CATEGORY_EQUIPMENT_CONDITION": return ItemFeatureList.EquipementConditionFeature((ItemFeatureList.EquipmentCondition)2);
                 }
             }
-            catch { }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
             return null;
         }
 
@@ -910,29 +1094,60 @@ namespace ProgressMod
             if (item == null) return null;
             var tags = new System.Collections.Generic.List<object>();
             var tagsMod = new System.Collections.Generic.List<object>();
-            void AppendTags(System.Collections.Generic.List<object> into, TagSystem ts)
-            {
-                if (ts == null || ts.dict == null) return;
-                try
-                {
-                    foreach (var kv in ts.dict)
-                    {
-                        var st = kv.Value; if (st == null) continue;
-                        into.Add(new
-                        {
-                            key = SafeStr(() => st.identifier, kv.Key ?? ""),
-                            label = SafeStr(() => st.identifierName, ""),
-                            enabled = SafeBool(() => st.valueEnabled),
-                            valueString = SafeStr(() => st.valueString, ""),
-                            valueInt = SafeInt(() => st.valueInt),
-                            valueFloat = SafeFloat(() => st.valueFloat),
-                        });
-                    }
-                }
-                catch { }
-            }
             AppendTags(tags, item.state);
             AppendTags(tagsMod, item.modifiedState);
+            var feats = DumpFeatures(item);
+            return new
+            {
+                uid = SafeInt(() => item.uniqueId),
+                id = SafeStr(() => item.identifier, ""),
+                name = SafeStr(() => item.name, ""),
+                unitCount = SafeInt(() => item.unitCount),
+                unitValue = SafeLong(() => item.unitValue),
+                unitBaseValue = SafeLong(() => item.unitBaseValue),
+                shortDescription = SafeStr(() => item.shortDescription, ""),
+                longDescription = SafeStr(() => item.longDescription, ""),
+                flavorText = SafeStr(() => item.flavorText, ""),
+                customText = SafeStr(() => item.customText, ""),
+                bonusAccuracy = SafeInt(() => item.bonusAccuracy),
+                spritePath = SafeStr(() => item.spritePath, ""),
+                spriteAtlasPath = SafeStr(() => item.spriteAtlasPath, ""),
+                shape = SafeStr(() => item.shape?.ToString(), ""),
+                tags = tags,
+                tagsModified = tagsMod,
+                features = feats,
+            };
+        }
+
+        // 标签字典 → JSON 对象列表 (base / modified 两套 system 共用)
+        private static void AppendTags(System.Collections.Generic.List<object> into, TagSystem ts)
+        {
+            if (ts == null || ts.dict == null) return;
+            try
+            {
+                foreach (var kv in ts.dict)
+                {
+                    var st = kv.Value; if (st == null) continue;
+                    into.Add(new
+                    {
+                        key = SafeStr(() => st.identifier, kv.Key ?? ""),
+                        label = SafeStr(() => st.identifierName, ""),
+                        enabled = SafeBool(() => st.valueEnabled),
+                        valueString = SafeStr(() => st.valueString, ""),
+                        valueInt = SafeInt(() => st.valueInt),
+                        valueFloat = SafeFloat(() => st.valueFloat),
+                    });
+                }
+            }
+            catch
+            {
+                // ponytail: IL2CPP native probe, silent fallback
+            }
+        }
+
+        // 物品特性列表 → JSON 对象列表 (含 fake/real 条件)
+        private static System.Collections.Generic.List<object> DumpFeatures(GameItem item)
+        {
             var feats = new System.Collections.Generic.List<object>();
             try
             {
@@ -959,27 +1174,11 @@ namespace ProgressMod
                     }
                 }
             }
-            catch { }
-            return new
+            catch
             {
-                uid = SafeInt(() => item.uniqueId),
-                id = SafeStr(() => item.identifier, ""),
-                name = SafeStr(() => item.name, ""),
-                unitCount = SafeInt(() => item.unitCount),
-                unitValue = SafeLong(() => item.unitValue),
-                unitBaseValue = SafeLong(() => item.unitBaseValue),
-                shortDescription = SafeStr(() => item.shortDescription, ""),
-                longDescription = SafeStr(() => item.longDescription, ""),
-                flavorText = SafeStr(() => item.flavorText, ""),
-                customText = SafeStr(() => item.customText, ""),
-                bonusAccuracy = SafeInt(() => item.bonusAccuracy),
-                spritePath = SafeStr(() => item.spritePath, ""),
-                spriteAtlasPath = SafeStr(() => item.spriteAtlasPath, ""),
-                shape = SafeStr(() => item.shape?.ToString(), ""),
-                tags = tags,
-                tagsModified = tagsMod,
-                features = feats,
-            };
+                // ponytail: IL2CPP native probe, silent fallback
+            }
+            return feats;
         }
 
         private static object DumpCondition(ItemCondition c)
