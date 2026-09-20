@@ -10,8 +10,10 @@
     <OutputPath>$(GameDir)\Mods\</OutputPath>
     <DefaultItemExcludes>$(DefaultItemExcludes);tscripts\xmod\decomp\**</DefaultItemExcludes>
   </PropertyGroup>
-  <!-- 编译后自动本地提交: git add 全部变更并 commit. 无变更时静默跳过. -->
-  <Target Name="AutoCommit" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
+  <!-- 编译后自动本地提交: git add 全部变更并 commit. 无变更时静默跳过.
+       默认关闭(曾默认在 Debug 下触发): 构建产出提交会污染历史, 收尾压噪声时极易连带压掉真提交
+       (2026-09-20 一次软重置险些丢掉 4 个已推送提交). 需要时显式加 -p:AutoCommit=true. -->
+  <Target Name="AutoCommit" AfterTargets="Build" Condition="'$(AutoCommit)' == 'true'">
     <Exec Command="git -c user.name=dev -c user.email=dev@local add -A &amp;&amp; git -c user.name=dev -c user.email=dev@local diff --cached --quiet || (git -c user.name=dev -c user.email=dev@local commit -m &quot;build: auto-commit $(Configuration) $(TargetFramework)&quot;)" IgnoreExitCode="true" WorkingDirectory="$(MSBuildProjectDirectory)" />
   </Target>
   <ItemGroup>
