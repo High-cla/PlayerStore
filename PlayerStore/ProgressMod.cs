@@ -274,25 +274,30 @@ namespace ProgressMod
             if (!RunOnMainThread(() =>
             {
                 var list = new System.Collections.Generic.List<object>();
+                var dead = new System.Collections.Generic.List<int>();
                 foreach (var kv in SpawnedItems)
                 {
                     var it = kv.Value;
-                    if (it == null) continue;
-                    try
+                    if (it == null) { dead.Add(kv.Key); continue; }
+                    int u;
+                    try { u = it.uniqueId; }
+                    catch { dead.Add(kv.Key); continue; }
+                    // uid==0 = native 对象已不可读 (被游戏侧消耗/丢弃/销毁, 或存档重载). 此类 token
+                    // 已无意义: 保留会让网页端收到 uid=0 的死条目, 点「完整检查器」必然 400, 且因服务端
+                    // 仍在返回该 token, 前端 refreshMine() 的死 token 清理永不触发.
+                    if (u == 0) { dead.Add(kv.Key); continue; }
+                    list.Add(new
                     {
-                        list.Add(new
-                        {
-                            token = kv.Key,
-                            uid = SafeInt(() => it.uniqueId),
-                            id = SafeStr(() => it.identifier, ""),
-                            name = SafeStr(() => it.name, ""),
-                            count = SafeInt(() => it.unitCount),
-                            unitValue = SafeLong(() => it.unitValue),
-                            shortDescription = SafeStr(() => it.shortDescription, "")
-                        });
-                    }
-                    catch { /* IL2CPP 异常: 跳过单条 */ }
+                        token = kv.Key,
+                        uid = u,
+                        id = SafeStr(() => it.identifier, ""),
+                        name = SafeStr(() => it.name, ""),
+                        count = SafeInt(() => it.unitCount),
+                        unitValue = SafeLong(() => it.unitValue),
+                        shortDescription = SafeStr(() => it.shortDescription, "")
+                    });
                 }
+                foreach (var k in dead) SpawnedItems.Remove(k);
                 return (object)list;
             }, out object result))
             {
@@ -622,6 +627,7 @@ namespace ProgressMod
                 if (kind == ItemOpKind.Delete)
                 {
                     DeleteItem(item);
+                    ForgetSpawned(item);
                     return;
                 }
                 // Edit
@@ -1021,6 +1027,21 @@ namespace ProgressMod
             try { if (a == b) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
             try { if (a.uniqueId != 0 && a.uniqueId == b.uniqueId) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
             return false;
+        }
+
+        // 删除成功后清掉「我的生成」里指向该物品的 token. 网页端 refreshMine() 以「服务端已不再返回
+        // 该 token」为唯一依据清理 localStorage 死 token (items_browser.html:548) —— 此处不删则列表
+        // 永久残留幽灵条目 (uid/name 全空), 且 SpawnedItems 长期持有已 Destroy 的 native 引用阻止回收.
+        // 仅主线程调用 (DeleteItem 只在 OnUpdate 排空路径执行), 与 SpawnedItems 的其他访问同线程, 无需加锁.
+        private static void ForgetSpawned(GameItem item)
+        {
+            if (item == null || SpawnedItems.Count == 0) return;
+            var dead = new System.Collections.Generic.List<int>();
+            foreach (var kv in SpawnedItems)
+            {
+                if (IsSameItem(kv.Value, item)) dead.Add(kv.Key);
+            }
+            foreach (var k in dead) SpawnedItems.Remove(k);
         }
 
         // ============ 标签 / 特性 操作 ============
