@@ -324,9 +324,9 @@ public class Core : MelonMod
 		RememberNativePos(instance);
 		if (!ButtonsVisible)
 		{
-			if (instance.IsOpen("inventory_sorter"))
+			if (instance.IsOpen(NativeWindowId))
 			{
-				instance.CloseWindow("inventory_sorter");
+				instance.CloseWindow(NativeWindowId);
 			}
 			_nativeSig = null;
 			return;
@@ -341,9 +341,9 @@ public class Core : MelonMod
 		}
 		_nativeDirty = false;
 		_nativeSig = text;
-		if (instance.IsOpen("inventory_sorter"))
+		if (instance.IsOpen(NativeWindowId))
 		{
-			instance.CloseWindow("inventory_sorter");
+			instance.CloseWindow(NativeWindowId);
 		}
 		_rootedActions.Clear();
 		if (list.Count == 0)
@@ -359,7 +359,7 @@ public class Core : MelonMod
 	{
 		try
 		{
-			CustomUIWindow window = instance.GetWindow("inventory_sorter");
+			CustomUIWindow window = instance.GetWindow(NativeWindowId);
 			if (window != null && window.IsAlive)
 			{
 				Vector2 anchoredPosition = window.Rect.anchoredPosition;
@@ -393,7 +393,7 @@ public class Core : MelonMod
 	{
 		float num = 242f;
 		float num2 = (float)Math.Max(3, MaxRowsConst) * 34f;
-		CustomUIBuilder val = instance.CreateWindow("inventory_sorter", "Inventory Sorter", "overlay").SetDraggable(true).SetCloseOnEscape(false)
+		CustomUIBuilder val = instance.CreateWindow(NativeWindowId, "Inventory Sorter", "overlay").SetDraggable(true).SetCloseOnEscape(false)
 			.SetSize(num, 50f + num2);
 		val.BeginScroll(num2);
 		val.BeginGrid(1, 168f, 28f, 6f);
