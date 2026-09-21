@@ -88,13 +88,38 @@ namespace ProgressMod
         }
         private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)> PendingItemOps =
             new System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)>();
-        // DumpItem 含 native 方法调用 (GetPublicDisplay/GetActualDisplay 等), 跨线程会 AccessViolation (il2cpp_runtime_invoke).
-        // 必须主线程执行: HTTP 线程入队 (uid, seq), 主线程 OnUpdate 产出写 DumpResults[seq], HTTP 线程轮询取值.
-        private static readonly System.Collections.Concurrent.ConcurrentQueue<(int uid, long seq)> PendingItemDumps =
-            new System.Collections.Concurrent.ConcurrentQueue<(int uid, long seq)>();
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, object> DumpResults =
-            new System.Collections.Concurrent.ConcurrentDictionary<long, object>();
-        private static long _dumpSeq;
+        // 主线程作业: DumpItem / 库存枚举都含 native 调用 (GetPublicDisplay / EmporiumEntry.Instance /
+        // GameItem 字段...), 跨线程会 AccessViolation (il2cpp_runtime_invoke) 或碰 Unity 主线程约束.
+        // 统一机制: HTTP 线程把「要读什么」封成闭包入队 (闭包只捕获请求参数纯值, 绝不跨线程共享
+        // Il2Cpp 引用), 主线程 OnUpdate 执行并回填结果, HTTP 线程等信号取值.
+        private sealed class MainThreadJob
+        {
+            public readonly Func<object> Work;
+            public readonly System.Threading.ManualResetEventSlim Done = new System.Threading.ManualResetEventSlim(false);
+            public object Result;
+            public MainThreadJob(Func<object> work) { Work = work; }
+        }
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<MainThreadJob> PendingJobs =
+            new System.Collections.Concurrent.ConcurrentQueue<MainThreadJob>();
+
+        // HTTP 线程调用: 入队 + 等主线程执行 (最长 timeoutMs). 返回 false = 主线程未响应 (未进存档/卡帧).
+        // 事件驱动 (非轮询) ⇒ 无 10ms 量化延迟, 且无「超时后结果残留」的字典泄漏 (作业对象由本线程独占持有).
+        private static bool RunOnMainThread(Func<object> work, out object result, int timeoutMs = 5000)
+        {
+            var job = new MainThreadJob(work);
+            PendingJobs.Enqueue(job);
+            try
+            {
+                if (!job.Done.Wait(timeoutMs)) { result = null; return false; }
+                result = job.Result;
+                return true;
+            }
+            finally
+            {
+                // 确定性释放等待句柄. 超时后主线程仍可能 Set 已释放的事件 —— 那边 Set 已包 try/catch.
+                job.Done.Dispose();
+            }
+        }
         // token -> 本次生成实例 (网页端 "我的生成" 追踪). 游戏重启即失效 (物品仍在库存但引用丢失, 由新生成覆盖)
         private static readonly System.Collections.Generic.Dictionary<int, GameItem> SpawnedItems = new System.Collections.Generic.Dictionary<int, GameItem>();
         private static int _spawnTokenSeq;
@@ -117,15 +142,22 @@ namespace ProgressMod
                 {
                     ApplyItemOp(new ItemOpRequest(op.Item1, op.Item2, op.Item3, op.Item4));
                 }
-                while (PendingItemDumps.TryDequeue(out var dj))
+                while (PendingJobs.TryDequeue(out var job))
                 {
-                    // 主线程执行 DumpItem (含 native 方法调用), 结果写回供 HTTP 线程轮询
+                    // 主线程执行 native 读取, 结果回填后唤醒等待的 HTTP 线程
                     try
                     {
-                        var ditem = FindItemByUid(dj.uid);
-                        DumpResults[dj.seq] = ditem == null ? null : DumpItem(ditem);
+                        job.Result = job.Work();
                     }
-                    catch (Exception e) { DumpResults[dj.seq] = null; MelonLogger.Error($"[ItemOp] dump uid={dj.uid} ex: {e.Message}"); }
+                    catch (Exception e)
+                    {
+                        job.Result = null;
+                        MelonLogger.Error($"[Job] 主线程作业异常: {e.Message}");
+                    }
+                    finally
+                    {
+                        try { job.Done.Set(); } catch { /* 作业对象已被等待方释放 */ }
+                    }
                 }
             }
             catch { /* IL2CPP 异常: 保持原值 */ }
@@ -226,71 +258,92 @@ namespace ProgressMod
         }
 
         // GET /api/mine → 列出本次会话生成且仍在跟踪的物品 (token 引用)
+        // 枚举 SpawnedItems + 读 GameItem 字段全部在主线程作业内完成: 前者与 SpawnItem 同锁域 (免并发改写
+        // 抛 InvalidOperationException), 后者避免跨线程 native 读取.
         private static void RouteMine(out object resp, out int code)
         {
-            var list = new System.Collections.Generic.List<object>();
-            foreach (var kv in SpawnedItems)
+            if (!RunOnMainThread(() =>
             {
-                var it = kv.Value;
-                if (it == null) continue;
-                try
+                var list = new System.Collections.Generic.List<object>();
+                foreach (var kv in SpawnedItems)
                 {
-                    list.Add(new
+                    var it = kv.Value;
+                    if (it == null) continue;
+                    try
                     {
-                        token = kv.Key,
-                        uid = SafeInt(() => it.uniqueId),
-                        id = it.identifier ?? "",
-                        name = it.name ?? "",
-                        count = it.unitCount,
-                        unitValue = it.unitValue,
-                        shortDescription = (it.shortDescription ?? "")
-                    });
+                        list.Add(new
+                        {
+                            token = kv.Key,
+                            uid = SafeInt(() => it.uniqueId),
+                            id = SafeStr(() => it.identifier, ""),
+                            name = SafeStr(() => it.name, ""),
+                            count = SafeInt(() => it.unitCount),
+                            unitValue = SafeLong(() => it.unitValue),
+                            shortDescription = SafeStr(() => it.shortDescription, "")
+                        });
+                    }
+                    catch { /* IL2CPP 异常: 跳过单条 */ }
                 }
-                catch { /* IL2CPP 异常: 跳过单条 */ }
+                return (object)list;
+            }, out object result))
+            {
+                resp = new { ok = true, items = result };
+                code = 200;
+                return;
             }
-            resp = new { ok = true, items = list };
-            code = 200;
+            resp = new { ok = false, err = "主线程未响应 (是否在存档?)" };
+            code = 500;
         }
 
         // GET /api/inventory → 枚举玩家全部库存物品 (主背包+柜台+文档+垃圾桶)
+        // EnumeratePlayerInventories / InvLabel / ReadInventoryItems 都触达 native 对象, 必须主线程.
         private static void RouteInventory(out object resp, out int code)
         {
-            var seen = new System.Collections.Generic.HashSet<int>();
-            var list = new System.Collections.Generic.List<object>();
-            foreach (var inv in EnumeratePlayerInventories())
+            if (!RunOnMainThread(() =>
             {
-                if (inv == null) continue;
-                string invName = InvLabel(inv);
-                foreach (var it in ReadInventoryItems(inv))
+                var seen = new System.Collections.Generic.HashSet<int>();
+                var list = new System.Collections.Generic.List<object>();
+                foreach (var inv in EnumeratePlayerInventories())
                 {
-                    if (it == null) continue;
-                    int u = 0;
-                    try { u = it.uniqueId; }
-                    catch
+                    if (inv == null) continue;
+                    string invName = InvLabel(inv);
+                    foreach (var it in ReadInventoryItems(inv))
                     {
-                        // 静默数据丢失: 读不到 uniqueId 的物品会被下面 u == 0 过滤, 整条记录从
-                        // /api/inventory 响应里消失 (网页看不到该物品). 该路径由 HTTP 请求触发,
-                        // 不在每帧热路径上, 故记警告便于定位而非静默吞掉.
-                        MelonLogger.Warning("[ItemOp] inventory: 读取 item.uniqueId 失败, 跳过该物品");
+                        if (it == null) continue;
+                        int u = 0;
+                        try { u = it.uniqueId; }
+                        catch
+                        {
+                            // 静默数据丢失: 读不到 uniqueId 的物品会被下面 u == 0 过滤, 整条记录从
+                            // /api/inventory 响应里消失 (网页看不到该物品). 该路径由 HTTP 请求触发,
+                            // 不在每帧热路径上, 故记警告便于定位而非静默吞掉.
+                            MelonLogger.Warning("[ItemOp] inventory: 读取 item.uniqueId 失败, 跳过该物品");
+                        }
+                        if (u == 0 || !seen.Add(u)) continue;
+                        list.Add(new
+                        {
+                            uid = u,
+                            id = SafeStr(() => it.identifier, ""),
+                            name = SafeStr(() => it.name, ""),
+                            count = SafeInt(() => it.unitCount),
+                            unitValue = SafeLong(() => it.unitValue),
+                            inv = invName
+                        });
                     }
-                    if (u == 0 || !seen.Add(u)) continue;
-                    list.Add(new
-                    {
-                        uid = u,
-                        id = SafeStr(() => it.identifier, ""),
-                        name = SafeStr(() => it.name, ""),
-                        count = SafeInt(() => it.unitCount),
-                        unitValue = SafeLong(() => it.unitValue),
-                        inv = invName
-                    });
                 }
+                return (object)list;
+            }, out object result))
+            {
+                resp = new { ok = true, items = result };
+                code = 200;
+                return;
             }
-            resp = new { ok = true, items = list };
-            code = 200;
+            resp = new { ok = false, err = "主线程未响应 (是否在存档?)" };
+            code = 500;
         }
 
-        // GET /api/item?uid=n → DumpItem 含 native 方法调用, 必须主线程执行:
-        // 入队 (uid, seq) 后轮询 DumpResults (最长 5s)
+        // GET /api/item?uid=n → DumpItem 含 native 方法调用, 必须主线程执行.
+        // 闭包只捕获 uid (纯值), GameItem 引用在主线程作业内解析, 不跨线程传递.
         private static void RouteItem(System.Net.HttpListenerRequest req, out object resp, out int code)
         {
             var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
@@ -301,32 +354,24 @@ namespace ProgressMod
                 code = 400;
                 return;
             }
-            long seq = System.Threading.Interlocked.Increment(ref _dumpSeq);
-            PendingItemDumps.Enqueue((uid, seq));
-            object dump = null;
-            bool got = false;
-            int waited = 0;
-            while (waited < 5000)
+            if (!RunOnMainThread(() =>
             {
-                if (DumpResults.TryRemove(seq, out dump)) { got = true; break; }
-                System.Threading.Thread.Sleep(10);
-                waited += 10;
-            }
-            if (!got)
+                var ditem = FindItemByUid(uid);
+                return ditem == null ? null : DumpItem(ditem);
+            }, out object dump))
             {
                 resp = new { ok = false, err = "dump timeout (主线程未响应, 是否在存档?)" };
                 code = 400;
+                return;
             }
-            else if (dump == null)
+            if (dump == null)
             {
                 resp = new { ok = false, err = "item not found" };
                 code = 400;
+                return;
             }
-            else
-            {
-                resp = new { ok = true, item = dump };
-                code = 200;
-            }
+            resp = new { ok = true, item = dump };
+            code = 200;
         }
 
         // GET /api/edit?uid=n&field=f&value=v → 入队属性编辑 (主线程执行)
