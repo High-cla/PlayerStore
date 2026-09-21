@@ -96,6 +96,7 @@ namespace ProgressMod
         {
             public readonly Func<object> Work;
             public readonly System.Threading.ManualResetEventSlim Done = new System.Threading.ManualResetEventSlim(false);
+            public volatile bool Abandoned;
             public object Result;
             public MainThreadJob(Func<object> work) { Work = work; }
         }
@@ -110,7 +111,7 @@ namespace ProgressMod
             PendingJobs.Enqueue(job);
             try
             {
-                if (!job.Done.Wait(timeoutMs)) { result = null; return false; }
+                if (!job.Done.Wait(timeoutMs)) { job.Abandoned = true; result = null; return false; }
                 result = job.Result;
                 return true;
             }
@@ -144,7 +145,9 @@ namespace ProgressMod
                 }
                 while (PendingJobs.TryDequeue(out var job))
                 {
-                    // 主线程执行 native 读取, 结果回填后唤醒等待的 HTTP 线程
+                    // 主线程执行 native 读取, 结果回填后唤醒等待的 HTTP 线程.
+                    // Abandoned = 请求方已超时放弃 (帧率骤降时可能发生), 跳过无谓的 native 工作.
+                    if (job.Abandoned) continue;
                     try
                     {
                         job.Result = job.Work();
@@ -192,7 +195,13 @@ namespace ProgressMod
                     var ctx = _listener.GetContext();
                     HandleRequest(ctx);
                 }
-                catch { /* 监听器停止时跳出 */ }
+                catch (Exception e)
+                {
+                    // GetContext 抛出即监听器不可恢复 (已 Dispose / 端口失效). 原实现只 catch 不 break,
+                    // 与注释「监听器停止时跳出」不符: 该路径会变成无退避的紧循环 (100% CPU 空转).
+                    MelonLogger.Warning($"[Spawn] HTTP 监听循环退出: {e.Message}");
+                    return;
+                }
             }
         }
 
