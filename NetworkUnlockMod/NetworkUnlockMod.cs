@@ -6,6 +6,12 @@ using MelonLoader;
 
 [assembly: MelonInfo(typeof(NetworkUnlockMod.Core), "NetworkUnlockMod", "0.1.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
+// 本程序集在 OnInitializeMelon 里自行 PatchAll, 故关掉 MelonLoader 的自动 PatchAll.
+// 否则同一 Prefix 会被挂两次: 自动 patch 与显式 patch 用的 Harmony owner 不同
+// (MelonLoader 用 "<Assembly.FullName>:<Name>", 本 mod 用 "local.NetworkUnlockMod"),
+// 而 Harmony 的 PatchFunctions.Add 按 owner 累加、不按方法去重 ⇒ 每次调用执行两遍.
+// 对照: PlayerStore/ProgressMod.cs 的 16 个补丁不显式 PatchAll, 正是依赖该自动机制.
+[assembly: HarmonyDontPatchAll]
 
 namespace NetworkUnlockMod
 {
@@ -44,6 +50,13 @@ namespace NetworkUnlockMod
         internal static bool Enabled => CfgEnabled.Value;
         internal static bool UnlockAll => CfgUnlockAll.Value;
 
+        /// <summary>
+        /// 上一次成功解析用的原始配置串. OnPreferencesSaved 是 MelonLoader 的全局事件
+        /// (每个 melon 都订阅, 任意 MelonPreferences.Save 都会触发全体), 启动期就可能被调用
+        /// 近十次. 用它做幂等判定, 避免重复重建 HashSet 与刷屏日志.
+        /// </summary>
+        private static string _lastRawIds = null;
+
         public override void OnInitializeMelon()
         {
             ReloadIds();
@@ -60,21 +73,34 @@ namespace NetworkUnlockMod
             }
         }
 
-        internal static void ReloadIds()
+        /// <summary>
+        /// 从配置串重建解锁 id 集合. 返回是否发生了实际变化(供调用方决定要不要打日志).
+        /// </summary>
+        internal static bool ReloadIds()
         {
-            var set = new HashSet<string>(StringComparer.Ordinal);
             var raw = CfgUnlockIds.Value ?? string.Empty;
-            foreach (var part in raw.Split(new[] { ',', ';', '|', '\n', '\r', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            if (_lastRawIds != null && raw == _lastRawIds)
+            {
+                return false; // 配置未变: 不重建, 不打日志
+            }
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var part in raw.Split(new[] { ',', ';', '|', '\n', '\r', '\t', ' ' }, StringSplitOptions.RemoveEmptyEntries))
             {
                 set.Add(part.Trim());
             }
             Ids = set;
+            _lastRawIds = raw;
+            return true;
         }
 
         public override void OnPreferencesSaved()
         {
-            ReloadIds();
-            MelonLogger.Msg($"[NetworkUnlock] 配置已更新: 解锁 {Ids.Count} 个条目");
+            // OnPreferencesSaved 是全局事件: 别的 mod 保存配置也会走到这里,
+            // 故仅在解锁列表真被改动时才重建并打日志.
+            if (ReloadIds())
+            {
+                MelonLogger.Msg($"[NetworkUnlock] 配置已更新: 解锁 {Ids.Count} 个条目");
+            }
         }
     }
 
