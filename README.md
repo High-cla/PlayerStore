@@ -31,16 +31,20 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 
 - **内嵌本地 HTTP 服务器**：`http://localhost:26880/`
 - **网页端物品浏览器**：https://high-cla.github.io/PlayerStore/items_browser.html
-  （429 物品，可按分类筛选/搜索；点击"生成 ×1" → 直接进主背包）
+  （451 物品，可按分类筛选/搜索；点击"生成 ×1" → 直接进主背包）
 - **通信链**：浏览器 fetch → 本地 HTTP → ProgressMod → 主背包
 - **生成逻辑**：
   ```csharp
-  if (!TrySpawnPrebuiltMachine(id, out item))     // 机器件: 直调原版 PreBuiltItemHelper.CreateX 工厂
-      item = ItemSpawner.Spawn(id);                // 其余: 原版生成路径
-  var inv = EmporiumEntry.Instance.invElement;     // 主背包网格
-  inv.UncheckedAccept(item);                       // 强塞入包(不做槽位预检否决)
+  if (!TrySpawnPrebuiltMachine(id, out item))       // 机器件: 直调原版 PreBuiltItemHelper.CreateX 工厂
+      if (!TrySpawnNativeLootCrate(id, out item))   // 容器类板条箱: 只在 ContainerItemDirectory 惰性注册
+          item = ItemSpawner.Spawn(id);             // 其余: 原版生成路径
+  var inv = EmporiumEntry.Instance.invElement;      // 主背包网格
+  inv.UncheckedAccept(item);                        // 强塞入包(不做槽位预检否决)
   ```
   主背包 = `EmporiumEntry.Instance.invElement`；HTTP 线程只入队，主线程消费（避免 Il2Cpp 跨线程）。
+  板条箱（`evidence_box`/`med_box`/`sec_box`/`service_box`/`eng_box`）不在静态物品表里，
+  `ItemSpawner.Spawn` 必失败，须先走 `PreBuiltItemHelper.LootCrate*` native 工厂
+  （对齐 ProbablyStolenItemManager 0.4.7 `TryCreateNativeLootCrate`）。
 
 **使用**：游戏运行 → 打开网页生成器 → 状态点变绿（连接成功）→ 搜物品 → 生成。
 
@@ -184,7 +188,7 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 
 | 文件 | 说明 |
 | --- | --- |
-| `docs/items_data_full.js` | 线上浏览器数据源（`const ITEMS = [...]`，429 项，单行 JSON） |
+| `docs/items_data_full.js` | 线上浏览器数据源（`const ITEMS = [...]`，451 项，单行 JSON） |
 | `InventorySorter/tscripts/xmod/item-catalog.json` | 权威目录记录（399 项，items 元数据） |
 | `mod/item_catalog.json` | 手维护中英表（441 项，`source_key` 指向本地化键） |
 | `InventorySorter/tscripts/all_item_ids.json` | 物品 stableId 清单 |
