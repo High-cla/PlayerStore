@@ -524,15 +524,24 @@ namespace ProgressMod
                     return;
                 }
                 if (!TryResolveInstruction(ref id)) return;
-                if (!TryCreateSpawnItem(id, out GameItem item)) return;
                 // 落点: 主背包 (EmporiumEntry.Instance.invElement, GameGridInventory). 用户裁决:
                 // 不要柜台 (PlayerStore 加权表); 无脑强塞 (MayHave 预检失败仅警告, UncheckedAccept 裁决).
                 var inv = EmporiumEntry.Instance?.invElement;
                 if (inv == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无主背包容器"); return; }
-                item.SetAmount(count);
-                if (!TryAcceptIntoMainInventory((GameInventory)inv, item, id)) return;
-                if (token > 0) { SpawnedItems[token] = item; }
-                MelonLogger.Msg($"[Spawn] 生成到主背包 {id} x{count}");
+                // 逐件独立生成, 每件数量为 1: 不用 SetAmount 堆叠, 避免物品格上标出「×N」.
+                // 每次都要新建实例 —— 同一实例只属于一个库存格.
+                GameItem first = null;
+                int done = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    if (!TryCreateSpawnItem(id, out GameItem item)) break;
+                    if (!TryAcceptIntoMainInventory((GameInventory)inv, item, id)) break;
+                    if (first == null) first = item;
+                    done++;
+                }
+                if (done == 0) return;
+                if (token > 0) { SpawnedItems[token] = first; }
+                MelonLogger.Msg($"[Spawn] 生成到主背包 {id} x{done} (各自独立, 不堆叠)");
             }
             catch (Exception e) { MelonLogger.Error($"[Spawn] ex: {e.Message}"); }
         }
