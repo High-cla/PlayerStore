@@ -122,7 +122,6 @@ input,select,textarea{font:inherit}
 .nav-item{width:100%;display:flex;align-items:center;justify-content:space-between;gap:var(--s2);
   padding:10px var(--s4);min-height:44px;border-radius:var(--r);color:var(--body);
   font-size:15px;line-height:1.5;text-align:left;border:1px solid transparent;background:none}
-@media (hover:hover){.nav-item:hover{color:var(--primary)}}
 /* 激活态: 文档用绿字 + 700, 不加底色 */
 .nav-item.active{color:var(--primary);font-weight:700}
 .nav-item .swatch{display:none}   /* 单色体系不靠色点区分分类 */
@@ -166,7 +165,6 @@ input,select,textarea{font:inherit}
   cursor:pointer;background:none}
 .card:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
 /* hover 只在有真指针的设备上生效: 触摸设备上 hover 会粘住, 且同时触发 focus 环双重高亮 */
-@media (hover:hover){.card:hover{border-color:var(--ink)}}
 .card>*{position:relative}
 /* 等高构造: 标题/英文名/ID 各锁 1 行 + 描述锁 2 行 —— 高度由结构决定, 不由数据决定
    (451 项里 137 项无描述、英文名长度差异极大, 放开就会各行不同高) */
@@ -393,6 +391,8 @@ input,select,textarea{font:inherit}
   .mini-btn:hover{color:var(--ink);border-color:var(--ink)}
   .mini-btn.danger:hover{background:var(--error);color:#fff}
   .drawer-tabs button:hover{color:var(--ink)}
+  .nav-item:hover{color:var(--primary)}
+  .card:hover{border-color:var(--ink)}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
