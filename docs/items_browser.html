@@ -806,27 +806,17 @@ async function checkServer(){
   return false;
 }
 // 生成 = 入队; /api/spawn 由 HTTP 线程处理, 回执即结果 (与云端一致).
+// 按钮文字与可用状态全程不变: 支持连续点击多次生成 (不变「已生成」, 也不 disable).
 async function spawnItem(id, btn, count){
-  const b = btn, orig = b.textContent, n = Math.max(1, Math.min(999, Math.floor(count) || 1));
-  // 原始类只在首次记录: 已生成会改写 className, 每次都记会把状态类当成原类
-  if(!b.dataset.orig) b.dataset.orig = b.className;
-  b.disabled = true;
-  const reset = ms => setTimeout(()=>{ b.className = b.dataset.orig || 'btn'; b.textContent=orig; b.disabled=false; }, ms);
+  const n = Math.max(1, Math.min(999, Math.floor(count) || 1));
   try {
     const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=' + n);
-    if(!r.ok){
-      b.className = 'btn bad'; b.textContent = '失败';
-      toast('生成失败: ' + (r.err||''), 'bad'); reset(2200);
-      return;
-    }
+    if(!r.ok){ toast('生成失败: ' + (r.err||''), 'bad'); return; }
     if(r.token) rememberToken(r.token);
-    b.className = 'btn ok'; b.textContent = '已生成';
     toast('已生成: ' + id + (n > 1 ? ' ×' + n : ''), 'ok');
     if(S.view === 'mine') refreshMine();
-    reset(1500);
   } catch(e){
-    b.className = 'btn bad'; b.textContent = '失败';
-    toast('请求失败: ' + e, 'bad'); reset(2200);
+    toast('请求失败: ' + e, 'bad');
   }
 }
 function rememberToken(t){ S.tokens.add(t); saveTokens(); $('myCount').textContent = S.tokens.size; }
