@@ -233,17 +233,16 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 - **卡片不是按钮**：卡片是 `role="group"`（无 `tabindex`），**点卡片正文 / 名称 / 描述都不开抽屉**；详情只由右下角「详情」按钮（`data-detail`）打开。**勿把 `onclick` 加回卡片本体**。
 - **卡片按钮排**：普通物品 = 生成 / 生成十个 / 详情（`data-spawn`，十个那只是 `data-count="10"`；`.foot-right` 把详情推到右侧）；`_instruction` 图纸卡 = 提示文字 + 详情。`spawnItem(id, btn, count)` 第三参是数量，直接进 `/api/spawn?...&count=n`（后端已限 1–999；省略即 1，向后兼容）。按钮复位靠 `b.dataset.orig` 记录原始类，**只在首次记录**（生成中 / 已生成会改写 `className`，每次都记会把状态类当成原类，幽灵按钮会被染成实心）。
 - **无障碍**：全站 `:focus-visible` 焦点环；**库存行**可键盘打开（Enter/Space）；分类导航重建 DOM 后会回填焦点（`renderNav` 尾部的 `focused` 逻辑，勿删）；toast `role="status" aria-live="polite"`；Escape 关抽屉；`/` 聚焦搜索。
-- **卡片等高由构造保证**（实测 481 卡全 282px）：`.card-desc` 固定 `height:50px` + `-webkit-line-clamp:2`；`.card-name` / `.card-en` / `.card-id` 各锁 1 行（`-webkit-line-clamp:1`）；`.card-cats` 有 `min-height:26px`、`.card-foot` 有 `min-height:60px`——16 个 `_instruction` 卡既无分类 chip、foot 又只有一行提示文字，不补 min-height 就会矮一截。**删这些尺寸中的任何一个，等高都会破**。
+- **卡片等高由构造保证**（实测 481 卡全 221px）：`.card-desc` 固定 `height:46px` + `-webkit-line-clamp:2`；`.card-name` / `.card-en` / `.card-id` 各锁 1 行（`-webkit-line-clamp:1`）；`.card-cats` 有 `min-height:20px`、`.card-foot` 有 `min-height:42px`——16 个 `_instruction` 卡既无分类 chip、foot 又只有一行提示文字，不补 min-height 就会矮一截。**删这些尺寸中的任何一个，等高都会破**。
+  - `.card-desc` 的 `height` 是**含 padding 与 border 的**（`box-sizing:border-box`）：`6px` padding-top + `1px` border + 2 行 × `19px` 行高 = `45px`，故取 `46px` 留 1px 余量。**行高用整数 px 而非倍数**（`1.45` 会算出 `18.85px`，在 border-box 下取整后两行放不下、第二行被切一半）。改字号时这三个数要一起重算。
 - **字体：全站单一字族 Inter**（文档 typography 规则：no serif / no display variant / **no monospace** / no italic）。通过 `@font-face` + **base64 内嵌** 400/700 两档，不是外链 `fonts/`。所以 HTML 拷到任何设备、任何目录都自带字体（实测 `document.fonts` 报 `400:loaded` / `700:loaded`，零外部字体请求）。
   - 内嵌的只有 **latin 子集**，中文回退到 `--font` 栈的 `Noto Sans SC` → `PingFang SC` → `Microsoft YaHei`（覆盖 Win/macOS/Android）。两者互补，缺一不可。
   - **不要给任何元素设 `font-family:monospace`**：`<code class="card-id">` 的浏览器默认字体就是等宽，所以 `.card-id` 必须显式写 `font-family:var(--font)`（删掉就会泄漏 monospace，静态检查 `monoLeak` 应为 0）。
   - 新增字重需同时补 `@font-face` 与 `:root --font` 栈。
-- **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。compact 下描述整块隐藏、卡片 padding 收窄（grid 列宽 340→268px），故卡片高度不再等高（紧凑模式按内容收缩，属预期）。
-- **跨设备加固**（改动样式时勿回退）：
-  - `<meta viewport>` 带 `viewport-fit=cover`——没有它 `env(safe-area-inset-*)` 恒为 0，刘海屏避让失效。顶栏与 toast 用 `max(…, env(safe-area-inset-*))` 避让安全区。
-  - **≤900px 时输入控件字号提到 16px**：iOS Safari 对 `font-size < 16px` 的输入框聚焦时会自动缩放整个页面且不还原。新增输入控件必须纳入这条规则。
-  - **所有 `:hover` 规则统一收在文件末尾的 `@media (hover:hover){…}` 块里**：触摸设备上 hover 会粘住（点过的按钮永久保持高亮），且与 `:focus-visible` 叠成双重高亮。新增 hover 规则必须写进该块，不要散落在组件旁边。
-  - 触控目标 ≥44px（实测 0 个过小目标）；`.app` 用 `100dvh` 优先 `100vh` 兜底，避免移动端地址栏收缩时溢出。
+- **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。compact 下描述整块隐藏、卡片 padding 收窄（列宽 248→196px），故卡片高度不再等高（紧凑模式按内容收缩，属预期）。实测 1440 宽下 comfortable 4 列 / compact 5 列。
+- **定位：桌面网页工具**（用户明确不做移动端适配）。卡片密度按桌面鼠标优化：`.btn` 高 `30px`（不是文档 WCAG 触控标准的 44px——那是触屏要求，鼠标用不到），列宽 `248px`，1440 宽下 4 列、一屏约 12 张。
+  - 保留的响应式只有"窄窗口"用途：`≤900px` 侧栏转横向可滚动分类条（不隐藏，分类保持可达）、抽屉满宽；`≤520px` 工具条换行。这些服务的是把桌面窗口拖窄，不是手机。
+  - **`:hover` 规则直接写**（不再包 `@media (hover:hover)`）——包它是为了防触屏 hover 粘滞，既然不做移动端就不需要这层外壳。
 - `esc()` 转义 `& < > " '` 五类；`localStorage` 键 `itemFavs` / `mySpawnTokens` / `ps_density`。
 
 - 物品中文名来源：游戏本地化包 `Probably-Stolen-ZH-*/translation/localization_master.csv`（`table=Item`, `key=item_<id>_name`）。
