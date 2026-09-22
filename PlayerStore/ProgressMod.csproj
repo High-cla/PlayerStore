@@ -50,4 +50,18 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <!-- 网页端资源内嵌: 本地启动时由 ProgressMod 自带的 HttpListener 直接服务——
+       不再依赖云端 Pages, 也不需要往游戏目录拷文件。改 docs/ 后重新构建即生效。 -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\docs\items_browser.html">
+      <LogicalName>web.items_browser.html</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\docs\items_data_full.js">
+      <LogicalName>web.items_data_full.js</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\docs\tag_zh.js">
+      <LogicalName>web.tag_zh.js</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
 </Project>

@@ -177,8 +177,10 @@ namespace ProgressMod
                 t.Start();
                 try
                 {
+                    // 打开本地页 —— 页面与数据由本 mod 的 HttpListener 同源发出, 打开即连上,
+                    // 不再依赖云端 Pages (离线可用, 也不会上传任何数据)。
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                        "https://high-cla.github.io/PlayerStore/items_browser.html")
+                        $"http://localhost:{ServerPort}/")
                     { UseShellExecute = true });
                 }
                 catch (Exception e2) { MelonLogger.Warning($"[Spawn] open browser ex: {e2.Message}"); }
@@ -223,6 +225,7 @@ namespace ProgressMod
                     else if (req.Url.AbsolutePath == "/api/edit") RouteEdit(req, out resp, out code);
                     else if (req.Url.AbsolutePath == "/api/delete") RouteDelete(req, out resp, out code);
                     else if (req.Url.AbsolutePath == "/api/health") RouteHealth(out resp, out code);
+                    else if (TryRouteWeb(req.Url.AbsolutePath, res)) return;  // 静态资源: 自行写出响应
                 }
                 catch (Exception e)
                 {
@@ -232,6 +235,66 @@ namespace ProgressMod
                 WriteJson(res, code, resp);
             }
             catch { /* IL2CPP 异常: 保持原值 */ }
+        }
+
+
+        // 静态网页资源: 由 DLL 内嵌 (csproj EmbeddedResource) —— 本地启动即可打开页面,
+        // 与 /api/* 同源, 无跨域也无网络依赖。命中则写出响应并返回 true。
+        private static readonly System.Collections.Generic.Dictionary<string, string> WebAssets
+            = new System.Collections.Generic.Dictionary<string, string>
+        {
+            { "/", "web.items_browser.html" },
+            { "/index.html", "web.items_browser.html" },
+            { "/items_browser.html", "web.items_browser.html" },
+            { "/items_data_full.js", "web.items_data_full.js" },
+            { "/tag_zh.js", "web.tag_zh.js" },
+        };
+
+        private static bool TryRouteWeb(string path, System.Net.HttpListenerResponse res)
+        {
+            if (path == "/favicon.ico")
+            {
+                // 浏览器无条件请求 favicon —— 返回 204 避免一条无意义的 404 污染 console
+                res.StatusCode = 204;
+                res.Close();
+                return true;
+            }
+            string logical;
+            if (!WebAssets.TryGetValue(path, out logical)) return false;
+            try
+            {
+                var asm = typeof(Core).Assembly;
+                using (var s = asm.GetManifestResourceStream(logical))
+                {
+                    if (s == null)
+                    {
+                        MelonLogger.Warning($"[Spawn] 内嵌资源缺失: {logical} (检查 csproj 的 EmbeddedResource)");
+                        return false;
+                    }
+                    var buf = new byte[s.Length];
+                    int off = 0;
+                    while (off < buf.Length)
+                    {
+                        int n = s.Read(buf, off, buf.Length - off);
+                        if (n <= 0) break;
+                        off += n;
+                    }
+                    res.StatusCode = 200;
+                    res.ContentType = logical.EndsWith(".js")
+                        ? "application/javascript; charset=utf-8"
+                        : "text/html; charset=utf-8";
+                    res.Headers["Cache-Control"] = "no-store";   // 本地开发: 永远取当前构建
+                    res.ContentLength64 = off;
+                    res.OutputStream.Write(buf, 0, off);
+                    res.OutputStream.Close();
+                    return true;
+                }
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Warning($"[Spawn] 静态资源写出失败 {path}: {e.Message}");
+                return false;
+            }
         }
 
         // 统一响应写出: 状态码 + JSON 头 + CORS + 内容长度 + 关闭输出流
