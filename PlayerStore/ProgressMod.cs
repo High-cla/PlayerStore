@@ -107,12 +107,26 @@ namespace ProgressMod
         }
         private static readonly System.Collections.Concurrent.ConcurrentQueue<MainThreadJob> PendingJobs =
             new System.Collections.Concurrent.ConcurrentQueue<MainThreadJob>();
+        // 主线程作业队列长度上限(背压阈值). 32: 单帧处理 32 个纯读作业耗时远低于 5s 超时窗口,
+        // 又能吸收网页端并发的 /api/mine + /api/inventory + /api/item 组合请求.
+        private const int MaxPendingJobs = 32;
 
-        // HTTP 线程调用: 入队 + 等主线程执行 (最长 timeoutMs). 返回 false = 主线程未响应
+        // HTTP 线程调用: 入队 + 等主线程执行 (最长 timeoutMs). 返回 false = 未响应 (过载/超时由 overloaded 区分)
         // (失焦暂停 / 大存档卡帧 / 未进存档 都会超时, 故不在此断言具体成因).
         // 事件驱动 (非轮询) ⇒ 无 10ms 量化延迟, 且无「超时后结果残留」的字典泄漏 (作业对象由本线程独占持有).
-        private static bool RunOnMainThread(Func<object> work, out object result, int timeoutMs = 5000)
+        private static bool RunOnMainThread(Func<object> work, out object result, int timeoutMs, out bool overloaded)
         {
+            // C 方案(背压): 队列已满 = 服务端过载, 立即拒绝而不入队 —— 入队只会让超时更晚发生并
+            // 加重单帧卡顿. 调用方据此回 503, 前端可退避重试.
+            // 用 PendingJobs.Count 而非自维护计数: 不存在「忘记递减 ⇒ 永久 503」的泄漏面. 该值是
+            // 近似量(并发同时入队时可短暂超出上限), 对背压语义无影响.
+            overloaded = PendingJobs.Count >= MaxPendingJobs;
+            if (overloaded)
+            {
+                result = null;
+                MelonLogger.Warning("[Spawn] 作业队列已满 (" + PendingJobs.Count + "/" + MaxPendingJobs + "), 拒绝请求");
+                return false;
+            }
             var job = new MainThreadJob(work);
             PendingJobs.Enqueue(job);
             try
@@ -374,14 +388,15 @@ namespace ProgressMod
                 }
                 foreach (var k in dead) SpawnedItems.Remove(k);
                 return (object)list;
-            }, out object result))
+            }, out object result, 5000, out bool overloaded))
             {
                 resp = new { ok = true, items = result };
                 code = 200;
                 return;
             }
-            resp = new { ok = false, err = "主线程未响应 (待处理作业 " + PendingJobs.Count + ")" };
-            code = 500;
+            // 过载(队列已满, 可退避重试)与超时(主线程真的没响应)是两种失败, 用状态码区分.
+            resp = new { ok = false, err = overloaded ? "server busy (队列已满 " + PendingJobs.Count + "/" + MaxPendingJobs + "), 请稍后重试" : "主线程未响应 (待处理作业 " + PendingJobs.Count + ")" };
+            code = overloaded ? 503 : 500;
         }
 
         // GET /api/inventory → 枚举玩家全部库存物品 (主背包+柜台+文档+垃圾桶)
@@ -421,14 +436,15 @@ namespace ProgressMod
                     }
                 }
                 return (object)list;
-            }, out object result))
+            }, out object result, 5000, out bool overloaded))
             {
                 resp = new { ok = true, items = result };
                 code = 200;
                 return;
             }
-            resp = new { ok = false, err = "主线程未响应 (待处理作业 " + PendingJobs.Count + ")" };
-            code = 500;
+            // 过载(队列已满, 可退避重试)与超时(主线程真的没响应)是两种失败, 用状态码区分.
+            resp = new { ok = false, err = overloaded ? "server busy (队列已满 " + PendingJobs.Count + "/" + MaxPendingJobs + "), 请稍后重试" : "主线程未响应 (待处理作业 " + PendingJobs.Count + ")" };
+            code = overloaded ? 503 : 500;
         }
 
         // GET /api/item?uid=n → DumpItem 含 native 方法调用, 必须主线程执行.
@@ -447,10 +463,12 @@ namespace ProgressMod
             {
                 var ditem = FindItemByUid(uid);
                 return ditem == null ? null : DumpItem(ditem);
-            }, out object dump))
+            }, out object dump, 5000, out bool overloaded))
             {
-                resp = new { ok = false, err = "dump timeout (主线程未响应, 待处理作业 " + PendingJobs.Count + ")" };
-                code = 400;
+                resp = new { ok = false, err = overloaded
+                    ? "server busy (队列已满 " + PendingJobs.Count + "/" + MaxPendingJobs + "), 请稍后重试"
+                    : "dump timeout (主线程未响应, 待处理作业 " + PendingJobs.Count + ")" };
+                code = overloaded ? 503 : 400;
                 return;
             }
             if (dump == null)
@@ -1441,47 +1459,38 @@ namespace ProgressMod
             catch (Exception e) { detail = e.Message; return false; }
         }
 
-        // mod 引擎: 命名表 -> 游戏表 ID (TableMaster const 优先, 同名 ID 回退)
+        // mod 引擎: 命名表键 -> TableMaster const 取值器 (键集合唯一真源, 未知键 = 不在表中)
+        private static readonly System.Collections.Generic.Dictionary<string, Func<string>> NamedTableIds =
+            new System.Collections.Generic.Dictionary<string, Func<string>>(StringComparer.Ordinal)
+        {
+            { "junk", () => TableMaster.junkTable },
+            { "access_card", () => TableMaster.accessCardTable },
+            { "all_module", () => TableMaster.allModuleTable },
+            { "makeshift_weapon", () => TableMaster.makeshiftWeaponTable },
+            { "material", () => TableMaster.materialTable },
+            { "household", () => TableMaster.householdTable },
+            { "packed_food", () => TableMaster.packedFoodTable },
+            { "t1module", () => TableMaster.t1moduleTable },
+            { "t2module", () => TableMaster.t2moduleTable },
+            { "tool", () => TableMaster.toolTable },
+            { "medical", () => TableMaster.medicalTable },
+        };
+
+        // mod 引擎: 命名表 -> 游戏表 ID (TableMaster const 优先, 同名 ID 回退; 未知键返回 "")
         private static string ResolveNamedTableId(string tableKey)
         {
+            if (tableKey == null) return ""; // 与 switch 版一致: null 键返回空, 不抛 ArgumentNullException
+            if (!NamedTableIds.TryGetValue(tableKey, out Func<string> resolve)) return "";
             try
             {
                 if (TableMaster.Instance != null)
                 {
-                    string text = tableKey switch
-                    {
-                        "junk" => TableMaster.junkTable,
-                        "access_card" => TableMaster.accessCardTable,
-                        "all_module" => TableMaster.allModuleTable,
-                        "makeshift_weapon" => TableMaster.makeshiftWeaponTable,
-                        "material" => TableMaster.materialTable,
-                        "household" => TableMaster.householdTable,
-                        "packed_food" => TableMaster.packedFoodTable,
-                        "t1module" => TableMaster.t1moduleTable,
-                        "t2module" => TableMaster.t2moduleTable,
-                        "tool" => TableMaster.toolTable,
-                        "medical" => TableMaster.medicalTable,
-                        _ => "",
-                    };
+                    string text = resolve();
                     if (!string.IsNullOrWhiteSpace(text)) return text;
                 }
             }
             catch { /* IL2CPP 异常: 保持原值 */ }
-            return tableKey switch
-            {
-                "junk" => "junk",
-                "access_card" => "access_card",
-                "all_module" => "all_module",
-                "makeshift_weapon" => "makeshift_weapon",
-                "material" => "material",
-                "household" => "household",
-                "packed_food" => "packed_food",
-                "t1module" => "t1module",
-                "t2module" => "t2module",
-                "tool" => "tool",
-                "medical" => "medical",
-                _ => "",
-            };
+            return tableKey;
         }
 
         // 图纸 -> 实物物品 映射 (布局目录里的机器/家具)

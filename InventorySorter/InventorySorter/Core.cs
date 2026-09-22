@@ -1309,13 +1309,13 @@ public class Core : MelonMod
 			foreach (GameItem item2 in buckets[item])
 			{
 				// ① 带内(带底 num)落位; 支撑用自支撑版(自身格互撑 ⇒ 厚件/空网格首件可放)
-				bool ok = PlaceInto(occ, grid, masks[item2], num, out int bx, out int by, out int bo, out int bottom, rects, selfSupport: true);
+				bool ok = PlaceInto(occ, grid, masks[item2], num, rects, true, out int bx, out int by, out int bo, out int bottom);
 				bool fromFallback = false;
 				if (!ok)
 				{
 					// ② 增量 ShrinkRects 切块会丢可用空间(近满包尤甚) ⇒ 重算整个 MFR 池再试
 					rects = FindFreeRects(occ, W, H);
-					ok = PlaceInto(occ, grid, masks[item2], num, out bx, out by, out bo, out bottom, rects, selfSupport: true);
+					ok = PlaceInto(occ, grid, masks[item2], num, rects, true, out bx, out by, out bo, out bottom);
 				}
 				if (!ok)
 				{
@@ -2258,7 +2258,7 @@ public class Core : MelonMod
 		List<(int x, int y, int w, int h)> rects = FindFreeRects(occ, W, H);
 		foreach (GameItem item in order)
 		{
-			if (!PlaceInto(occ, grid, masks[item], 0, out var bx, out var by, out var bo, out var bottom, rects))
+			if (!PlaceInto(occ, grid, masks[item], 0, rects, false, out var bx, out var by, out var bo, out var bottom))
 			{
 				return false;
 			}
@@ -2776,9 +2776,9 @@ public class Core : MelonMod
 		}
 	}
 
-	private static bool PlaceInto(bool[,] occ, GridContext grid, ItemMask m, int minY, out int bx, out int by, out int bo, out int bottom, List<(int x, int y, int w, int h)> cachedRects = null, bool selfSupport = false)
+	private static bool PlaceInto(bool[,] occ, GridContext grid, ItemMask m, int minY, List<(int x, int y, int w, int h)> cachedRects, bool selfSupport, out int bx, out int by, out int bo, out int bottom)
 	{
-		// out 顺序 (bx, by, bo, bottom) 与语义保持不动(4 个调用点依赖).
+		// out 顺序 (bx, by, bo, bottom) 与语义保持不动(3 个调用点依赖).
 		List<(int x, int y, int w, int h)> rects = cachedRects ?? FindFreeRects(occ, grid.W, grid.H);
 		if (!TryPickPlaceSlot(rects, occ, grid, m, minY, selfSupport, out bx, out by, out bo))
 		{
