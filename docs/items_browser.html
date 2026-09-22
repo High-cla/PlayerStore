@@ -2,245 +2,329 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Probably Stolen 物品浏览器</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Probably Stolen — 物品工作台</title>
 <style>
 /* ============================================================
-   设计令牌 — 颜色/间距/圆角/字号/层级/类别身份色的唯一定义处
-   改配色只改这里。文本色按 WCAG AA 校准 (小字 >=4.5, UI 元素 >=3.0)
+   设计系统 — App-shell 工作台 (非文档流)
+   这是工具不是文档: 固定外壳 + 分栏独立滚动, 功能各有其位。
+   层级: topbar(60) / sidebar(248) / content(auto) / drawer(480 覆盖层)
+   令牌是本文件配色与尺度的唯一定义处, 改这里即可整体换肤。
    ============================================================ */
 :root{
-  /* 背景层级 */
-  --bg:#12141a; --bg-raised:#1a1d26; --bg-side:#181b23; --bg-panel:#171a22;
-  --bg-card:#1c2029; --bg-input:#212530; --bg-badge:#2a2e3a; --bg-hover:#232834;
-  --bg-accent:#2b4a6b; --bg-accent-hi:#345d85;
-  --bg-violet:#4a3f8e; --bg-violet-hi:#5a4fae; --bg-violet-alt:#6c5ce7;
-  --bg-green:#2b7a4b; --bg-green-hi:#33915c;
-  --bg-danger:#c62828; --bg-danger-soft:#3a1f2b; --bg-danger-deep:#7a2432;
-  --bg-loc:#241f3a;
-  /* 前景 */
-  --fg:#e8eaf0; --fg-strong:#eef2f8; --fg-dim:#aeb6c4; --fg-muted:#8a92a0;
-  --fg-para:#8f95a1; --fg-faint:#9096a0; --fg-en:#8892a2; --fg-id:#5c93c2;
-  --fg-tag:#9aa4b4; --fg-cat:#b8c0cc; --fg-accent:#8ecff7;
-  --fg-on-green:#d9ffe8; --fg-on-violet:#ddd6ff;
-  /* 描边与语义 */
-  --line:#2a2e3a; --line-input:#333a48; --line-accent:#5a9fd4;
-  --ok:#4caf50; --bad:#f44336; --warn:#f0b840;
-  --dot-idle:#686868; --fav-idle:#646b77; --fg-on-dark:#fff;
-  --tag-instr-bg:#876b3a;
-  /* 间距 / 圆角 / 字号 / 层级 */
-  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
-  --r-1:5px; --r-2:8px; --r-3:10px; --r-4:14px;
-  --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:14px; --fs-xl:16px; --fs-2xl:20px;
-  --z-header:10; --z-detail:20; --z-inspector:50; --z-toast:99;
-  --font:'Segoe UI','Microsoft YaHei UI',system-ui,sans-serif;
-  --font-mono:ui-monospace,Consolas,'Cascadia Mono',monospace;
-  /* 类别身份色 */
-  --c-access_cards:#f0b840;
-  --c-ammunition_explosives:#e8724c;
-  --c-armor:#6f9dd8;
-  --c-chemicals:#7fc98a;
-  --c-containers:#c08a5e;
-  --c-currency:#e6c35c;
-  --c-documents:#a8b4c8;
-  --c-energy_cells:#5fd0d8;
-  --c-equipment:#8ab4f8;
-  --c-farming:#8fc76a;
-  --c-food_drink:#e8946a;
-  --c-goods:#d8a24c;
-  --c-husbandry:#b9a06a;
-  --c-lottery:#e07ab8;
-  --c-machines_storage:#9aa8bc;
-  --c-materials:#a89a7c;
-  --c-medical:#e97a8a;
-  --c-medical_chemical:#c98ad8;
-  --c-misc:#98a2b0;
-  --c-modules:#7ab8e0;
-  --c-supplies:#8fd0a8;
-  --c-tools:#b0a8d8;
-  --c-weapons:#d8785c;
-  --c-weapon_mods:#c98a6a;
-  --c-random_drop:#f0b840;
-  --c-prebuilt:#9d8cf0;
-  --c-new_items:#6ee7a8;
+  /* 表面与描边 */
+  --bg:#0d0f13; --surface:#14171d; --surface-2:#1a1e26; --surface-3:#212630;
+  --border:#262c37; --border-strong:#333b49;
+  /* 前景 — 均对 surface-2 校准过 AA (正文与次要文字 >=4.5) */
+  --fg:#e6e9ef; --fg2:#a7b0be; --fg3:#8b95a5;
+  --accent:#5aa9f0; --accent-ink:#0b1622; --accent-soft:rgba(90,169,240,.13);
+  --ok:#3ecf7a; --warn:#e8b13a; --bad:#ef5a5a;
+  --ok-soft:rgba(62,207,122,.13); --warn-soft:rgba(232,177,58,.13); --bad-soft:rgba(239,90,90,.13);
+  /* 尺度 */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px;
+  --r1:6px; --r2:10px; --r3:14px;
+  --t2xs:11px; --txs:12px; --tsm:13px; --tmd:14px; --tlg:16px; --txl:20px; --t2xl:26px;
+  /* 布局 */
+  --topbar:60px; --nav:248px; --drawer:480px; --z-drawer:40; --z-toast:90;
+  --font:'Segoe UI','Microsoft YaHei UI',system-ui,-apple-system,sans-serif;
+  --mono:ui-monospace,'Cascadia Mono',Consolas,monospace;
+  /* 类别身份色 — 只作小面积点缀 (色点/描边), 不作大面积背景, 故无对比度约束 */
+  --c-access_cards:#f0b840; --c-ammunition_explosives:#e8724c; --c-armor:#6f9dd8;
+  --c-chemicals:#7fc98a; --c-containers:#c08a5e; --c-currency:#e6c35c;
+  --c-documents:#a8b4c8; --c-energy_cells:#5fd0d8; --c-equipment:#8ab4f8;
+  --c-farming:#8fc76a; --c-food_drink:#e8946a; --c-goods:#d8a24c;
+  --c-husbandry:#b9a06a; --c-lottery:#e07ab8; --c-machines_storage:#9aa8bc;
+  --c-materials:#a89a7c; --c-medical:#e97a8a; --c-medical_chemical:#c98ad8;
+  --c-misc:#98a2b0; --c-modules:#7ab8e0; --c-supplies:#8fd0a8;
+  --c-tools:#b0a8d8; --c-weapons:#d8785c; --c-weapon_mods:#c98a6a;
+  --c-random_drop:#f0b840; --c-prebuilt:#9d8cf0; --c-new_items:#6ee7a8;
 }
 *{margin:0;padding:0;box-sizing:border-box}
-/* 全站键盘焦点环 (含 role=button 的卡片/库存行); 鼠标点击不显示 */
-:focus-visible{outline:2px solid var(--fg-accent);outline-offset:2px;border-radius:var(--r-1)}
-body{font-family:var(--font);background:var(--bg);color:var(--fg);min-height:100vh}
-.push-right{margin-left:auto}
-.w-120{width:120px}.w-150{width:150px}
-.is-hidden{display:none!important}
-header{padding:var(--sp-5) 24px;background:var(--bg-raised);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:var(--z-header)}
-header h1{font-size:var(--fs-2xl);color:var(--fg-accent)}
-header p{font-size:var(--fs-md);color:var(--fg-muted);margin-top:var(--sp-1)}
-header b{color:var(--fg-dim)}
-.search-bar{display:flex;gap:var(--sp-3);margin-top:var(--sp-3);flex-wrap:wrap;align-items:center}
-.search-bar input[type=text]{flex:1;min-width:260px;padding:10px 14px;border-radius:var(--r-2);border:1px solid var(--line-input);background:var(--bg-input);color:var(--fg);font-size:var(--fs-lg)}
-.search-bar input:focus{border-color:var(--line-accent)}
-.count-badge{background:var(--bg-badge);padding:var(--sp-2) 14px;border-radius:var(--r-2);font-size:var(--fs-md);color:var(--fg-dim)}
-main{display:flex;min-height:calc(100vh - 140px)}
-aside{width:240px;padding:var(--sp-4);border-right:1px solid var(--line);background:var(--bg-side);flex-shrink:0}
-aside h3{font-size:var(--fs-md);color:var(--fg-accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px}
-.cat-list{display:flex;flex-direction:column;gap:2px}
-.cat-btn{display:flex;justify-content:space-between;align-items:center;padding:var(--sp-2) 10px;border-radius:var(--r-1);color:var(--fg-cat);cursor:pointer;font-size:var(--fs-md);border:none;background:none;text-align:left;width:100%}
-.cat-btn:hover{background:var(--bg-hover);color:var(--fg-on-dark)}
-.cat-btn.active{color:var(--fg-accent);font-weight:600;background:var(--bg-accent)}
-@supports (background:color-mix(in srgb,red 20%,blue)){.cat-btn.active{background:color-mix(in srgb,var(--cat,var(--fg-accent)) 22%,var(--bg-raised));color:color-mix(in srgb,var(--cat,var(--fg-accent)) 88%,#fff)}}
-.cat-btn .n{background:var(--bg-badge);padding:2px var(--sp-2);border-radius:var(--r-4);font-size:var(--fs-xs);color:var(--fg-muted)}
-.cat-btn.active .n{background:transparent;color:color-mix(in srgb,var(--cat,var(--fg-accent)) 88%,#fff)}
-@supports not (background:color-mix(in srgb,red 20%,blue)){.cat-btn.active .n{color:var(--fg-accent)}}
-#grid{flex:1;padding:var(--sp-5);display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:var(--sp-3);align-content:start}
-.card{background:var(--bg-card);border:1px solid var(--line);border-radius:var(--r-3);padding:14px;cursor:pointer;transition:transform .1s,border-color .1s;position:relative}
-.card:hover{transform:translateY(-2px);border-color:var(--line-accent)}
-.fav-btn{position:absolute;top:var(--sp-2);right:var(--sp-2);background:none;border:none;font-size:var(--fs-2xl);cursor:pointer;color:var(--fav-idle);line-height:1;padding:var(--sp-1);z-index:2}
-.fav-btn:hover{color:var(--warn)}
-.fav-btn.on{color:var(--warn);text-shadow:0 0 6px rgba(240,184,64,.5)}
-.card .nm{font-size:var(--fs-lg);font-weight:600;color:var(--fg-strong)}
-.card .nm-en{font-size:var(--fs-sm);color:var(--fg-en);margin-top:2px}
-.card .cat{display:flex;flex-wrap:wrap;gap:var(--sp-1);margin-top:var(--sp-2)}
-.card .tag{font-size:var(--fs-xs);padding:2px var(--sp-2);border-radius:var(--r-4);background:var(--bg-badge);color:var(--fg-tag)}
-.tag-instr{background:var(--tag-instr-bg);color:var(--fg-on-dark)}
-.card .id{font-size:var(--fs-xs);color:var(--fg-id);margin-top:var(--sp-2);font-family:var(--font-mono)}
-.card .desc{font-size:var(--fs-sm);color:var(--fg-para);margin-top:6px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card .acts{margin-top:10px}
-.detail{position:fixed;right:var(--sp-5);bottom:var(--sp-5);max-width:420px;background:var(--bg-input);border:1px solid var(--line-accent);border-radius:var(--r-3);padding:var(--sp-4);box-shadow:0 var(--sp-2) 30px rgba(0,0,0,.5);display:none;z-index:var(--z-detail)}
-.detail.show{display:block}
-.detail h2{font-size:var(--fs-xl);color:var(--fg-on-dark)}
-.detail .en{color:var(--fg-en);font-size:var(--fs-md);margin:var(--sp-1) 0 10px}
-.detail .desc-full{font-size:var(--fs-md);line-height:1.6;color:var(--fg-cat);margin-bottom:var(--sp-3);white-space:pre-wrap}
-.detail .meta{font-size:var(--fs-sm);color:var(--fg-muted);display:grid;gap:var(--sp-1)}
-.detail .meta b{color:var(--fg-accent);font-weight:500}
-#copyId{background:var(--bg-accent);border:none;color:var(--fg-accent);padding:var(--sp-2) var(--sp-4);border-radius:var(--r-2);cursor:pointer;margin-top:var(--sp-3);font-size:var(--fs-md)}
-#copyId:hover{background:var(--bg-accent-hi)}
-#closeDetail{position:absolute;top:10px;right:14px;background:none;border:none;color:var(--fg-muted);font-size:var(--fs-xl);cursor:pointer}
-.empty{grid-column:1/-1;text-align:center;color:var(--fg-faint);padding:60px;font-size:15px}
-.server-status{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-sm);color:var(--fg-muted);margin-top:var(--sp-2)}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--dot-idle);display:inline-block;flex-shrink:0}
-.dot.on{background:var(--ok)}.dot.off{background:var(--bad)}.dot.warn{background:var(--warn)}
-.spawn-btn{background:var(--bg-green);border:none;color:var(--fg-on-green);padding:6px 14px;border-radius:var(--r-2);cursor:pointer;font-size:var(--fs-sm);font-weight:600}
-.spawn-btn:hover{background:var(--bg-green-hi)}
-.spawn-btn:disabled{opacity:.6;cursor:progress}
-.spawn-btn.done{background:var(--ok)}
-.spawn-btn.err{background:var(--bg-danger)}
-.toast{position:fixed;top:var(--sp-5);right:var(--sp-5);background:var(--bg-input);border:1px solid var(--line-accent);color:var(--fg);padding:var(--sp-3) 18px;border-radius:var(--r-3);font-size:var(--fs-md);z-index:var(--z-toast);opacity:0;transition:opacity .3s;pointer-events:none;max-width:min(420px,90vw)}
-.toast.show{opacity:1}
+[hidden]{display:none!important}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r1)}
+html,body{height:100%}
+body{font:var(--tmd)/1.5 var(--font);background:var(--bg);color:var(--fg);overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,select,textarea{font:inherit}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#2e3644;border-radius:99px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:#3d4759;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- 外壳 ---------- */
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ---------- 顶栏: 只放全局项 ---------- */
+.topbar{height:var(--topbar);flex-shrink:0;display:flex;align-items:center;gap:var(--s4);
+  padding:0 var(--s4);background:var(--surface);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:var(--s2);flex-shrink:0}
+.brand-mark{width:28px;height:28px;border-radius:7px;background:var(--accent-soft);color:var(--accent);
+  display:grid;place-items:center;font:600 var(--tsm)/1 var(--mono);letter-spacing:.5px}
+.brand-text{font-weight:600;font-size:var(--tlg);white-space:nowrap}
+.search-wrap{flex:1;max-width:560px;position:relative}
+.search-wrap input{width:100%;height:36px;padding:0 38px 0 12px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--r2);color:var(--fg);font-size:var(--tmd)}
+.search-wrap input::placeholder{color:var(--fg3)}
+.search-wrap input:focus{outline:none;border-color:var(--accent);background:var(--bg)}
+.search-wrap kbd{position:absolute;right:9px;top:50%;transform:translateY(-50%);pointer-events:none;
+  font:var(--t2xs)/1 var(--mono);color:var(--fg3);background:var(--surface-3);
+  border:1px solid var(--border);border-radius:4px;padding:3px 6px}
+.status{display:flex;align-items:center;gap:var(--s2);font-size:var(--txs);color:var(--fg2);
+  margin-left:auto;white-space:nowrap;max-width:340px;overflow:hidden}
+.status span:last-child{overflow:hidden;text-overflow:ellipsis}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--fg3);flex-shrink:0}
+.dot.on{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+.dot.off{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+.dot.warn{background:var(--warn);box-shadow:0 0 0 3px var(--warn-soft)}
+.icon-btn{width:34px;height:34px;border-radius:var(--r1);display:grid;place-items:center;
+  color:var(--fg2);font-size:var(--tlg);flex-shrink:0}
+.icon-btn:hover{background:var(--surface-3);color:var(--fg)}
+.icon-btn.on{background:var(--accent-soft);color:var(--accent)}
+
+/* ---------- 主体分栏 ---------- */
+.body{flex:1;display:flex;min-height:0}
+
+/* ---------- 左栏分类导航 ---------- */
+.sidebar{width:var(--nav);flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;min-height:0}
+.nav-scroll{flex:1;overflow-y:auto;padding:var(--s3) var(--s2) var(--s5)}
+.nav-pinned{display:flex;flex-direction:column;gap:2px;padding-bottom:var(--s2);
+  border-bottom:1px solid var(--border);margin-bottom:var(--s3)}
+.nav-group{margin-bottom:var(--s3)}
+.nav-group-t{font-size:var(--t2xs);font-weight:600;letter-spacing:.08em;color:var(--fg3);
+  text-transform:uppercase;padding:var(--s2) var(--s3) var(--s1)}
+.nav-item{width:100%;display:flex;align-items:center;gap:var(--s2);padding:7px var(--s3);
+  border-radius:var(--r1);color:var(--fg2);font-size:var(--tsm);text-align:left}
+.nav-item:hover{background:var(--surface-2);color:var(--fg)}
+.nav-item.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.nav-item .swatch{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.nav-item .label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-item .n{font:var(--t2xs)/1 var(--mono);color:var(--fg3);background:var(--surface-3);
+  padding:3px 6px;border-radius:99px;min-width:24px;text-align:center}
+.nav-item.active .n{background:transparent;color:var(--accent);padding-right:0}
+
+/* ---------- 内容区 ---------- */
+.content{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.toolbar{height:52px;flex-shrink:0;display:flex;align-items:center;gap:var(--s4);
+  padding:0 var(--s5);border-bottom:1px solid var(--border);background:var(--surface)}
+.views{display:flex;gap:2px;background:var(--surface-2);padding:3px;border-radius:var(--r2)}
+.view-tab{padding:6px 14px;border-radius:7px;font-size:var(--tsm);color:var(--fg2);
+  display:flex;align-items:center;gap:6px;white-space:nowrap}
+.view-tab:hover{color:var(--fg)}
+.view-tab.active{background:var(--surface-3);color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.view-tab .tab-n{font:var(--t2xs)/1 var(--mono);color:var(--fg3);background:var(--bg);
+  padding:3px 6px;border-radius:99px;min-width:22px;text-align:center}
+.view-tab.active .tab-n{color:var(--accent)}
+.toolbar-right{margin-left:auto;display:flex;align-items:center;gap:var(--s3)}
+.text-btn{padding:6px 12px;border-radius:var(--r1);color:var(--fg2);font-size:var(--tsm);
+  border:1px solid var(--border)}
+.text-btn:hover{background:var(--surface-2);color:var(--fg);border-color:var(--border-strong)}
+.result-count{font:var(--tsm)/1 var(--mono);color:var(--fg3);white-space:nowrap}
+.view-extra{flex-shrink:0;padding:var(--s3) var(--s5);border-bottom:1px solid var(--border);background:var(--surface)}
+.view-extra:empty{display:none}
+.extra-row{display:flex;align-items:center;gap:var(--s3)}
+.extra-row input{flex:1;max-width:340px;height:32px;padding:0 10px;background:var(--surface-2);
+  border:1px solid var(--border);border-radius:var(--r1);color:var(--fg);font-size:var(--tsm)}
+.extra-row input:focus{outline:none;border-color:var(--accent)}
+.scroll-area{flex:1;overflow-y:auto;min-height:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:var(--s3);
+  padding:var(--s5);align-content:start}
+.grid.compact{grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:var(--s2);padding:var(--s3)}
+
+/* ---------- 卡片 ---------- */
+.card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);
+  padding:var(--s4);cursor:pointer;display:flex;flex-direction:column;gap:var(--s2);
+  transition:border-color .12s,background .12s}
+.card:hover{border-color:var(--border-strong);background:var(--surface-2)}
+.card-name{font-size:var(--tmd);font-weight:600;color:var(--fg);padding-right:24px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-en{font-size:var(--txs);color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-cats{display:flex;flex-wrap:wrap;gap:5px}
+.cat-chip{display:inline-flex;align-items:center;gap:5px;font-size:var(--t2xs);color:var(--fg2);
+  background:var(--surface-3);padding:3px 8px;border-radius:99px}
+.cat-chip i{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.card-id{font:var(--t2xs)/1.4 var(--mono);color:var(--fg3);background:var(--surface-2);
+  padding:3px 7px;border-radius:4px;align-self:flex-start;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-desc{font-size:var(--txs);color:var(--fg2);line-height:1.45;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.9em}
+.card-foot{margin-top:auto;padding-top:var(--s1);display:flex;align-items:center;gap:var(--s2)}
+.fav{position:absolute;top:9px;right:9px;width:26px;height:26px;border-radius:var(--r1);
+  display:grid;place-items:center;font-size:15px;color:var(--fg3);z-index:2}
+.fav:hover{background:var(--surface-3);color:var(--warn)}
+.fav.on{color:var(--warn)}
+.btn{height:30px;padding:0 14px;border-radius:var(--r1);font-size:var(--txs);font-weight:600;
+  background:var(--accent);color:var(--accent-ink);display:inline-flex;align-items:center;gap:6px}
+.btn:hover{filter:brightness(1.1)}
+.btn:disabled{opacity:.6;cursor:progress}
+.btn.ok{background:var(--ok)}
+.btn.bad{background:var(--bad);color:#fff}
+.btn.ghost{background:transparent;color:var(--fg2);border:1px solid var(--border);font-weight:500}
+.btn.ghost:hover{background:var(--surface-2);color:var(--fg);border-color:var(--border-strong)}
+.btn.danger{background:var(--bad-soft);color:var(--bad)}
+.btn.danger:hover{background:var(--bad);color:#fff}
+.pill-note{font-size:var(--t2xs);color:var(--fg3);display:inline-flex;align-items:center;gap:5px}
+.grid.compact .card{padding:10px;gap:5px}
+.grid.compact .card-name{font-size:var(--tsm)}
+.grid.compact .card-desc{display:none}
+.grid.compact .card-id{font-size:10px}
+
+/* ---------- 行列表 (库存 / 我的生成) ---------- */
+.row-list{padding:var(--s5);display:flex;flex-direction:column;gap:6px}
+.row-list.compact{padding:var(--s3);gap:4px}
+.row{display:flex;align-items:center;gap:var(--s3);background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r2);padding:var(--s3) var(--s4);cursor:pointer;text-align:left;width:100%}
+.row:hover{border-color:var(--border-strong);background:var(--surface-2)}
+.row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.row-name{font-size:var(--tsm);font-weight:600;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-sub{font:var(--t2xs)/1.4 var(--mono);color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-nums{display:flex;gap:var(--s3);flex-shrink:0;font:var(--txs)/1 var(--mono);color:var(--fg2)}
+.row-loc{font-size:var(--t2xs);color:var(--accent);background:var(--accent-soft);
+  padding:3px 9px;border-radius:99px;flex-shrink:0;white-space:nowrap}
+.row-acts{display:flex;gap:6px;flex-shrink:0}
+.mini-btn{height:26px;padding:0 10px;border-radius:var(--r1);font-size:var(--t2xs);
+  background:var(--surface-3);color:var(--fg2)}
+.mini-btn:hover{background:var(--accent);color:var(--accent-ink)}
+.mini-btn.danger{background:var(--bad-soft);color:var(--bad)}
+.mini-btn.danger:hover{background:var(--bad);color:#fff}
+.empty{grid-column:1/-1;text-align:center;color:var(--fg3);padding:64px var(--s5);font-size:var(--tsm)}
+.row-list .empty{grid-column:auto}
+.empty b{color:var(--fg2)}
+
+/* ---------- 右侧抽屉: 图鉴信息 + 库存实例编辑的唯一入口 ---------- */
+.scrim{position:fixed;inset:0;background:rgba(5,7,11,.55);opacity:0;pointer-events:none;
+  transition:opacity .16s;z-index:var(--z-drawer)}
+.scrim.show{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:var(--drawer);max-width:100vw;background:var(--surface);
+  border-left:1px solid var(--border-strong);z-index:calc(var(--z-drawer) + 1);display:flex;flex-direction:column;
+  transform:translateX(100%);transition:transform .18s ease;box-shadow:-16px 0 40px rgba(0,0,0,.4)}
+.drawer.show{transform:translateX(0)}
+.drawer-head{flex-shrink:0;display:flex;align-items:flex-start;gap:var(--s3);padding:var(--s4) var(--s5);
+  border-bottom:1px solid var(--border)}
+.dh-main{flex:1;min-width:0}
+.dh-main h2{font-size:var(--tlg);font-weight:600;color:var(--fg);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.dh-sub{font:var(--txs)/1.5 var(--mono);color:var(--fg3);margin-top:3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drawer-tabs{flex-shrink:0;display:flex;gap:2px;padding:var(--s2) var(--s4) 0;border-bottom:1px solid var(--border)}
+.drawer-tabs:empty{display:none}
+.drawer-tabs button{padding:8px 14px;font-size:var(--tsm);color:var(--fg3);border-bottom:2px solid transparent;
+  margin-bottom:-1px}
+.drawer-tabs button:hover{color:var(--fg2)}
+.drawer-tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.drawer-body{flex:1;overflow-y:auto;padding:var(--s4) var(--s5)}
+.drawer-foot{flex-shrink:0;display:flex;align-items:center;gap:var(--s2);padding:var(--s3) var(--s5);
+  border-top:1px solid var(--border);background:var(--surface-2)}
+.drawer-foot:empty{display:none}
+.pane{display:none}
+.pane.show{display:block}
+.sec-t{font-size:var(--txs);font-weight:600;color:var(--fg2);letter-spacing:.04em;
+  margin:var(--s4) 0 var(--s2);padding-bottom:6px;border-bottom:1px solid var(--border)}
+.sec-t:first-child{margin-top:0}
+.kv{display:grid;grid-template-columns:88px 1fr;gap:7px var(--s3);font-size:var(--txs);margin-bottom:var(--s3)}
+.kv dt{color:var(--fg3)}
+.kv dd{color:var(--fg2);word-break:break-word;font-family:var(--mono)}
+.kv dd.plain{font-family:var(--font)}
+.desc-full{font-size:var(--tsm);color:var(--fg2);line-height:1.65;white-space:pre-wrap;margin-bottom:var(--s3)}
+.fld{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s2)}
+.fld label{width:104px;flex-shrink:0;color:var(--fg3);font-size:var(--txs);text-align:right}
+.fld input,.fld textarea{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--border);
+  color:var(--fg);border-radius:var(--r1);padding:7px 10px;font-size:var(--tsm)}
+.fld textarea{font-family:inherit;resize:vertical;min-height:52px;line-height:1.5}
+.fld input:focus,.fld textarea:focus{outline:none;border-color:var(--accent);background:var(--bg)}
+.tr{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r1);
+  padding:var(--s2) var(--s3);margin-bottom:6px;display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.tr .k{font:var(--txs)/1 var(--mono);color:var(--fg);min-width:132px}
+.tr .v{font:var(--t2xs)/1.4 var(--mono);color:var(--fg3);flex:1;min-width:120px}
+.tr select,.tr input{background:var(--bg);border:1px solid var(--border);color:var(--fg);
+  border-radius:5px;padding:5px 8px;font-size:var(--txs)}
+.tr input.tval{width:132px;flex:none}
+.pane-empty{color:var(--fg3);font-size:var(--tsm);text-align:center;padding:var(--s5)}
+
+/* ---------- toast ---------- */
+.toast{position:fixed;left:50%;bottom:var(--s5);transform:translate(-50%,16px);z-index:var(--z-toast);
+  background:var(--surface-3);border:1px solid var(--border-strong);color:var(--fg);
+  padding:var(--s3) var(--s5);border-radius:var(--r2);font-size:var(--tsm);max-width:min(560px,90vw);
+  opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;
+  box-shadow:0 8px 28px rgba(0,0,0,.45)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
 .toast.ok{border-color:var(--ok)}.toast.bad{border-color:var(--bad)}
-.mybtn{background:var(--bg-violet);border:none;color:var(--fg-on-violet);padding:var(--sp-2) var(--sp-4);border-radius:var(--r-2);cursor:pointer;font-size:var(--fs-md);font-weight:600}
-.mybtn:hover{background:var(--bg-violet-hi)}
-.mybtn.on{background:var(--bg-violet-alt)}
-#myPanel{display:none;background:var(--bg-side);border-bottom:1px solid var(--line);padding:var(--sp-4) 24px;max-height:50vh;overflow:auto}
-#myPanel.show{display:block}
-#myPanel h3{color:var(--fg-accent);font-size:var(--fs-lg);margin-bottom:10px}
-.my-item{background:var(--bg-card);border:1px solid var(--line);border-radius:var(--r-2);padding:10px 14px;margin-bottom:var(--sp-2)}
-.my-item .row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.my-item .nm{font-weight:600;color:var(--fg-strong);font-size:var(--fs-md)}
-.my-item .sub{color:var(--fg-muted);font-size:var(--fs-sm)}
-.my-item .acts{margin-left:auto;display:flex;gap:6px}
-.my-item button{background:var(--bg-badge);border:none;color:var(--fg-cat);padding:var(--sp-1) var(--sp-3);border-radius:var(--r-1);cursor:pointer;font-size:var(--fs-sm)}
-.my-item button:hover{background:var(--bg-accent-hi);color:var(--fg-on-dark)}
-.my-item button.del{background:var(--bg-danger-soft)}
-.my-item button.del:hover{background:var(--bg-danger);color:var(--fg-on-dark)}
-.my-empty{color:var(--fg-faint);font-size:var(--fs-md);text-align:center;padding:var(--sp-5)}
-#invPanel{display:none;background:var(--bg-side);border-bottom:1px solid var(--line);padding:var(--sp-4) 24px;max-height:55vh;overflow:auto}
-#invPanel.show{display:block}
-#invPanel h3{color:var(--fg-accent);font-size:var(--fs-lg);margin-bottom:10px}
-.inv-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.inv-toolbar input{flex:1;max-width:320px;background:var(--bg-input);border:1px solid var(--line-input);color:var(--fg);border-radius:var(--r-1);padding:6px 10px;font-size:var(--fs-sm)}
-.inv-row{display:flex;align-items:center;gap:10px;background:var(--bg-card);border:1px solid var(--line);border-radius:var(--r-2);padding:var(--sp-2) 14px;margin-bottom:6px;cursor:pointer}
-.inv-row:hover{border-color:var(--bg-violet-hi)}
-.inv-row .nm{font-weight:600;color:var(--fg-strong);font-size:var(--fs-md);flex:1;min-width:120px}
-.inv-row .sub{color:var(--fg-muted);font-size:var(--fs-sm);white-space:nowrap}
-.inv-row .loc{color:var(--bg-violet-alt);font-size:var(--fs-xs);background:var(--bg-loc);padding:2px var(--sp-2);border-radius:var(--r-4)}
-/* 完整检查器 modal */
-#inspector{display:none;position:fixed;inset:0;background:rgba(5,8,14,.78);z-index:var(--z-inspector);align-items:center;justify-content:center}
-#inspector.show{display:flex}
-.insp-box{background:var(--bg-panel);border:1px solid var(--line-input);border-radius:var(--r-4);max-width:860px;width:92%;max-height:86vh;overflow:auto;padding:var(--sp-5) 24px}
-.insp-head{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:14px}
-.insp-head h2{margin:0;font-size:18px;color:var(--fg-strong)}
-.insp-head .uid{color:var(--fg-muted);font-size:var(--fs-sm);font-family:var(--font-mono)}
-.insp-tabs{display:flex;gap:var(--sp-1);border-bottom:1px solid var(--line);margin-bottom:14px}
-.insp-tabs button{background:none;border:none;color:var(--fg-muted);padding:var(--sp-2) 18px;cursor:pointer;font-size:var(--fs-md);border-bottom:2px solid transparent}
-.insp-tabs button.on{color:var(--fg-accent);border-bottom-color:var(--fg-accent)}
-.insp-pane{display:none}
-.insp-pane.show{display:block}
-.insp-field{display:flex;align-items:center;gap:10px;margin-bottom:var(--sp-2)}
-.insp-field label{width:150px;color:var(--fg-muted);font-size:var(--fs-sm);text-align:right;flex-shrink:0}
-.insp-field input{flex:1;background:var(--bg-input);border:1px solid var(--line-input);color:var(--fg);border-radius:var(--r-1);padding:var(--sp-1) 9px;font-size:var(--fs-sm)}
-.insp-field textarea{flex:1;background:var(--bg-input);border:1px solid var(--line-input);color:var(--fg);border-radius:var(--r-1);padding:var(--sp-1) 9px;font-size:var(--fs-sm);font-family:inherit;min-height:40px}
-.insp-section-title{color:var(--fg-accent);font-size:var(--fs-md);margin:var(--sp-4) 0 var(--sp-2);font-weight:600}
-.insp-row{display:flex;align-items:center;gap:var(--sp-2);background:var(--bg-card);border:1px solid var(--line);border-radius:6px;padding:var(--sp-1) 10px;margin-bottom:var(--sp-1);flex-wrap:wrap}
-.insp-row .k{font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--fg);min-width:140px}
-.insp-row .v{font-size:var(--fs-sm);color:var(--fg-muted);flex:1}
-.insp-row input{background:var(--bg-input);border:1px solid var(--line-input);color:var(--fg);border-radius:var(--sp-1);padding:3px 7px;font-size:var(--fs-sm);width:150px}
-.insp-row select{background:var(--bg-input);border:1px solid var(--line-input);color:var(--fg);border-radius:var(--sp-1);padding:3px 6px;font-size:var(--fs-sm)}
-.mini-btn{background:var(--bg-badge);border:none;color:var(--fg-cat);padding:3px 10px;border-radius:var(--r-1);cursor:pointer;font-size:var(--fs-xs)}
-.mini-btn:hover{background:var(--bg-accent-hi);color:var(--fg-on-dark)}
-.mini-btn.green{background:var(--bg-green);color:var(--fg-on-green)}
-.mini-btn.red{background:var(--bg-danger-soft)}
-.mini-btn.red:hover{background:var(--bg-danger);color:var(--fg-on-dark)}
-.insp-empty{color:var(--fg-faint);font-size:var(--fs-sm);padding:var(--sp-3);text-align:center}
-@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* 窄屏: 左栏转为横向分类条, 不隐藏 (隐藏会让分类不可达) */
+@media (max-width:900px){
+  .body{flex-direction:column}
+  .sidebar{width:100%;max-height:150px;border-right:none;border-bottom:1px solid var(--border)}
+  .nav-scroll{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;padding:var(--s2)}
+  .nav-pinned,.nav-group{display:flex;flex-direction:row;gap:6px;border:none;margin:0;padding:0}
+  .nav-group-t{display:none}
+  .nav-item{width:auto;white-space:nowrap;padding:6px 10px}
+  .drawer{width:100vw}
+  .toolbar{padding:0 var(--s3)}
+  .grid,.row-list{padding:var(--s3)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
-<header>
-  <h1>Probably Stolen — 物品浏览器</h1>
-  <p>数据源: items_data_full.js（含 30 项 mod 生成器）· 共 <b id="totalCount">0</b> 项 · 支持中英搜索 / 收藏 / 生成 / 库存编辑</p>
-  <div class="search-bar">
-    <input type="text" id="search" placeholder="搜索名称 / ID / 描述...（支持中英）">
-    <span class="count-badge" id="count">0 项</span>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">PS</span>
+      <span class="brand-text">物品工作台</span>
+    </div>
+    <div class="search-wrap">
+      <input id="search" type="search" placeholder="搜索 名称 / ID / 描述 — 中英均可" autocomplete="off" aria-label="搜索物品">
+      <kbd>/</kbd>
+    </div>
+    <div class="status" id="status" title="生成服务器状态">
+      <span class="dot" id="svDot"></span>
+      <span id="svText">检查中…</span>
+    </div>
+    <button class="icon-btn" id="densityBtn" title="切换密度 (舒适 / 紧凑)" aria-label="切换显示密度">⇕</button>
+  </header>
+
+  <div class="body">
+    <nav class="sidebar" aria-label="分类导航">
+      <div class="nav-scroll" id="navList"></div>
+    </nav>
+    <main class="content">
+      <div class="toolbar">
+        <div class="views" role="tablist" aria-label="视图">
+          <button class="view-tab" data-view="catalog" role="tab" aria-selected="true">图鉴</button>
+          <button class="view-tab" data-view="inventory" role="tab" aria-selected="false">库存 <span class="tab-n" id="invCount">0</span></button>
+          <button class="view-tab" data-view="mine" role="tab" aria-selected="false">我的生成 <span class="tab-n" id="myCount">0</span></button>
+        </div>
+        <div class="toolbar-right">
+          <button class="text-btn" id="refreshBtn">刷新</button>
+          <span class="result-count" id="count">—</span>
+        </div>
+      </div>
+      <div class="view-extra" id="viewExtra"></div>
+      <div class="scroll-area" id="scrollArea">
+        <div class="grid" id="grid"></div>
+        <div class="row-list" id="rowList" hidden></div>
+      </div>
+    </main>
   </div>
-  <div class="server-status">
-    <span class="dot" id="svDot"></span>
-    <span id="svText">检查生成服务器...</span>
-    <button class="mybtn" id="invBtn">📦 库存</button>
-    <button class="mybtn push-right" id="myBtn">🎒 我的生成 (0)</button>
-  </div>
- </header>
- <div class="toast" id="toast" role="status" aria-live="polite"></div>
- <div id="invPanel">
-   <h3>📦 全部库存 — 点物品打开完整检查器 (任意库存物品可编辑/删除)</h3>
-   <div class="inv-toolbar"><input type="text" id="invSearch" placeholder="过滤 名称/ID..."><span class="count-badge" id="invCount">0 项</span></div>
-   <div id="invList"></div>
- </div>
- <div id="myPanel">
-   <h3>🎒 我的生成 — 本次会话生成物品 (可编辑属性 / 删除)</h3>
-   <div id="myList"></div>
- </div>
-<main>
-  <aside>
-    <h3>分类</h3>
-    <div class="cat-list" id="catList"></div>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-label="物品详情">
+    <div class="drawer-head">
+      <div class="dh-main">
+        <h2 id="dwName">—</h2>
+        <div class="dh-sub" id="dwSub"></div>
+      </div>
+      <button class="icon-btn" id="dwClose" aria-label="关闭面板">✕</button>
+    </div>
+    <div class="drawer-tabs" id="dwTabs"></div>
+    <div class="drawer-body" id="dwBody"></div>
+    <div class="drawer-foot" id="dwFoot"></div>
   </aside>
-  <div id="grid"></div>
-</main>
-<div class="detail" id="detail">
-  <button id="closeDetail">×</button>
-  <h2 id="dName"></h2>
-  <div class="en" id="dEn"></div>
-  <div class="desc-full" id="dDesc"></div>
-  <div class="meta" id="dMeta"></div>
-  <button id="copyId">复制 stableId</button>
- </div>
- <div id="inspector">
-   <div class="insp-box">
-     <div class="insp-head">
-       <h2 id="insName"></h2>
-       <span class="uid" id="insUid"></span>
-       <span class="push-right">
-         <button class="mini-btn red" id="insDelete">🗑 删除物品</button>
-         <button class="mini-btn" id="insClose">✕ 关闭</button>
-       </span>
-     </div>
-     <div class="insp-tabs">
-       <button data-tab="base" class="on">基础字段</button>
-       <button data-tab="tags">标签 (base / modified)</button>
-       <button data-tab="features">特性</button>
-     </div>
-     <div id="insFields"></div>
-   </div>
- </div>
-<!-- 数据/标签脚本带版本戳: 数据更新时必须同步 bump, 否则浏览器按 max-age 缓存旧副本 -->
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<!-- 数据带版本戳: 数据更新时必须同步 bump, 否则浏览器按 max-age 缓存旧副本 -->
 <script src="items_data_full.js?v=20260921"></script>
 <script src="tag_zh.js?v=20260916"></script>
 <script>
@@ -279,213 +363,77 @@ const GENERATED_ITEMS = [
   {stableId:'prebuilt:random_hand',nameZh:'变体：随机手部物品',nameEn:'Variant: Random hand item',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机手部物品',descriptionEn:'Prebuilt variant: random hand item',kind:'mod-generator'}
 ];
 ITEMS.push(...GENERATED_ITEMS);
-// ===== NEW_ITEMS 30 项中英名补全 (源: mod/item_catalog.json + 同类推断) =====
+// ===== NEW_ITEMS 30 项中英名补全 (源: mod/item_catalog.json + 同类推断); 仅填空, 不覆盖非空值 =====
 const EXTRA_NAMES = {
- "3d_printer_instruction": {
-  "zh": "3D打印机说明",
-  "en": "3D Printer Instruction"
- },
- "age_well": {
-  "zh": "催陈器",
-  "en": "AgeWell"
- },
- "age_well_instruction": {
-  "zh": "催陈器说明",
-  "en": "AgeWell Instructions"
- },
- "alarm_instruction": {
-  "zh": "警报器使用手册",
-  "en": "Alarm Instruction Manual"
- },
- "ancient_alien_relics": {
-  "zh": "“远古外星遗物”",
-  "en": "\"Ancient Alien Relics\""
- },
- "bandage": {
-  "zh": "基础绷带",
-  "en": "Basic Bandage"
- },
- "beer_case": {
-  "zh": "一箱红魔啤酒",
-  "en": "Red Imp Beer Case"
- },
- "dehydrated_water": {
-  "zh": "100%脱水纯水",
-  "en": "100% Pure Dehydrated Water"
- },
- "evaporator_instruction": {
-  "zh": "蒸发器说明",
-  "en": "Evaporator Instruction"
- },
- "furnace_instruction": {
-  "zh": "使用说明：熔炉",
-  "en": "How To: The Furnace"
- },
- "genetic_scanner": {
-  "zh": "基因扫描仪",
-  "en": "Gene Scanner"
- },
- "hemostatic_bandage": {
-  "zh": "止血绷带",
-  "en": "Hemostatic Bandage"
- },
- "hydroponic_instruction": {
-  "zh": "水培系统说明",
-  "en": "Hydroponic Instruction"
- },
- "hydroponic_nutrient_tablet": {
-  "zh": "水培营养片",
-  "en": "Hydroponic Nutrient Tablet"
- },
- "modified_access_card": {
-  "zh": "篡改识别卡",
-  "en": "Modified Access Card"
- },
- "moisture_farm_instruction": {
-  "zh": "使用说明：水分收集器",
-  "en": "How To: The Moisture Farm"
- },
- "node": {
-  "zh": "节点",
-  "en": "Node"
- },
- "permit_gun_1": {
-  "zh": "一级武器许可证",
-  "en": "Class 1 Weapon Permit"
- },
- "printer_chip": {
-  "zh": "3D打印芯片",
-  "en": "3D Printer Chip"
- },
- "projector_instruction": {
-  "zh": "使用说明：投影仪",
-  "en": "How To: The Projector"
- },
- "scav_journal": {
-  "zh": "拾荒者的日志",
-  "en": "Scav's journal entry"
- },
- "sign_generic": {
-  "zh": "普通霓虹灯牌",
-  "en": "Generic Neon Sign"
- },
- "sign_luxury": {
-  "zh": "奢侈品霓虹灯牌",
-  "en": "Luxury Item Neon Sign"
- },
- "skinning_knife": {
-  "zh": "剥皮刀",
-  "en": "Skinning Knife"
- },
- "toolbox": {
-  "zh": "工具箱",
-  "en": "Toolbox"
- },
- "topical_bandage": {
-  "zh": "外用药膏绷带",
-  "en": "Topical Medication Bandage"
- },
- "used_water_testing_strip": {
-  "zh": "水质检测试纸（已使用）",
-  "en": "Water Testing Strip (Used)"
- },
- "water_purifier_instruction": {
-  "zh": "净水器说明",
-  "en": "Water Purifier Instructions"
- },
- "wine_bloomberry": {
-  "zh": "荧光莓果酿",
-  "en": "BloomBerry Wine"
- },
- "wine_gloomberry": {
-  "zh": "阴光莓果酿",
-  "en": "GloomBerry Wine"
- }
+ "3d_printer_instruction":{"zh":"3D打印机说明","en":"3D Printer Instruction"},
+ "age_well":{"zh":"催陈器","en":"AgeWell"},
+ "age_well_instruction":{"zh":"催陈器说明","en":"AgeWell Instructions"},
+ "alarm_instruction":{"zh":"警报器使用手册","en":"Alarm Instruction Manual"},
+ "ancient_alien_relics":{"zh":"“远古外星遗物”","en":"\"Ancient Alien Relics\""},
+ "bandage":{"zh":"基础绷带","en":"Basic Bandage"},
+ "beer_case":{"zh":"一箱红魔啤酒","en":"Red Imp Beer Case"},
+ "dehydrated_water":{"zh":"100%脱水纯水","en":"100% Pure Dehydrated Water"},
+ "evaporator_instruction":{"zh":"蒸发器说明","en":"Evaporator Instruction"},
+ "furnace_instruction":{"zh":"使用说明：熔炉","en":"How To: The Furnace"},
+ "genetic_scanner":{"zh":"基因扫描仪","en":"Gene Scanner"},
+ "hemostatic_bandage":{"zh":"止血绷带","en":"Hemostatic Bandage"},
+ "hydroponic_instruction":{"zh":"水培系统说明","en":"Hydroponic Instruction"},
+ "hydroponic_nutrient_tablet":{"zh":"水培营养片","en":"Hydroponic Nutrient Tablet"},
+ "modified_access_card":{"zh":"篡改识别卡","en":"Modified Access Card"},
+ "moisture_farm_instruction":{"zh":"使用说明：水分收集器","en":"How To: The Moisture Farm"},
+ "node":{"zh":"节点","en":"Node"},
+ "permit_gun_1":{"zh":"一级武器许可证","en":"Class 1 Weapon Permit"},
+ "printer_chip":{"zh":"3D打印芯片","en":"3D Printer Chip"},
+ "projector_instruction":{"zh":"使用说明：投影仪","en":"How To: The Projector"},
+ "scav_journal":{"zh":"拾荒者的日志","en":"Scav's journal entry"},
+ "sign_generic":{"zh":"普通霓虹灯牌","en":"Generic Neon Sign"},
+ "sign_luxury":{"zh":"奢侈品霓虹灯牌","en":"Luxury Item Neon Sign"},
+ "skinning_knife":{"zh":"剥皮刀","en":"Skinning Knife"},
+ "toolbox":{"zh":"工具箱","en":"Toolbox"},
+ "topical_bandage":{"zh":"外用药膏绷带","en":"Topical Medication Bandage"},
+ "used_water_testing_strip":{"zh":"水质检测试纸（已使用）","en":"Water Testing Strip (Used)"},
+ "water_purifier_instruction":{"zh":"净水器说明","en":"Water Purifier Instructions"},
+ "wine_bloomberry":{"zh":"荧光莓果酿","en":"BloomBerry Wine"},
+ "wine_gloomberry":{"zh":"阴光莓果酿","en":"GloomBerry Wine"}
 };
 ITEMS.forEach(it => {
   const x = EXTRA_NAMES[it.stableId];
   if(x && !it.nameZh) it.nameZh = x.zh;
   if(x && !it.nameEn) it.nameEn = x.en;
 });
-const grid = document.getElementById('grid');
-const search = document.getElementById('search');
-const catList = document.getElementById('catList');
-const detail = document.getElementById('detail');
-const $count = document.getElementById('count');
-const $toast = document.getElementById('toast');
-const $myList = document.getElementById('myList');
-const $invList = document.getElementById('invList');
-const $invCount = document.getElementById('invCount');
-const $svDot = document.getElementById('svDot');
-const $svText = document.getElementById('svText');
-const $myBtn = document.getElementById('myBtn');
-const $dName = document.getElementById('dName');
-const $dEn = document.getElementById('dEn');
-const $dDesc = document.getElementById('dDesc');
-const $dMeta = document.getElementById('dMeta');
-const $copyId = document.getElementById('copyId');
-let CUR_ITEM = null;
-let curCat = 'ALL';
-let curSearch = '';
-let FAVORITES = new Set(JSON.parse(localStorage.getItem('itemFavs') || '[]'));
-function saveFavs(){ localStorage.setItem('itemFavs', JSON.stringify([...FAVORITES])); }
-function toggleFav(id){
-  if(FAVORITES.has(id)) FAVORITES.delete(id); else FAVORITES.add(id);
-  saveFavs(); renderCats(); renderGrid();
-}
 
-// 分类英文->中文映射
+// ===== 词表 =====
 const CAT_ZH = {
-  'ALL': '全部',
-  'ACCESS_CARDS': '门禁卡',
-  'AMMUNITION_EXPLOSIVES': '弹药与爆炸物',
-  'ARMOR': '护甲',
-  'CHEMICALS': '化学品',
-  'CONTAINERS': '容器',
-  'CURRENCY': '货币',
-  'DOCUMENTS': '文件',
-  'ENERGY_CELLS': '能量电池',
-  'EQUIPMENT': '装备',
-  'FARMING': '农业',
-  'FOOD_DRINK': '食物与饮料',
-  'GOODS': '商品',
-  'HUSBANDRY': '畜牧',
-  'LOTTERY': '抽奖',
-  'MACHINES_STORAGE': '机器与仓储',
-  'MATERIALS': '材料',
-  'MEDICAL': '医疗',
-  'MEDICAL_CHEMICAL': '医疗化学',
-  'MISC': '杂项',
-  'MODULES': '模块',
-  'SUPPLIES': '补给品',
-  'TOOLS': '工具',
-  'WEAPONS': '武器',
-  'WEAPON_MODS': '武器配件',
-  'RANDOM_DROP': '🎲 随机掉落',
-  'PREBUILT': '🧬 预置变体',
-  'NEW_ITEMS': '🆕 新增物品'
+  'ALL':'全部','FAV':'收藏','ACCESS_CARDS':'门禁卡','AMMUNITION_EXPLOSIVES':'弹药与爆炸物','ARMOR':'护甲',
+  'CHEMICALS':'化学品','CONTAINERS':'容器','CURRENCY':'货币','DOCUMENTS':'文件','ENERGY_CELLS':'能量电池',
+  'EQUIPMENT':'装备','FARMING':'农业','FOOD_DRINK':'食物与饮料','GOODS':'商品','HUSBANDRY':'畜牧',
+  'LOTTERY':'抽奖','MACHINES_STORAGE':'机器与仓储','MATERIALS':'材料','MEDICAL':'医疗',
+  'MEDICAL_CHEMICAL':'医疗化学','MISC':'杂项','MODULES':'模块','SUPPLIES':'补给品','TOOLS':'工具',
+  'WEAPONS':'武器','WEAPON_MODS':'武器配件','RANDOM_DROP':'随机掉落','PREBUILT':'预置变体','NEW_ITEMS':'新增物品'
 };
-function zCat(c){ return CAT_ZH[c] || c; }
-
-// 物品类型 英文->中文映射
+// 分类导航分组 — 27 项扁平列表难找, 归为 5 组
+const CAT_GROUPS = [
+  ['装备与武器', ['WEAPONS','WEAPON_MODS','ARMOR','AMMUNITION_EXPLOSIVES','EQUIPMENT']],
+  ['物资与材料', ['MATERIALS','CHEMICALS','MEDICAL','MEDICAL_CHEMICAL','SUPPLIES','ENERGY_CELLS','CONTAINERS','MACHINES_STORAGE']],
+  ['工具与模块', ['TOOLS','MODULES']],
+  ['生活与交易', ['FOOD_DRINK','FARMING','HUSBANDRY','GOODS','CURRENCY','DOCUMENTS','LOTTERY','ACCESS_CARDS','MISC']],
+  ['生成器',     ['RANDOM_DROP','PREBUILT','NEW_ITEMS']]
+];
 const TYPE_ZH = {
-  'ACCESS_CARD': '门禁卡', 'ALARM_MODULE': '报警模块', 'ALCOHOL': '酒精', 'AMMUNITION': '弹药',
-  'ARMOR': '护甲', 'ART': '艺术品', 'BASIC_MATERIAL': '基础材料', 'BREVAGE': '饮品',
-  'CHEMICAL_SUPPLIES': '化学用品', 'CONTRABAND': '违禁品', 'DOCUMENT': '文件', 'ENERGY_CELL': '能量电池',
-  'EVAPORATOR_MODULE': '蒸发器模块', 'FARMING_SUPPLIES': '农牧用品', 'FILTER': '过滤器', 'FIREARM': '枪械',
-  'FOOD': '食物', 'GUN_MOD': '枪械配件', 'HOUSEHOLD_GOOD': '日用品', 'HYDROPONIC_MODULE': '水培模块',
-  'JUNK': '废料', 'LOTTERY': '抽奖券', 'LOWTECH': '低科技', 'LUXURY_ITEM': '奢侈品',
-  'MACHINE': '机器', 'MAKESHIFT': '简易制品', 'MATERIAL': '材料', 'MEDICAL': '医疗',
-  'MEDICAL_TOOL': '医疗工具', 'MELEE_WEAPON': '近战武器', 'MIDLINE': '中档', 'MODDABLE': '可改装',
-  'MODULE': '模块', 'MUNITION': '弹药', 'NARCOTIC': '麻醉品', 'NODE': '节点',
-  'PLAYER_CURRENCY': '货币', 'PLAYER_UPGRADE_CURRENCY': '升级货币', 'POISON': '毒物', 'PRINTER_MODULE': '打印模块',
-  'PROCESSED_FOOD': '加工食品', 'SEED': '种子', 'STORAGE': '储物', 'SUBSTANCE': '物质',
-  'SUPPLY_CRATE': '补给箱', 'TOOL': '工具', 'TREAT': '零食', 'WATER': '水',
-  'WATER_PURIFICATION_SUPPLY': '净水用品', 'WATER_RATION': '配给水', 'WEAPON': '武器'
+  'ACCESS_CARD':'门禁卡','ALARM_MODULE':'报警模块','ALCOHOL':'酒精','AMMUNITION':'弹药','ARMOR':'护甲',
+  'ART':'艺术品','BASIC_MATERIAL':'基础材料','BREVAGE':'饮品','CHEMICAL_SUPPLIES':'化学用品',
+  'CONTRABAND':'违禁品','DOCUMENT':'文件','ENERGY_CELL':'能量电池','EVAPORATOR_MODULE':'蒸发器模块',
+  'FARMING_SUPPLIES':'农牧用品','FILTER':'过滤器','FIREARM':'枪械','FOOD':'食物','GUN_MOD':'枪械配件',
+  'HOUSEHOLD_GOOD':'日用品','HYDROPONIC_MODULE':'水培模块','JUNK':'废料','LOTTERY':'抽奖券',
+  'LOWTECH':'低科技','LUXURY_ITEM':'奢侈品','MACHINE':'机器','MAKESHIFT':'简易制品','MATERIAL':'材料',
+  'MEDICAL':'医疗','MEDICAL_TOOL':'医疗工具','MELEE_WEAPON':'近战武器','MIDLINE':'中档','MODDABLE':'可改装',
+  'MODULE':'模块','MUNITION':'弹药','NARCOTIC':'麻醉品','NODE':'节点','PLAYER_CURRENCY':'货币',
+  'PLAYER_UPGRADE_CURRENCY':'升级货币','POISON':'毒物','PRINTER_MODULE':'打印模块','PROCESSED_FOOD':'加工食品',
+  'SEED':'种子','STORAGE':'储物','SUBSTANCE':'物质','SUPPLY_CRATE':'补给箱','TOOL':'工具','TREAT':'零食',
+  'WATER':'水','WATER_PURIFICATION_SUPPLY':'净水用品','WATER_RATION':'配给水','WEAPON':'武器'
 };
 // 游戏内部属性标签名 → 中文: item.state/modifiedState 里某些 tag 的 key/label 本身是
-// TYPE-STRING_<snake_case> 本地化键 (TagSystem.StringToDisplayString 生成, 如装甲/背包件模板自动标签),
-// 不在物品类型 TYPE_ZH 词表内. key 全小写匹配. (实测来源: backpack_large_military 真机 dump)
+// TYPE-STRING_<snake_case> 本地化键 (TagSystem.StringToDisplayString 生成), 不在 TYPE_ZH 词表内.
 const TAGNAME_ZH = {
   backpack:'背包', equippable:'可装备', armor_item:'护甲件',
   default_armor_value:'默认护甲值', current_max_armor_value:'当前最大护甲值', current_armor_value:'当前护甲值',
@@ -493,13 +441,6 @@ const TAGNAME_ZH = {
   armor_resilience:'护甲韧性', armor_accuracy_modifier:'护甲精度修正', armor_dodge_modifier:'护甲闪避修正',
   item_type_string:'物品类型'
 };
-function zType(t){ return TYPE_ZH[t] || t; }
-
-function categoryCounts(){
-  const c = {};
-  ITEMS.forEach(i => (i.categories || []).forEach(x => c[x] = (c[x]||0)+1));
-  return c;
-}
 // 类别身份色: 键名与 :root 的 --c-* 一一对应, 令牌唯一定义处仍是 CSS
 const CAT_TOKEN = {
   ACCESS_CARDS:'access_cards', AMMUNITION_EXPLOSIVES:'ammunition_explosives', ARMOR:'armor',
@@ -510,112 +451,212 @@ const CAT_TOKEN = {
   MODULES:'modules', SUPPLIES:'supplies', TOOLS:'tools', WEAPONS:'weapons',
   WEAPON_MODS:'weapon_mods', RANDOM_DROP:'random_drop', PREBUILT:'prebuilt', NEW_ITEMS:'new_items'
 };
-const _cssCached = getComputedStyle(document.documentElement);
+const ROOT_CS = getComputedStyle(document.documentElement);
 function catColor(c){
   const t = CAT_TOKEN[c];
-  return (t && _cssCached.getPropertyValue('--c-' + t).trim()) || _cssCached.getPropertyValue('--fg-accent').trim();
+  return (t && ROOT_CS.getPropertyValue('--c-' + t).trim()) || ROOT_CS.getPropertyValue('--accent').trim();
 }
-function renderCats(){
-  const c = categoryCounts();
-  const keys = ['ALL', 'FAV', ...Object.keys(c).sort()];
-  // renderCats 会重建 DOM, 记住焦点以便用键盘连续切换分类
-  const focused = (document.activeElement && document.activeElement.dataset) ? document.activeElement.dataset.cat : null;
-  catList.innerHTML = keys.map(k => {
-    const label = k==='FAV' ? '★收藏' : zCat(k);
-    const n = k==='ALL' ? ITEMS.length : (k==='FAV' ? FAVORITES.size : c[k]);
-    const on = curCat===k;
-    const st = on ? ' style="--cat:' + catColor(k) + '"' : '';
-    return `<button class="cat-btn ${on?'active':''}" type="button" data-cat="${esc(k)}" aria-pressed="${on}"${st}>
-      <span>${label}</span><span class="n">${n}</span></button>`;
-  }).join('');
-  catList.querySelectorAll('.cat-btn').forEach(b => b.onclick = () => {
-    curCat = b.dataset.cat; renderCats(); renderGrid();
-  });
-  if(focused){ const again = catList.querySelector('.cat-btn[data-cat="' + CSS.escape(focused) + '"]'); if(again) again.focus(); }
-}
-function matches(i){
-  if(curCat==='FAV' && !FAVORITES.has(i.stableId)) return false;
-  if(curCat!=='ALL' && curCat!=='FAV' && !(i.categories||[]).includes(curCat)) return false;
-  if(!curSearch) return true;
-  const q = curSearch.toLowerCase();
-  return (i.nameZh||'').toLowerCase().includes(q) ||
-         (i.nameEn||'').toLowerCase().includes(q) ||
-         (i.stableId||'').toLowerCase().includes(q) ||
-         (i.descriptionZh||'').toLowerCase().includes(q) ||
-         (i.descriptionEn||'').toLowerCase().includes(q);
-}
-function renderGrid(){
-  const list = ITEMS.filter(matches);
-  list.sort((a,b) => (FAVORITES.has(b.stableId)?1:0) - (FAVORITES.has(a.stableId)?1:0));
-  $count.textContent = list.length + ' 项';
-  grid.innerHTML = list.length ? list.map(i => {
-    const id = i.stableId || '';
-    const on = FAVORITES.has(id);
-    const isInstr = id.endsWith('_instruction');
-    return `<div class="card" data-id="${esc(id)}" role="button" tabindex="0" aria-label="${esc(i.nameZh||i.nameEn||id)}">
-      <button class="fav-btn ${on?'on':''}" type="button" data-fav="${esc(id)}" aria-pressed="${on}" aria-label="收藏">${on?'★':'☆'}</button>
-      <div class="nm">${esc(i.nameZh||'')}</div>
-      <div class="nm-en">${esc(i.nameEn||'')}</div>
-      <div class="cat">${(i.categories||[]).slice(0,4).map(c=>`<span class="tag">${zCat(c)}</span>`).join('')}</div>
-      <div class="id">${esc(id)}</div>
-      <div class="desc">${esc(i.descriptionZh||i.descriptionEn||'')}</div>
-      <div class="acts">${isInstr
-        ? '<span class="tag tag-instr">📄 图纸(不能直接生成)</span>'
-        : `<button class="spawn-btn" type="button" data-spawn="${esc(id)}">生成</button>`}</div>
-    </div>`; }).join('') : `<div class="empty">无匹配物品${curSearch ? ' — 没有与「' + esc(curSearch) + '」匹配的结果' : ''}</div>`;
-  grid.querySelectorAll('.card').forEach(c => {
-    c.onclick = () => showDetail(c.dataset.id);
-    c.onkeydown = e => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); showDetail(c.dataset.id); } };
-  });
-  grid.querySelectorAll('.fav-btn').forEach(b => b.onclick = (e) => { e.stopPropagation(); toggleFav(b.dataset.fav); });
-  grid.querySelectorAll('.spawn-btn').forEach(b => b.onclick = (e) => { e.stopPropagation(); spawnItem(b.dataset.spawn, b); });
-}
-// 转义 & < > " ' —— 引号也必须转义 (属性值注入面)
-function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-function showDetail(id){
-  const i = ITEMS.find(x => x.stableId===id);
-  if(!i) return;
-  CUR_ITEM = i;
-  $dName.textContent = i.nameZh || id;
-  $dEn.textContent = i.nameEn || '';
-  $dDesc.textContent = i.descriptionZh || i.descriptionEn || '';
-  $dMeta.innerHTML = `
-    <div><b>stableId</b> ${esc(i.stableId)}</div>
-    <div><b>分类</b> ${esc((i.categories||[]).map(zCat).join(', '))}</div>
-    <div><b>itemTypes</b> ${esc((i.itemTypes||[]).map(zType).join(', '))}</div>
-    <div><b>kind</b> ${esc(i.kind||'')}</div>
-    <div><b>directory</b> ${esc(i.directory||'')}</div>
-    <div><b>addPolicy</b> ${esc(i.addPolicy||'')}</div>`;
-  detail.classList.add('show');
-}
-document.getElementById('closeDetail').onclick = () => detail.classList.remove('show');
-document.addEventListener('keydown', e => {
-  if(e.key === 'Escape'){ detail.classList.remove('show'); document.getElementById('inspector').classList.remove('show'); }
-});
-document.getElementById('invSearch').addEventListener('keydown', e => { if(e.key==='Escape'){ e.target.value=''; renderInv(''); } });
-// 不再从 DOM 里爬 stableId (依赖 <b> 的兄弟节点结构), 直接用当前详情项
-$copyId.onclick = async () => {
-  const id = (CUR_ITEM && CUR_ITEM.stableId) || '';
-  if(!id) return;
-  let ok = false;
-  try { await navigator.clipboard.writeText(id); ok = true; }
-  catch {
-    try {   // http:// 或权限被拒时降级
-      const ta = document.createElement('textarea');
-      ta.value = id; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.opacity='0';
-      document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove();
-    } catch { ok = false; }
-  }
-  $copyId.textContent = ok ? '已复制 ✓' : '复制失败 — 请手动复制';
-  setTimeout(()=>{ $copyId.textContent = '复制 stableId'; }, 1800);
-};
-let _searchTimer = 0;
-search.oninput = () => {
-  clearTimeout(_searchTimer);
-  _searchTimer = setTimeout(() => { curSearch = search.value.trim(); renderGrid(); }, 120);
-};
+const zCat = c => CAT_ZH[c] || c;
+const zType = t => TYPE_ZH[t] || t;
+const TAG_ZH_SAFE = () => (typeof TAG_ZH !== 'undefined' ? TAG_ZH : null);
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
-// ===== API 层: 单一入口 (超时 / JSON 容错 / 统一错误形状) =====
+// ===== 状态 =====
+const S = {
+  view:'catalog', cat:'ALL', q:'', subQ:'',
+  density: localStorage.getItem('ps_density') || 'comfortable',
+  fav:new Set(JSON.parse(localStorage.getItem('itemFavs') || '[]')),
+  tokens:new Set(JSON.parse(localStorage.getItem('mySpawnTokens') || '[]')),
+  inv:[], mine:[], ins:null, insTab:'basic', uid:0
+};
+const $ = id => document.getElementById(id);
+const grid=$('grid'), rowList=$('rowList'), navList=$('navList'), viewExtra=$('viewExtra');
+
+function saveFavs(){ localStorage.setItem('itemFavs', JSON.stringify([...S.fav])); }
+function saveTokens(){ localStorage.setItem('mySpawnTokens', JSON.stringify([...S.tokens])); }
+function toggleFav(id){
+  S.fav.has(id) ? S.fav.delete(id) : S.fav.add(id);
+  saveFavs(); renderNav(); renderContent();
+}
+function catCounts(){
+  const c = {};
+  ITEMS.forEach(i => (i.categories||[]).forEach(x => c[x] = (c[x]||0)+1));
+  return c;
+}
+
+// ===== 左栏导航 =====
+function renderNav(){
+  const counts = catCounts();
+  const row = (key, label, n, dot) => `
+    <button class="nav-item ${S.cat===key?'active':''}" type="button" data-cat="${esc(key)}" aria-pressed="${S.cat===key}">
+      ${dot ? `<i class="swatch" style="background:${dot}"></i>` : ''}
+      <span class="label">${esc(label)}</span><span class="n">${n}</span>
+    </button>`;
+  let html = '<div class="nav-pinned">'
+    + row('ALL','全部物品', ITEMS.length, null)
+    + row('FAV','收藏', S.fav.size, ROOT_CS.getPropertyValue('--warn').trim())
+    + '</div>';
+  for(const [title, keys] of CAT_GROUPS){
+    const present = keys.filter(k => counts[k]);
+    if(!present.length) continue;
+    html += `<div class="nav-group"><div class="nav-group-t">${esc(title)}</div>`
+      + present.map(k => row(k, zCat(k), counts[k], catColor(k))).join('')
+      + '</div>';
+  }
+  navList.innerHTML = html;
+  navList.querySelectorAll('.nav-item').forEach(b => b.onclick = () => {
+    S.cat = b.dataset.cat;
+    if(S.view !== 'catalog') setView('catalog'); else { renderNav(); renderContent(); }
+  });
+}
+
+// ===== 视图 =====
+function setView(v){
+  S.view = v;
+  document.querySelectorAll('.view-tab').forEach(t => {
+    const on = t.dataset.view === v;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', String(on));
+  });
+  const isCatalog = v === 'catalog';
+  grid.hidden = !isCatalog;
+  rowList.hidden = isCatalog;
+  if(!isCatalog) S.cat = 'ALL';
+  renderNav();
+  renderViewExtra();
+  renderContent();
+}
+function renderViewExtra(){
+  if(S.view === 'catalog'){ viewExtra.innerHTML = ''; return; }
+  const isInv = S.view === 'inventory';
+  const ph = isInv ? '过滤库存 — 名称 / ID' : '过滤我的生成 — 名称 / ID';
+  const hint = isInv ? '点任意行打开检查器, 可编辑字段 / 标签 / 特性或删除' : '本次会话生成的物品; 服务器已无的记录会自动清理';
+  viewExtra.innerHTML = `<div class="extra-row">
+    <input type="search" id="subSearch" placeholder="${ph}" value="${esc(S.subQ)}" aria-label="${ph}">
+    <span class="pill-note">${hint}</span></div>`;
+  $('subSearch').oninput = e => { S.subQ = e.target.value; renderContent(); };
+}
+function setDensity(d){
+  S.density = d;
+  localStorage.setItem('ps_density', d);
+  const compact = d === 'compact';
+  grid.classList.toggle('compact', compact);
+  rowList.classList.toggle('compact', compact);
+  $('densityBtn').classList.toggle('on', compact);
+  $('densityBtn').title = compact ? '当前: 紧凑 — 点击切换为舒适' : '当前: 舒适 — 点击切换为紧凑';
+}
+
+// ===== 匹配 =====
+function matches(i){
+  if(S.cat === 'FAV' && !S.fav.has(i.stableId)) return false;
+  if(S.cat !== 'ALL' && S.cat !== 'FAV' && !(i.categories||[]).includes(S.cat)) return false;
+  if(!S.q) return true;
+  const q = S.q.toLowerCase();
+  return (i.nameZh||'').toLowerCase().includes(q)
+      || (i.nameEn||'').toLowerCase().includes(q)
+      || (i.stableId||'').toLowerCase().includes(q)
+      || (i.descriptionZh||'').toLowerCase().includes(q)
+      || (i.descriptionEn||'').toLowerCase().includes(q);
+}
+function catChips(cats, max){
+  return (cats||[]).slice(0, max).map(c =>
+    `<span class="cat-chip"><i style="background:${catColor(c)}"></i>${esc(zCat(c))}</span>`).join('');
+}
+
+// ===== 渲染 =====
+function renderContent(){
+  if(S.view === 'catalog') renderCatalog();
+  else if(S.view === 'inventory') renderInventory();
+  else renderMine();
+}
+function renderCatalog(){
+  const list = ITEMS.filter(matches);
+  // 收藏置顶, 其余保持数据源顺序 (sort 稳定, 不重排源数组)
+  list.sort((a,b) => (S.fav.has(b.stableId)?1:0) - (S.fav.has(a.stableId)?1:0));
+  $('count').textContent = list.length + ' / ' + ITEMS.length + ' 项';
+  if(!list.length){
+    grid.innerHTML = `<div class="empty">没有匹配的物品${S.q ? ` — 没有与「${esc(S.q)}」匹配的结果` : ''}</div>`;
+    return;
+  }
+  grid.innerHTML = list.map(i => {
+    const id = i.stableId || '';
+    const on = S.fav.has(id);
+    const isInstr = id.endsWith('_instruction');
+    return `<article class="card" data-id="${esc(id)}" role="button" tabindex="0" aria-label="${esc(i.nameZh||i.nameEn||id)}">
+      <button class="fav ${on?'on':''}" type="button" data-fav="${esc(id)}" aria-pressed="${on}" aria-label="收藏">${on?'★':'☆'}</button>
+      <h3 class="card-name">${esc(i.nameZh || i.nameEn || id)}</h3>
+      <p class="card-en">${esc(i.nameEn||'')}</p>
+      <div class="card-cats">${catChips(i.categories, 2)}</div>
+      <code class="card-id">${esc(id)}</code>
+      <p class="card-desc">${esc(i.descriptionZh||i.descriptionEn||'')}</p>
+      <div class="card-foot">${isInstr
+        ? '<span class="pill-note">图纸 — 不可直接生成</span>'
+        : `<button class="btn" type="button" data-spawn="${esc(id)}">生成</button>`}</div>
+    </article>`;
+  }).join('');
+  grid.querySelectorAll('.card').forEach(c => {
+    c.onclick = () => openCatalog(c.dataset.id);
+    c.onkeydown = e => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); openCatalog(c.dataset.id); } };
+  });
+  grid.querySelectorAll('.fav').forEach(b => b.onclick = e => { e.stopPropagation(); toggleFav(b.dataset.fav); });
+  grid.querySelectorAll('[data-spawn]').forEach(b => b.onclick = e => { e.stopPropagation(); spawnItem(b.dataset.spawn, b); });
+}
+function renderInventory(){
+  $('count').textContent = S.inv.length ? S.inv.length + ' 项' : '—';
+  $('invCount').textContent = S.inv.length;
+  const q = S.subQ.toLowerCase();
+  const rows = S.inv.filter(x => !q || (x.name||'').toLowerCase().includes(q) || (x.id||'').toLowerCase().includes(q));
+  if(!rows.length){
+    rowList.innerHTML = `<div class="empty">${S.inv.length
+      ? '无匹配物品'
+      : '库存为空 — 先到「图鉴」点物品的<b>生成</b>, 或进入存档后点刷新'}</div>`;
+    return;
+  }
+  rowList.innerHTML = rows.map(x => `
+    <button class="row" type="button" data-uid="${x.uid}">
+      <span class="row-main">
+        <span class="row-name">${esc(x.name||x.id||'')}</span>
+        <span class="row-sub">${esc(x.id||'')}</span>
+      </span>
+      <span class="row-nums"><span>×${x.count}</span><span>单价 ${x.unitValue}</span></span>
+      <span class="row-loc">${esc(x.inv||'库存')}</span>
+    </button>`).join('');
+  rowList.querySelectorAll('.row').forEach(r => r.onclick = () => openInstance(Number(r.dataset.uid)));
+}
+function renderMine(){
+  const items = S.mine;
+  $('count').textContent = items.length ? items.length + ' 项' : '—';
+  $('myCount').textContent = items.length;
+  if(!items.length){
+    rowList.innerHTML = '<div class="empty">还没有生成记录 — 到「图鉴」点物品的<b>生成</b>, 生成成功后会出现在这里</div>';
+    return;
+  }
+  rowList.innerHTML = items.map(x => `
+    <div class="row" data-uid="${x.uid||0}">
+      <span class="row-main">
+        <span class="row-name">${esc(x.name||x.id||'')}</span>
+        <span class="row-sub">${esc(x.id||'')}</span>
+      </span>
+      <span class="row-nums"><span>×${x.count}</span><span>单价 ${x.unitValue}</span></span>
+      <span class="row-acts">
+        <button class="mini-btn" type="button" data-edit="${x.uid||0}">检查器</button>
+        <button class="mini-btn danger" type="button" data-del="${x.uid||0}">删除</button>
+      </span>
+    </div>`).join('');
+  rowList.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openInstance(Number(b.dataset.edit)));
+  rowList.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    const uid = Number(b.dataset.del);
+    if(!uid){ toast('该记录没有有效 uid — 可能已被删除', 'bad'); return; }
+    if(!confirm('删除该物品? 将从库存移除并销毁。')) return;
+    const j = await apiFetch('/api/delete?uid=' + uid);
+    if(j.ok){ toast('删除请求已发送', 'ok'); setTimeout(refreshMine, 600); }
+    else toast('删除失败: ' + (j.err||''), 'bad');
+  });
+}
+
+// ===== API 层 =====
+// 唯一入口。返回【已解析的对象】—— 调用方不要再 .json(), 那会抛 TypeError。
 const API = 'http://localhost:26880';
 const API_TIMEOUT = 8000;
 // 主线程可能被大存档长时间占用, 探针给更宽预算
@@ -638,332 +679,390 @@ async function apiFetch(path, ms = API_TIMEOUT){
 }
 let _toastTimer = 0;
 function toast(msg, cls){
-  clearTimeout(_toastTimer);          // 连点时后一条不再被前一条的清零提前打断
-  $toast.textContent = msg;
-  $toast.className = 'toast show ' + (cls||'');
-  _toastTimer = setTimeout(()=>{ $toast.className = 'toast'; }, 2600);
+  clearTimeout(_toastTimer);   // 连点时后一条不再被前一条的清零提前打断
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (cls||'');
+  _toastTimer = setTimeout(()=>{ t.className = 'toast'; }, 2600);
 }
-// 两级探针: /api/health 只证明 HTTP 线程存活 (不触主线程); /api/mine 走 RunOnMainThread,
+// 两级探针: /api/health 只证明 HTTP 线程存活 (不触主线程); /api/mine 走主线程,
 // 才能证明主线程可达 (未进存档/窗口失焦时主线程排空停摆, 此时点「生成」只会入队而无产物).
+let _mainThreadOk = false;
 async function checkServer(){
   const h = await apiFetch('/api/health', API_HEALTH_TIMEOUT);
   if(!h.ok){
-    $svDot.className='dot off';
-    $svText.textContent = '生成服务器离线 — 启动游戏(ProgressMod)后自动重连';
+    _mainThreadOk = false;
+    $('svDot').className = 'dot off';
+    $('svText').textContent = '生成服务器离线 — 启动游戏后自动重连';
     return false;
   }
   const m = await apiFetch('/api/mine', API_HEALTH_TIMEOUT);
   if(m.ok){
-    $svDot.className='dot on';
-    $svText.textContent='生成服务器已连接 · 主线程就绪';
+    _mainThreadOk = true;
+    $('svDot').className = 'dot on';
+    $('svText').textContent = '已连接 · 主线程就绪';
     return true;
   }
-  $svDot.className='dot warn';
-  $svText.textContent = 'HTTP 已连接, 主线程未响应 — 请进入存档并保持游戏窗口在前台';
+  _mainThreadOk = false;
+  $('svDot').className = 'dot warn';
+  $('svText').textContent = 'HTTP 已连接, 主线程未响应 — 请进入存档并保持窗口在前台';
   return false;
 }
-// 生成 = 入队; /api/spawn 只回 {ok, token}. 真正落地要轮询 /api/mine 看到该 token.
-// 旧版收到入队回执就报「已生成」, 主线程停摆时会假成功 — 这里改为确认落地后才报成功.
+// 生成 = 入队; /api/spawn 只回 {ok, token}. 真正落地要轮询 /api/mine 看到该 token,
+// 否则主线程停摆时会假成功 (收到入队回执就报「已生成」).
 async function spawnItem(id, btn){
-  const b = btn;
+  const b = btn, orig = b.textContent;
   if(!(await checkServer())){ toast('服务器未就绪 — 请进入存档并保持窗口在前台', 'bad'); return; }
-  b.disabled = true; b.className = 'spawn-btn'; b.textContent = '生成中...';
+  b.disabled = true; b.className = 'btn'; b.textContent = '生成中…';
+  const reset = ms => setTimeout(()=>{ b.className='btn'; b.textContent=orig; b.disabled=false; }, ms);
   const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=1');
-  const reset = (txt, cls, ms) => setTimeout(()=>{ b.className='spawn-btn'; b.textContent='生成'; b.disabled=false; }, ms);
   if(!r.ok){
-    b.className = 'spawn-btn err'; b.textContent = '失败';
-    toast('生成失败: ' + (r.err||''), 'bad'); reset('', '', 2200);
+    b.className = 'btn bad'; b.textContent = '失败';
+    toast('生成失败: ' + (r.err||''), 'bad'); reset(2200);
     return;
   }
   if(r.token) rememberToken(r.token);
   const landed = r.token ? await waitSpawned(r.token, 40, 250) : true;   // 最多 ~10s
   if(landed){
-    b.className = 'spawn-btn done'; b.textContent = '已生成 ✓';
-    toast('已生成到主背包: ' + id, 'ok'); reset('', '', 1800);
+    b.className = 'btn ok'; b.textContent = '已生成';
+    toast('已生成到主背包: ' + id, 'ok');
+    if(S.view === 'mine') refreshMine();
+    reset(1800);
   }else{
-    b.className = 'spawn-btn err'; b.textContent = '超时';
-    toast('已入队但未见产物 — 主线程可能被中断或未进存档 (可稍后在「我的生成」查看)', 'bad');
-    reset('', '', 2600);
+    b.className = 'btn bad'; b.textContent = '超时';
+    toast('已入队但未见产物 — 主线程可能被中断或未进存档 (稍后可在「我的生成」查看)', 'bad');
+    reset(2600);
   }
 }
 // 轮询 /api/mine 直到该 token 出现 (该路径走主线程, 返回即证明 item 已落地)
 async function waitSpawned(token, tries, gapMs){
   for(let i=0;i<tries;i++){
-    await new Promise(res=>setTimeout(res, gapMs));
+    await new Promise(res => setTimeout(res, gapMs));
     const m = await apiFetch('/api/mine', API_TIMEOUT);
     if(m.ok && (m.items||[]).some(x => String(x.token) === String(token))) return true;
   }
   return false;
 }
-// ===== 🎒 我的生成 (token 追踪) =====
-let MY_TOKENS = new Set(JSON.parse(localStorage.getItem('mySpawnTokens') || '[]'));
-function rememberToken(t){ MY_TOKENS.add(t); localStorage.setItem('mySpawnTokens', JSON.stringify([...MY_TOKENS])); updateMyBtn(); }
-function forgetToken(t){ MY_TOKENS.delete(t); localStorage.setItem('mySpawnTokens', JSON.stringify([...MY_TOKENS])); }
-function updateMyBtn(){ $myBtn.textContent = `🎒 我的生成 (${MY_TOKENS.size})`; }
-let myShowing = false;
-document.getElementById('myBtn').onclick = () => {
-  myShowing = !myShowing;
-  document.getElementById('myPanel').classList.toggle('show', myShowing);
-  document.getElementById('myBtn').classList.toggle('on', myShowing);
-  if(myShowing) refreshMine();
-};
+function rememberToken(t){ S.tokens.add(t); saveTokens(); $('myCount').textContent = S.tokens.size; }
+
+// ===== 取数 =====
 async function refreshMine(){
-  const listEl = $myList;
-  if(!(await checkServer())){ listEl.innerHTML = '<div class="my-empty">服务器离线 — 启动游戏后重试</div>'; return; }
-  try{
-    const r = await apiFetch('/api/mine');
-    const j = await r.json();
-    const items = (j.items||[]).filter(x => MY_TOKENS.has(x.token));
-    // 若服务器已无 (被删/重启), 清掉本地死 token
-    const live = new Set(items.map(x=>x.token));
-    [...MY_TOKENS].forEach(t => { if(!live.has(t)) MY_TOKENS.delete(t); });
-    localStorage.setItem('mySpawnTokens', JSON.stringify([...MY_TOKENS]));
-    updateMyBtn();
-    if(!items.length){ listEl.innerHTML = '<div class="my-empty">还没有生成记录 — 点卡片「生成」后这里会出现。刷新页面前有效。</div>'; return; }
-    listEl.innerHTML = items.map(x => `
-      <div class="my-item" data-uid="${x.uid||0}">
-        <div class="row1">
-          <span class="nm">${esc(x.name||x.id||'')}</span>
-          <span class="sub">${esc(x.id||'')} · 数量 ${x.count} · 价值 ${x.unitValue}</span>
-          <span class="acts">
-            <button class="edit-btn">✎ 完整检查器</button>
-            <button class="del-btn del">🗑 删除</button>
-          </span>
-        </div>
-      </div>`).join('');
-    listEl.querySelectorAll('.edit-btn').forEach(b => b.onclick = () => {
-      const uid = b.closest('.my-item').dataset.uid;
-      openInspector(Number(uid));
-    });
-    listEl.querySelectorAll('.del-btn').forEach(b => b.onclick = async () => {
-      const uid = b.closest('.my-item').dataset.uid;
-      if(!confirm('删除该物品? (从库存移除并销毁)')) return;
-      const rr = await apiFetch('/api/delete?uid=' + uid);
-      const jj = await rr.json();
-      if(jj.ok){ toast('删除请求已发送', 'ok'); setTimeout(()=>{ refreshMine(); }, 600); }
-      else toast('删除失败: ' + (jj.err||''), 'bad');
-    });
-  }catch(e){ listEl.innerHTML = '<div class="my-empty">加载失败: ' + esc(String(e)) + '</div>'; }
+  if(!(await checkServer())){ rowList.innerHTML = '<div class="empty">服务器离线 — 启动游戏后重试</div>'; return; }
+  const j = await apiFetch('/api/mine');            // 已解析对象
+  if(!j.ok){ rowList.innerHTML = '<div class="empty">加载失败: ' + esc(j.err||'') + '</div>'; return; }
+  const items = (j.items||[]).filter(x => S.tokens.has(x.token));
+  // 服务器已无该 token (被删 / 重启) → 清掉本地死 token, 否则永远留在列表里
+  const live = new Set(items.map(x => x.token));
+  [...S.tokens].forEach(t => { if(!live.has(t)) S.tokens.delete(t); });
+  saveTokens();
+  S.mine = items;
+  if(S.view === 'mine') renderMine();
+  else $('myCount').textContent = items.length;
+}
+async function refreshInv(){
+  if(!(await checkServer())){ rowList.innerHTML = '<div class="empty">服务器离线 — 启动游戏后重试</div>'; return; }
+  const j = await apiFetch('/api/inventory');       // 已解析对象
+  if(!j.ok){ rowList.innerHTML = '<div class="empty">加载失败: ' + esc(j.err||'') + '</div>'; return; }
+  S.inv = j.items || [];
+  $('invCount').textContent = S.inv.length;
+  if(S.view === 'inventory') renderInventory();
+}
+async function refreshCurrent(){
+  if(S.view === 'inventory') await refreshInv();
+  else if(S.view === 'mine') await refreshMine();
+  else await checkServer();
 }
 
-// ===== 📦 全部库存 (完整检查器入口) =====
-let invShowing = false;
-const invBtn = document.getElementById('invBtn');
-invBtn.onclick = () => {
-  invShowing = !invShowing;
-  document.getElementById('invPanel').classList.toggle('show', invShowing);
-  invBtn.classList.toggle('on', invShowing);
-  if(invShowing) refreshInv();
-};
-let ALL_INV = [];
-async function refreshInv(){
-  const listEl = $invList;
-  if(!(await checkServer())){ listEl.innerHTML = '<div class="my-empty">服务器离线 — 启动游戏后重试</div>'; return; }
-  try{
-    const r = await apiFetch('/api/inventory');
-    const j = await r.json();
-    ALL_INV = j.items||[];
-    $invCount.textContent = ALL_INV.length + ' 项';
-    renderInv('');
-  }catch(e){ listEl.innerHTML = '<div class="my-empty">加载失败: ' + esc(String(e)) + '</div>'; }
+// ===== 抽屉: 图鉴条目(信息) 与 库存实例(编辑/标签/特性) 的统一入口 =====
+function openDrawer(){ $('drawer').classList.add('show'); $('scrim').classList.add('show'); $('drawer').setAttribute('aria-hidden','false'); }
+function closeDrawer(){ $('drawer').classList.remove('show'); $('scrim').classList.remove('show'); $('drawer').setAttribute('aria-hidden','true'); }
+$('dwClose').onclick = closeDrawer;
+$('scrim').onclick = closeDrawer;
+
+function openCatalog(id){
+  const i = ITEMS.find(x => x.stableId === id);
+  if(!i) return;
+  $('dwName').textContent = i.nameZh || i.nameEn || id;
+  $('dwSub').textContent = i.nameEn || '';
+  $('dwTabs').innerHTML = '';
+  const isInstr = id.endsWith('_instruction');
+  $('dwBody').innerHTML = `<div class="pane show">
+    <dl class="kv">
+      <dt>stableId</dt><dd>${esc(i.stableId||'')}</dd>
+      <dt>分类</dt><dd class="plain">${esc((i.categories||[]).map(zCat).join('、')) || '—'}</dd>
+      <dt>类型</dt><dd class="plain">${esc((i.itemTypes||[]).map(zType).join('、')) || '—'}</dd>
+      <dt>kind</dt><dd>${esc(i.kind||'—')}</dd>
+      <dt>目录</dt><dd>${esc(i.directory||'—')}</dd>
+      <dt>添加策略</dt><dd>${esc(i.addPolicy||'—')}</dd>
+    </dl>
+    ${(i.descriptionZh||i.descriptionEn)
+      ? `<div class="sec-t">描述</div><div class="desc-full">${esc(i.descriptionZh||i.descriptionEn)}</div>` : ''}
+  </div>`;
+  $('dwFoot').innerHTML = isInstr
+    ? '<span class="pill-note">图纸 — 不能直接生成</span><span style="margin-left:auto"><button class="btn ghost" id="dwCopy">复制 ID</button></span>'
+    : '<button class="btn" id="dwSpawn">生成到主背包</button><span style="margin-left:auto"><button class="btn ghost" id="dwCopy">复制 ID</button></span>';
+  $('dwCopy').onclick = async () => {
+    let ok = false;
+    try{ await navigator.clipboard.writeText(i.stableId); ok = true; }
+    catch{
+      try{
+        const ta = document.createElement('textarea');
+        ta.value = i.stableId; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.opacity='0';
+        document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove();
+      }catch{ ok = false; }
+    }
+    toast(ok ? '已复制: ' + i.stableId : '复制失败 — 请手动复制', ok ? 'ok' : 'bad');
+  };
+  const sp = $('dwSpawn');
+  if(sp) sp.onclick = () => spawnItem(i.stableId, sp);
+  openDrawer();
 }
-document.getElementById('invSearch').oninput = e => renderInv(e.target.value);
-function renderInv(q){
-  const listEl = $invList;
-  q = (q||'').toLowerCase();
-  const rows = ALL_INV.filter(x => !q || (x.name||'').toLowerCase().includes(q) || (x.id||'').toLowerCase().includes(q));
-  if(!rows.length){
-    listEl.innerHTML = `<div class="my-empty">${ALL_INV.length ? '无匹配物品' : '库存为空 — 先点卡片生成物品。'}</div>`;
+
+const INSTANCE_TABS = [['basic','基本信息'],['tags','标签'],['features','特性']];
+function openInstance(uid){
+  if(!uid){ toast('该条目没有有效 uid — 可能已被删除', 'bad'); return Promise.resolve(); }
+  S.uid = uid;
+  S.insTab = 'basic';
+  $('dwName').textContent = '加载中…';
+  $('dwSub').textContent = 'uid ' + uid;
+  $('dwBody').innerHTML = '<div class="pane-empty">读取物品…</div>';
+  $('dwFoot').innerHTML = '';
+  openDrawer();
+  return loadInstance();
+}
+async function loadInstance(){
+  const uid = S.uid;
+  if(!(await checkServer())){ $('dwBody').innerHTML = '<div class="pane-empty">服务器离线 — 启动游戏后重试</div>'; return; }
+  const j = await apiFetch('/api/item?uid=' + uid);    // 已解析对象
+  if(!j.ok || !j.item){
+    const msg = j.err || 'item not found';
+    $('dwBody').innerHTML = '<div class="pane-empty">读取失败: ' + esc(msg) + '</div>';
+    toast('读取失败: ' + msg, 'bad');
     return;
   }
-  listEl.innerHTML = rows.map(x => `
-    <div class="inv-row" data-uid="${x.uid}" role="button" tabindex="0" aria-label="${esc(x.name||x.id||'')}">
-      <span class="nm">${esc(x.name||x.id||'')}</span>
-      <span class="sub">${esc(x.id||'')} ×${x.count}</span>
-      <span class="sub">价值 ${x.unitValue}</span>
-      <span class="loc">${esc(x.inv||'库存')}</span>
-    </div>`).join('');
-  listEl.querySelectorAll('.inv-row').forEach(row => {
-    const open = () => openInspector(Number(row.dataset.uid));
-    row.onclick = open;
-    row.onkeydown = e => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); open(); } };
-  });
+  renderInstance(j.item);
 }
-
-// ===== 🔍 完整检查器 (拉全字段 / 编辑 / 标签 / 特性 / 删除) =====
-let CUR_UID = 0;
-async function openInspector(uid){
-  if(!(await checkServer())){ toast('服务器离线', 'bad'); return; }
-  CUR_UID = uid;
-  const box = document.getElementById('inspector');
-  box.classList.add('show');
-  document.getElementById('insName').textContent = '加载中...';
-  document.getElementById('insUid').textContent = 'uid ' + uid;
-  try{
-    const r = await apiFetch('/api/item?uid=' + uid);
-    const j = await r.json();
-    if(!j.ok || !j.item){ toast('读取失败: ' + (j.err||'item not found'), 'bad'); box.classList.remove('show'); return; }
-    renderInspector(j.item);
-  }catch(e){ toast('加载失败: ' + e, 'bad'); box.classList.remove('show'); }
-}
-let INS = null;
-function renderInspector(item){
-  INS = item;
-  document.getElementById('insName').textContent = (item.name||item.id||'') + (item.unitCount>1 ? ' ×'+item.unitCount : '');
-  document.getElementById('insUid').textContent = (item.id||'') + ' · uid ' + item.uid + ' · 价值 ' + item.unitValue;
-  // 基础 tab
-  const baseEl = document.getElementById('insFields');
-  baseEl.innerHTML = '';
-  const paneB = document.createElement('div'); paneB.className='insp-pane show'; paneB.dataset.p='base';
-  paneB.innerHTML = fieldHTML('名称','name',item.name||'') +
-    fieldHTML('数量','unitCount',item.unitCount,true) +
-    fieldHTML('价值/个','unitValue',item.unitValue,true) +
-    fieldHTML('基础价值','unitBaseValue',item.unitBaseValue,true) +
-    fieldHTML('短描述','shortDescription',item.shortDescription||'','desc') +
-    fieldHTML('长描述','longDescription',item.longDescription||'','desc') +
-    fieldHTML('风味文本','flavorText',item.flavorText||'','desc') +
-    fieldHTML('自定义文本','customText',item.customText||'','desc') +
-    fieldHTML('精度加成','bonusAccuracy',item.bonusAccuracy,true) +
-    fieldHTML('精灵路径','spritePath',item.spritePath||'') +
-    fieldHTML('精灵图集','spriteAtlasPath',item.spriteAtlasPath||'');
-  // 标签 tab
-  const paneT = document.createElement('div'); paneT.className='insp-pane'; paneT.dataset.p='tags';
-  paneT.innerHTML = '<div class="insp-section-title">base 标签 (item.state)</div><div id="tagBase"></div>' +
-    '<div class="insp-section-title">modified 标签 (item.modifiedState)</div><div id="tagMod"></div>' +
-    '<div class="insp-section-title">添加标签</div>' +
-    '<div class="insp-row"><input id="newTagKey" placeholder="新标签 key"><input id="newTagLabel" placeholder="显示名 (可选)" class="w-150">' +
-    '<button class="mini-btn green" id="addTagBtn">+ 添加</button></div>';
-  // 特性 tab — 预设下拉 (照原版 ItemManager FeaturePresets 12 项) + 自定义 category
-  const FEAT_PRESETS = [
-    ['free','免费 / Free'],['retail_markup','零售加价 / Retail markup'],['donation','捐赠 / Donation'],
-    ['discounted_buy','折扣购买 / Discounted buy'],['premium_buy','高级购买 / Premium buy'],
-    ['cigarette_authenticity','香烟真伪 / Cigarette authenticity'],['stamp_authenticity','邮票真伪 / Stamp authenticity'],
-    ['module_stuck','模块卡住 / Module stuck'],['discount_25','25% 折扣 / 25% discount'],
-    ['bargain_markup','议价加价 / Bargain markup'],['bargain_discount','议价折扣 / Bargain discount'],
-    ['equipment_good','良好装备状态 / Good equipment']
-  ];
-  const paneF = document.createElement('div'); paneF.className='insp-pane'; paneF.dataset.p='features';
-  const featOpts = '<option value="__custom__">自定义 category…</option>' + FEAT_PRESETS.map(p=>`<option value="${p[0]}">${p[1]}</option>`).join('');
-  paneF.innerHTML = '<div class="insp-section-title">已有特性</div><div id="featList"></div>' +
-    '<div class="insp-section-title">添加特性</div>' +
-    '<div class="insp-row"><select id="newFeatSel">' + featOpts + '</select>' +
-    '<input id="newFeatCat" class="is-hidden" placeholder="自定义 category / identifier">' +
-    '<button class="mini-btn green" id="addFeatBtn">+ 添加</button></div>';
-  baseEl.append(paneB, paneT, paneF);
-  const featSel = document.getElementById('newFeatSel');
-  if(featSel) featSel.onchange = () => {
-    const cus = document.getElementById('newFeatCat');
-    if(cus) cus.classList.toggle('is-hidden', featSel.value !== '__custom__');
+function renderInstance(it){
+  S.ins = it;
+  $('dwName').textContent = (it.name || it.id || '') + (it.unitCount > 1 ? ' ×' + it.unitCount : '');
+  $('dwSub').textContent = (it.id||'') + ' · uid ' + it.uid + ' · 单价 ' + it.unitValue;
+  $('dwTabs').innerHTML = INSTANCE_TABS.map(([k,label]) =>
+    `<button type="button" data-tab="${k}" class="${S.insTab===k?'on':''}">${label}</button>`).join('');
+  $('dwBody').innerHTML = buildPanes(it);
+  renderPanes();
+  $('dwFoot').innerHTML = `<button class="btn danger" id="dwDel">删除物品</button>
+    <span style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn ghost" id="dwReload">重新读取</button>
+    </span>`;
+  $('dwDel').onclick = async () => {
+    if(!confirm('确定删除该物品? 将从库存移除并销毁。')) return;
+    const r = await apiFetch('/api/delete?uid=' + S.uid);   // 已解析对象
+    if(r.ok){
+      toast('删除请求已发送', 'ok'); closeDrawer();
+      setTimeout(()=>{ refreshCurrent(); refreshMine(); }, 600);
+    } else toast('删除失败: ' + (r.err||''), 'bad');
   };
-  renderTags();
-  renderFeats();
+  $('dwReload').onclick = loadInstance;
+  // 字段编辑 (change = 失焦或回车提交)
+  $('dwBody').onchange = async e => {
+    const inp = e.target.closest('[data-field]');
+    if(!inp) return;
+    if(await insEdit(inp.dataset.field, inp.value)) toast('已应用: ' + inp.dataset.field, 'ok');
+  };
 }
-function fieldHTML(label, field, val, isNum, isDesc){
-  const v = esc(String(val ?? ''));
-  if(isDesc) return `<div class="insp-field"><label>${label}</label><textarea class="f-${field}" data-field="${field}">${v}</textarea></div>`;
-  return `<div class="insp-field"><label>${label}</label><input class="f-${field}" data-field="${field}" ${isNum?'type="number"':''} value="${v}"></div>`;
+function renderPanes(){
+  $('dwBody').querySelectorAll('.pane').forEach(p => p.classList.toggle('show', p.dataset.p === S.insTab));
+  $('dwTabs').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.insTab));
+  renderTagsPane();
 }
-function renderTags(){
-  const base = INS.tags||[], mod = INS.tagsModified||[];
-  document.getElementById('tagBase').innerHTML = base.length ? base.map(tagHTML).join('') : '<div class="insp-empty">无 base 标签</div>';
-  document.getElementById('tagMod').innerHTML = mod.length ? mod.map(t => tagHTML(t,true)).join('') : '<div class="insp-empty">无 modified 标签</div>';
+// tab 切换: dwTabs 容器不会被替换, 只换 innerHTML, 故在容器上委托一次即可
+$('dwTabs').onclick = e => {
+  const b = e.target.closest('[data-tab]');
+  if(!b || !b.dataset.tab) return;
+  S.insTab = b.dataset.tab;
+  renderPanes();
+};
+function buildPanes(it){
+  const f = (label, field, val, isNum, isDesc) => {
+    const v = esc(String(val ?? ''));
+    return isDesc
+      ? `<div class="fld"><label>${label}</label><textarea data-field="${field}">${v}</textarea></div>`
+      : `<div class="fld"><label>${label}</label><input data-field="${field}" ${isNum?'type="number"':''} value="${v}"></div>`;
+  };
+  return `<div class="pane" data-p="basic">
+    <div class="sec-t">基础字段 — 修改后失焦即生效</div>
+    ${f('名称','name',it.name||'')}
+    ${f('数量','unitCount',it.unitCount,true)}
+    ${f('价值/个','unitValue',it.unitValue,true)}
+    ${f('基础价值','unitBaseValue',it.unitBaseValue,true)}
+    ${f('精度加成','bonusAccuracy',it.bonusAccuracy,true)}
+    ${f('短描述','shortDescription',it.shortDescription||'','','1')}
+    ${f('长描述','longDescription',it.longDescription||'','','1')}
+    ${f('风味文本','flavorText',it.flavorText||'','','1')}
+    ${f('自定义文本','customText',it.customText||'','','1')}
+    <div class="sec-t">资源</div>
+    ${f('精灵路径','spritePath',it.spritePath||'')}
+    ${f('精灵图集','spriteAtlasPath',it.spriteAtlasPath||'')}
+  </div>
+  <div class="pane" data-p="tags">
+    <div class="sec-t">base 标签 (item.state)</div><div id="tagBase"></div>
+    <div class="sec-t">modified 标签 (item.modifiedState)</div><div id="tagMod"></div>
+    <div class="sec-t">添加标签</div>
+    <div class="tr"><input id="newTagKey" placeholder="标签 key" style="flex:1">
+      <input id="newTagLabel" placeholder="显示名 (可选)" style="flex:1">
+      <button class="mini-btn" id="addTagBtn" type="button">添加</button></div>
+  </div>
+  <div class="pane" data-p="features">
+    <div class="sec-t">已有特性</div><div id="featList"></div>
+    <div class="sec-t">添加特性</div>
+    <div class="tr">
+      <select id="newFeatSel" style="flex:1">
+        <option value="__custom__">自定义 category…</option>
+        ${FEAT_PRESETS.map(p=>`<option value="${p[0]}">${p[1]}</option>`).join('')}
+      </select>
+      <input id="newFeatCat" placeholder="自定义 category / identifier" hidden style="flex:1">
+      <button class="mini-btn" id="addFeatBtn" type="button">添加</button></div>
+  </div>`;
 }
-// tag 中文: 优先 TAG_ZH[key]; 剥掉 TYPE-STRING_ 前缀后查 TYPE_ZH(物品类型)/TAG_ZH/TAGNAME_ZH(内部属性名); label 同法兜底
+// 特性预设 — 照原版 ItemManager FeaturePresets 12 项
+const FEAT_PRESETS = [
+  ['free','免费 / Free'],['retail_markup','零售加价 / Retail markup'],['donation','捐赠 / Donation'],
+  ['discounted_buy','折扣购买 / Discounted buy'],['premium_buy','高级购买 / Premium buy'],
+  ['cigarette_authenticity','香烟真伪 / Cigarette authenticity'],['stamp_authenticity','邮票真伪 / Stamp authenticity'],
+  ['module_stuck','模块卡住 / Module stuck'],['discount_25','25% 折扣 / 25% discount'],
+  ['bargain_markup','议价加价 / Bargain markup'],['bargain_discount','议价折扣 / Bargain discount'],
+  ['equipment_good','良好装备状态 / Good equipment']
+];
+async function insEdit(field, value){
+  const j = await apiFetch('/api/edit?uid=' + S.uid + '&field=' + field + '&value=' + encodeURIComponent(value));
+  if(!j.ok) toast('编辑 ' + field + ' 失败: ' + (j.err||''), 'bad');
+  return j.ok;
+}
+// tag 中文: 优先 TAG_ZH[key]; 剥掉 TYPE-STRING_ 前缀后查 TYPE_ZH / TAG_ZH / TAGNAME_ZH; label 同法兜底
 function zhTag(t){
-  const k = String(t.key||'');
-  const l = String(t.label||'');
-  if(TAG_ZH && TAG_ZH[k]) return TAG_ZH[k];
+  const T = TAG_ZH_SAFE();
+  const k = String(t.key||''), l = String(t.label||'');
+  if(T && T[k]) return T[k];
   const kk = k.replace(/^TYPE-STRING_/,'');
-  if(kk!==k){
-    if(TYPE_ZH && TYPE_ZH[kk]) return TYPE_ZH[kk];
-    if(TAG_ZH && TAG_ZH[kk]) return TAG_ZH[kk];
-    const kkk = kk.toLowerCase();
-    if(TAGNAME_ZH && TAGNAME_ZH[kkk]) return TAGNAME_ZH[kkk];
+  if(kk !== k){
+    if(TYPE_ZH[kk]) return TYPE_ZH[kk];
+    if(T && T[kk]) return T[kk];
+    if(TAGNAME_ZH[kk.toLowerCase()]) return TAGNAME_ZH[kk.toLowerCase()];
   }
   const ll = l.replace(/^TYPE-STRING_/,'');
-  if(TYPE_ZH && TYPE_ZH[ll]) return TYPE_ZH[ll];
-  if(TAG_ZH && TAG_ZH[ll]) return TAG_ZH[ll];
-  const lll = ll.toLowerCase();
-  if(TAGNAME_ZH && TAGNAME_ZH[lll]) return TAGNAME_ZH[lll];
+  if(TYPE_ZH[ll]) return TYPE_ZH[ll];
+  if(T && T[ll]) return T[ll];
+  if(TAGNAME_ZH[ll.toLowerCase()]) return TAGNAME_ZH[ll.toLowerCase()];
   return l || t.key;
 }
-// label 是否只是未本地化键的镜像(TYPE-STRING_* 且能映射), 若是则 .v 不重复显示
+// label 是否只是未本地化键的镜像 (TYPE-STRING_* 且能映射) — 是则不再重复显示
 function isMirrorLabel(t){
   const l = String(t.label||'');
   if(!l.startsWith('TYPE-STRING_')) return false;
   const ll = l.slice('TYPE-STRING_'.length);
-  return !!(TYPE_ZH && TYPE_ZH[ll]) || !!(TAG_ZH && TAG_ZH[ll]) || !!(TAGNAME_ZH && TAGNAME_ZH[ll.toLowerCase()]);
+  const T = TAG_ZH_SAFE();
+  return !!TYPE_ZH[ll] || !!(T && T[ll]) || !!TAGNAME_ZH[ll.toLowerCase()];
 }
 function tagHTML(t, modified){
-  const m = modified ? '&mod' : '';
+  const m = modified ? '1' : '';
   const on = t.enabled;
   const showL = t.label && !isMirrorLabel(t);
-  return `<div class="insp-row">
+  return `<div class="tr">
     <span class="k" title="key: ${esc(t.key)}">${esc(zhTag(t))}</span>
     <span class="v">${showL ? esc(t.label) + ' · ' : ''}int=${t.valueInt} · str=${esc(t.valueString||'')}</span>
     <select class="tog" data-key="${esc(t.key)}" data-m="${m}">
       <option value="1" ${on?'selected':''}>开</option>
       <option value="0" ${!on?'selected':''}>关</option>
     </select>
-    <input class="tval" data-key="${esc(t.key)}" data-m="${m}" value="${esc(t.valueString||'')}" placeholder="字符串值" class="w-120">
-    <button class="mini-btn" data-tval="${esc(t.key)}" data-m="${m}">设值</button>
-    <button class="mini-btn red" data-rtag="${esc(t.key)}" data-m="${m}">删除</button>
+    <input class="tval" data-key="${esc(t.key)}" data-m="${m}" value="${esc(t.valueString||'')}" placeholder="字符串值">
+    <button class="mini-btn" type="button" data-tval="${esc(t.key)}" data-m="${m}">设值</button>
+    <button class="mini-btn danger" type="button" data-rtag="${esc(t.key)}" data-m="${m}">删除</button>
   </div>`;
 }
-function renderFeats(){
-  const fs = INS.features||[];
-  const el = document.getElementById('featList');
-  el.innerHTML = fs.length ? fs.map(f => {
-    const cond = (f.fakeCondition?('假:'+f.fakeCondition.category):'') + (f.realCondition?(' 真:'+f.realCondition.category):'');
-    return `<div class="insp-row">
-      <span class="k">${esc(f.identifier||f.category||'')}</span>
-      <span class="v">${esc(f.category||'')} · 修饰 ${f.valueModifier} · ${f.useCondition?'有假/真条件':''} ${esc(cond)} · ${f.isDisabled?'禁用':'启用'}</span>
-      <button class="mini-btn red" data-rfeat="${esc(f.identifier||'')}">删除</button>
-    </div>`;
-  }).join('') : '<div class="insp-empty">无特性 — 香烟/邮票/模块类物品通常有特性</div>';
+function renderTagsPane(){
+  const base = (S.ins && S.ins.tags) || [], mod = (S.ins && S.ins.tagsModified) || [];
+  const tb = $('tagBase'), tm = $('tagMod');
+  if(tb) tb.innerHTML = base.length ? base.map(t => tagHTML(t,false)).join('') : '<div class="pane-empty">无 base 标签</div>';
+  if(tm) tm.innerHTML = mod.length ? mod.map(t => tagHTML(t,true)).join('') : '<div class="pane-empty">无 modified 标签</div>';
+  const fs = (S.ins && S.ins.features) || [];
+  const el = $('featList');
+  if(el){
+    el.innerHTML = fs.length ? fs.map(f => {
+      const cond = (f.fakeCondition ? '假:' + f.fakeCondition.category : '')
+                 + (f.realCondition ? ' 真:' + f.realCondition.category : '');
+      return `<div class="tr">
+        <span class="k">${esc(f.identifier||f.category||'')}</span>
+        <span class="v">${esc(f.category||'')} · 修饰 ${f.valueModifier} · ${f.useCondition?'有假/真条件':''} ${esc(cond)} · ${f.isDisabled?'禁用':'启用'}</span>
+        <button class="mini-btn danger" type="button" data-rfeat="${esc(f.identifier||'')}">删除</button>
+      </div>`;
+    }).join('') : '<div class="pane-empty">无特性 — 香烟 / 邮票 / 模块类物品通常有特性</div>';
+  }
+  const sel = $('newFeatSel');
+  if(sel) sel.onchange = () => {
+    const cus = $('newFeatCat');
+    if(cus) cus.hidden = sel.value !== '__custom__';
+  };
 }
-async function insEdit(field, value){
-  const rr = await apiFetch('/api/edit?uid=' + CUR_UID + '&field=' + field + '&value=' + encodeURIComponent(value));
-  const jj = await rr.json();
-  if(!jj.ok) toast('编辑 ' + field + ' 失败: ' + (jj.err||''), 'bad');
-  return jj.ok;
-}
-// 事件: 字段编辑 (blur 提交)
-document.getElementById('insFields').addEventListener('change', async e => {
-  const inp = e.target.closest('[data-field]');
-  if(!inp) return;
-  const field = inp.dataset.field;
-  if(await insEdit(field, inp.value)) toast('已应用: ' + field, 'ok');
-});
-// 事件: tab 切换
-document.querySelectorAll('.insp-tabs button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('.insp-tabs button').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on');
-  const tab = b.dataset.tab;
-  document.querySelectorAll('#insFields .insp-pane').forEach(p=>p.classList.toggle('show', p.dataset.p===tab));
-});
-// 事件: 标签开关/设值/删除 + 添加
-document.getElementById('insFields').addEventListener('click', async e => {
+// 抽屉内事件委托: 标签与特性的开关 / 设值 / 删除 / 添加
+$('dwBody').addEventListener('click', async e => {
   const s = e.target.closest('.tog');
-  if(s){ e.stopPropagation(); await insEdit(s.dataset.m ? 'tagModifiedEnabled':'tagEnabled', s.dataset.key+'='+s.value); toast('标签更新', 'ok'); return; }
+  if(s){
+    await insEdit(s.dataset.m ? 'tagModifiedEnabled' : 'tagEnabled', s.dataset.key + '=' + s.value);
+    toast('标签已更新', 'ok'); return;
+  }
   const sv = e.target.closest('button[data-tval]');
-  if(sv){ e.stopPropagation(); const key=sv.dataset.tval; const m=sv.dataset.m; const inp=sv.parentElement.querySelector('input[data-key="'+key+'"][data-m="'+m+'"]'); await insEdit(m?'tagModifiedValue':'tagValue', key+'='+inp.value); toast('已设值', 'ok'); return; }
+  if(sv){
+    const inp = sv.closest('.tr').querySelector('input.tval');
+    await insEdit(sv.dataset.m ? 'tagModifiedValue' : 'tagValue', sv.dataset.tval + '=' + (inp ? inp.value : ''));
+    toast('已设值', 'ok'); return;
+  }
   const rt = e.target.closest('button[data-rtag]');
-  if(rt){ e.stopPropagation(); const key=rt.dataset.rtag; const m=rt.dataset.m; await insEdit(m?'tagModifiedRemove':'tagRemove', key); toast('标签已删除', 'ok'); setTimeout(()=>refreshInspector(), 500); return; }
+  if(rt){
+    await insEdit(rt.dataset.m ? 'tagModifiedRemove' : 'tagRemove', rt.dataset.rtag);
+    toast('标签已删除', 'ok'); setTimeout(loadInstance, 500); return;
+  }
   const rf = e.target.closest('button[data-rfeat]');
-  if(rf){ e.stopPropagation(); await insEdit('featureRemove', rf.dataset.rfeat); toast('特性已删除', 'ok'); setTimeout(()=>refreshInspector(), 500); return; }
-  if(e.target.id==='addTagBtn'){ const k=document.getElementById('newTagKey').value.trim(); const l=document.getElementById('newTagLabel').value.trim(); if(!k){toast('填 tag key','bad');return;} await insEdit('tagAdd', k+(l?'|'+l:'')); toast('已添加标签', 'ok'); document.getElementById('newTagKey').value=''; document.getElementById('newTagLabel').value=''; setTimeout(()=>refreshInspector(), 500); }
-  if(e.target.id==='addFeatBtn'){ const sel=document.getElementById('newFeatSel'); const selV=sel?sel.value:'__custom__'; const c= selV==='__custom__' ? (document.getElementById('newFeatCat').value||'').trim() : selV; if(!c){toast('填 category','bad');return;} await insEdit('featureAdd', c); toast('已添加特性: '+c, 'ok'); if(document.getElementById('newFeatCat')) document.getElementById('newFeatCat').value=''; setTimeout(()=>refreshInspector(), 500); }
+  if(rf){
+    await insEdit('featureRemove', rf.dataset.rfeat);
+    toast('特性已删除', 'ok'); setTimeout(loadInstance, 500); return;
+  }
+  if(e.target.id === 'addTagBtn'){
+    const k = $('newTagKey').value.trim(), l = $('newTagLabel').value.trim();
+    if(!k){ toast('请填写标签 key', 'bad'); return; }
+    await insEdit('tagAdd', k + (l ? '|' + l : ''));
+    toast('已添加标签', 'ok'); $('newTagKey').value = ''; $('newTagLabel').value = '';
+    setTimeout(loadInstance, 500); return;
+  }
+  if(e.target.id === 'addFeatBtn'){
+    const sel = $('newFeatSel');
+    const c = (sel && sel.value !== '__custom__') ? sel.value : ($('newFeatCat').value||'').trim();
+    if(!c){ toast('请填写 category', 'bad'); return; }
+    await insEdit('featureAdd', c);
+    toast('已添加特性: ' + c, 'ok');
+    const cus = $('newFeatCat'); if(cus) cus.value = '';
+    setTimeout(loadInstance, 500);
+  }
 });
-async function refreshInspector(){ if(CUR_UID) openInspector(CUR_UID); }
-document.getElementById('insClose').onclick = () => { document.getElementById('inspector').classList.remove('show'); };
-document.getElementById('insDelete').onclick = async () => {
-  if(!confirm('确定删除该物品? 将从库存移除并销毁。')) return;
-  const rr = await apiFetch('/api/delete?uid=' + CUR_UID);
-  const jj = await rr.json();
-  if(jj.ok){ toast('删除请求已发送', 'ok'); document.getElementById('inspector').classList.remove('show'); setTimeout(()=>{ if(invShowing) refreshInv(); refreshMine(); }, 600); }
-  else toast('删除失败: ' + (jj.err||''), 'bad');
+
+// ===== 事件 =====
+let _searchTimer = 0;
+$('search').oninput = e => {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => {
+    S.q = e.target.value.trim();
+    if(S.view !== 'catalog') setView('catalog'); else renderContent();
+  }, 120);
 };
+$('refreshBtn').onclick = refreshCurrent;
+$('densityBtn').onclick = () => setDensity(S.density === 'compact' ? 'comfortable' : 'compact');
+document.querySelectorAll('.view-tab').forEach(t => t.onclick = () => setView(t.dataset.view));
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape') closeDrawer();
+  // "/" 快速聚焦搜索 (焦点在输入控件内时不触发)
+  if(e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)){
+    e.preventDefault(); $('search').focus(); $('search').select();
+  }
+});
 // 后台标签页停轮询: 省电, 也避免对主线程做无意义探针
 let _pollTimer = 0;
 function startPolling(){
@@ -971,12 +1070,13 @@ function startPolling(){
   _pollTimer = setInterval(()=>{ if(!document.hidden) checkServer(); }, 5000);
 }
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkServer(); });
-startPolling();
-checkServer();
-updateMyBtn();
-document.getElementById('totalCount').textContent = ITEMS.length;
 
-renderCats(); renderGrid();
+// ===== 启动 =====
+setDensity(S.density);
+setView('catalog');
+$('myCount').textContent = S.tokens.size;
+checkServer();
+startPolling();
 </script>
 </body>
 </html>
