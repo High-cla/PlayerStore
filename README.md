@@ -234,6 +234,10 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 - **卡片按钮排**：普通物品 = 生成 / 生成十个 / 详情（`data-spawn`，十个那只是 `data-count="10"`；`.foot-right` 把详情推到右侧）；`_instruction` 图纸卡 = 提示文字 + 详情。`spawnItem(id, btn, count)` 第三参是数量，直接进 `/api/spawn?...&count=n`（后端已限 1–999；省略即 1，向后兼容）。按钮复位靠 `b.dataset.orig` 记录原始类，**只在首次记录**（生成中 / 已生成会改写 `className`，每次都记会把状态类当成原类，幽灵按钮会被染成实心）。
 - **无障碍**：全站 `:focus-visible` 焦点环；**库存行**可键盘打开（Enter/Space）；分类导航重建 DOM 后会回填焦点（`renderNav` 尾部的 `focused` 逻辑，勿删）；toast `role="status" aria-live="polite"`；Escape 关抽屉；`/` 聚焦搜索。
 - **卡片等高由构造保证**：`.card-desc` 固定 `height:38px` + `-webkit-line-clamp:2`；`.card-cats` 与 `.card-foot` 各有 `min-height`（23px / 42px），因为 16 个 `_instruction` 卡既无分类 chip、foot 又只有一行提示文字——不补 min-height 会让它们矮 23px（实测 210 vs 233）。**删这三个尺寸中的任何一个，等高都会破**。
+- **卡片字体**：卡片用 IBM Plex Mono（与设计稿 slice-dark.html 同款），通过 `@font-face` + **base64 内嵌**在文件里，不是外链 `fonts/`。所以 HTML 拷到任何设备、任何目录都自带字体（实测：只拷 HTML 到空目录，`document.fonts.check('400 16px "IBM Plex Mono"')` 仍为 true、零外部字体请求）。
+  - 内嵌的只有 **latin 子集**，中文仍走 `--font` 栈的 Noto Sans SC 等系统字体；两者互补，缺一不可。
+  - 只内嵌 **400 / 600 两档**（卡片实际用到的字重）。加字重需同时补 `@font-face` 与 `.card{--mono}` 栈。
+  - 作用域：`.card{--mono:...}` 覆盖 `:root` 的值，子元素（`.card-id` / `.cat-chip` / `.btn`）继承 ⇒ **抽屉、导航、工具栏仍是 `:root` 的 Cascadia Mono**。因为 `.btn` 是卡片与抽屉共用的类，靠这层作用域隔离，改卡片字体不会波及抽屉。
 - **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。compact 下描述整块隐藏，故卡片高度不再等高（紧凑模式按内容收缩，属预期）。
 - `esc()` 转义 `& < > " '` 五类；`localStorage` 键 `itemFavs` / `mySpawnTokens` / `ps_density`。
 
