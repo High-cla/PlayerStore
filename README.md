@@ -202,14 +202,14 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 
 ```
 .app  100vh flex column
-├── .topbar   60px   只放全局项: 品牌 / 搜索 / 状态灯 / 密度切换
+├── .topbar   54px   只放全局项: 品牌 / 搜索 / 状态灯 / 密度切换
 └── .body     flex row, min-height:0
-    ├── .sidebar  248px  左栏分类导航 (自身 overflow-y)
+    ├── .sidebar  234px  左栏分类导航 (自身 overflow-y); ≤900px 转横向分类条
     └── .content  flex column
         ├── .toolbar    三视图切换 (图鉴 / 库存 / 我的生成) + 刷新 + 计数
         ├── .view-extra 视图专属过滤条 (按需填充)
-        └── .scroll-area 内容区滚动容器 (grid 或 row-list)
-.drawer  480px 右侧覆盖层 — 任意物品的唯一详情/编辑入口
+        └── .scroll-area 内容区滚动容器 (grid 或 row-list); 同时承载整列环境光
+.drawer  448px 右侧覆盖层 — 任意物品的唯一详情/编辑入口
 ```
 
 要点：
@@ -219,12 +219,19 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 - **视图由 `setView(v)` 统一切换**，内容渲染分发到 `renderCatalog` / `renderInventory` / `renderMine`。注意 `renderInventory` / `renderMine` 只在对应视图激活时才写 DOM（`refreshXxx` 结束后按 `S.view` 决定是否渲染）。
 - **抽屉统一承接两种语义**：图鉴条目 = 只读信息（`openCatalog`）；库存实例 = 基本信息 / 标签 / 特性 三 tab，可编辑（`openInstance` → `loadInstance`）。`openInstance` 返回 Promise 便于测试与串接。
 
-- **设计令牌**：`<style>` 开头的 `:root{...}` 是颜色 / 间距 / 圆角 / 字号 / 表面 / 层级 / 类别身份色的唯一定义处，改配色只改这里。文本色按 WCAG AA 校准（小字 ≥4.5，UI 元素 ≥3.0，实测全站最低 5.52）；类别身份色为 `--c-<category 小写>`（如 `--c-medical`），只作小面积点缀（色点 / 描边），**不作大面积背景**，故无色值对比度约束；JS 侧 `CAT_TOKEN` 只做键名映射、不存色值。
+- **设计令牌**：`<style>` 开头的 `:root{...}` 是颜色 / 间距 / 圆角 / 字号 / 表面 / 层级 / 族色的唯一定义处，改配色只改这里。
+  - **视觉方向 = 深色 + 渐变过渡 + 零图片**。零图片是硬约束：全页不得出现 `<img>` / `<svg>` / `<canvas>` / `url()` 背景（游戏贴图是 IL2CPP 内部资源路径 `Items/xxx`，**不是 web 可访问的 URL，也不打算提取**）。视觉信息全部由排版、族色光与渐变承载。
+  - **渐变是照明系统，不是装饰**：`.scroll-area` 顶部两道径向环境光 → 卡片是这束光下的承光面（卡体纵向渐变 + 卡顶 2px 族色渐变边 + 族色辉光 `.13` + 右下角 202deg 过渡）→ CTA / 导航激活 / 抽屉顶边同样是渐变。**不要在卡片上加左侧色条**（claude-design 明令的反模式），族色身份一律走卡顶渐变边与光。
+  - 文本色按 WCAG AA 校准（小字 ≥4.5）。注意**辉光会提亮实际底色**，测对比度必须把族色按 `.13` 混入卡片底色再算——按纯灰底测会得到虚高值。当前实测全页最低 **4.778**（`animal_cage` 英文名）。
+- **族色系统（8 族 + 中性）**：26 个类别收敛成 `--f-<族>-{1,2}` 8 族（ember / rose / amber / lime / orange / steel / violet / cyan）+ `--f-none-*`。`CAT_FAMILY`（JS）做类别→族映射，`famOfItem` / `famOfId` 求族，元素带 `fam-*` 类即获得 `--g1/--g2`。`--c-<category 小写>` 仍存在，是**族色的族内别名**，供导航色点与分类 chip 复用（`catColor` 读的仍是 `--c-*`，未改）。
+  - 新增类别必须同时进 `CAT_ZH`（中文名）/ `CAT_GROUPS`（导航分组）/ `CAT_TOKEN`（色点）/**`CAT_FAMILY`（族色，漏了会落 'none' 中性族）**，并给 `--c-<category>` 指向某个 `--f-*`。
+  - `ID_FAMILY` 是 `id → 族` 的预建 Map（库存行只有 id）：**逐行 `ITEMS.find` 是 O(rows × 481)，不要那样写**。
 - **分类导航分组**：27 个分类在 `CAT_GROUPS` 里归为 5 组（装备与武器 / 物资与材料 / 工具与模块 / 生活与交易 / 生成器）。新增分类必须同时进 `CAT_ZH`（中文名）与 `CAT_GROUPS`（否则不在导航中出现）与 `CAT_TOKEN`（配色）。
 - **API 层**：所有请求经 `apiFetch(path, ms)`（`AbortController` 超时 8s、探针 15s；响应非 JSON 容错；统一 `{ok, err}` 形状）。**它返回的是已解析对象，调用方不要再 `.json()`**——那会抛 `TypeError`，且会被外层 `try/catch` 吞成"加载失败"（v0.5.7 修复过此类回归）。新增端点必须走它，不要再直接 `fetch(API + …)`。
 - **服务器状态探针**：`/api/health` 只证明 HTTP 线程存活（不触主线程）；`checkServer()` 会再打一次 `/api/mine` 证明主线程可达，二者皆通才显示绿点。主线程停摆（未进存档 / 窗口失焦）时点「生成」只入队而无产物，故 `spawnItem` 拿到 token 后轮询 `/api/mine` 确认落地才报「已生成」，超时报错而非假成功。
 - **无障碍**：全站 `:focus-visible` 焦点环；卡片与库存行可键盘打开（Enter/Space）；分类导航重建 DOM 后会回填焦点（`renderNav` 尾部的 `focused` 逻辑，勿删）；toast `role="status" aria-live="polite"`；Escape 关抽屉；`/` 聚焦搜索。
-- **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。
+- **卡片等高由构造保证**：`.card-desc` 固定 `height:38px` + `-webkit-line-clamp:2`；`.card-cats` 与 `.card-foot` 各有 `min-height`（23px / 42px），因为 16 个 `_instruction` 卡既无分类 chip、foot 又只有一行提示文字——不补 min-height 会让它们矮 23px（实测 210 vs 233）。**删这三个尺寸中的任何一个，等高都会破**。
+- **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。compact 下描述整块隐藏，故卡片高度不再等高（紧凑模式按内容收缩，属预期）。
 - `esc()` 转义 `& < > " '` 五类；`localStorage` 键 `itemFavs` / `mySpawnTokens` / `ps_density`。
 
 - 物品中文名来源：游戏本地化包 `Probably-Stolen-ZH-*/translation/localization_master.csv`（`table=Item`, `key=item_<id>_name`）。
