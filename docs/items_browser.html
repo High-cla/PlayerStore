@@ -789,71 +789,51 @@ function toast(msg, cls){
   _toastTimer = setTimeout(()=>{ t.className = 'toast'; }, 2600);
 }
 // 两级探针: /api/health 只证明 HTTP 线程存活 (不触主线程); /api/mine 走主线程,
-// 才能证明主线程可达 (未进存档时主线程排空停摆, 此时点「生成」只会入队而无产物).
-// 注: 窗口失焦导致的停摆已由 mod 侧 Application.runInBackground = true 解决, 故此提示只提「进入存档」.
-let _mainThreadOk = false;
+// 才能证明主线程可达 (主线程停摆时点「生成」只会入队而无产物).
+// 注意不要武断归因: 主线程不响应可能是失焦暂停 / 大存档卡帧 / 未进存档, 三种都会超时.
+// 故直接透出服务端 err 文案 (RouteMine 附带「待处理作业数」便于判断主线程是否在消费).
+// 只探 /api/health (HTTP 线程存活即视为连上). 不要拿 /api/mine 当探针或门禁:
+// 它走主线程, 只用于「我的生成」列表; 主线程偶尔卡帧会让它超时, 据此判"离线"是误报.
 async function checkServer(){
   const h = await apiFetch('/api/health', API_HEALTH_TIMEOUT);
-  if(!h.ok){
-    _mainThreadOk = false;
-    $('svDot').className = 'dot off';
-    $('svText').textContent = '生成服务器离线 — 启动游戏后自动重连';
-    return false;
-  }
-  const m = await apiFetch('/api/mine', API_HEALTH_TIMEOUT);
-  if(m.ok){
-    _mainThreadOk = true;
+  if(h.ok){
     $('svDot').className = 'dot on';
-    $('svText').textContent = '已连接 · 主线程就绪';
+    $('svText').textContent = '生成服务器已连接 (ProgressMod)';
     return true;
   }
-  _mainThreadOk = false;
-  $('svDot').className = 'dot warn';
-  $('svText').textContent = 'HTTP 已连接, 主线程未响应 — 请进入存档';
+  $('svDot').className = 'dot off';
+  $('svText').textContent = '生成服务器离线 — 启动游戏后自动重连';
   return false;
 }
-// 生成 = 入队; /api/spawn 只回 {ok, token}. 真正落地要轮询 /api/mine 看到该 token,
-// 否则主线程停摆时会假成功 (收到入队回执就报「已生成」).
+// 生成 = 入队; /api/spawn 由 HTTP 线程处理, 回执即结果 (与云端一致).
 async function spawnItem(id, btn, count){
   const b = btn, orig = b.textContent, n = Math.max(1, Math.min(999, Math.floor(count) || 1));
-  // 原始类只在首次记录: 生成中/已生成会改写 className, 每次都记会把状态类当成原类
+  // 原始类只在首次记录: 已生成会改写 className, 每次都记会把状态类当成原类
   if(!b.dataset.orig) b.dataset.orig = b.className;
-  if(!(await checkServer())){ toast('服务器未就绪 — 请进入存档', 'bad'); return; }
-  b.disabled = true; b.className = 'btn'; b.textContent = '生成中…';
+  b.disabled = true;
   const reset = ms => setTimeout(()=>{ b.className = b.dataset.orig || 'btn'; b.textContent=orig; b.disabled=false; }, ms);
-  const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=' + n);
-  if(!r.ok){
-    b.className = 'btn bad'; b.textContent = '失败';
-    toast('生成失败: ' + (r.err||''), 'bad'); reset(2200);
-    return;
-  }
-  if(r.token) rememberToken(r.token);
-  const landed = r.token ? await waitSpawned(r.token, 40, 250) : true;   // 最多 ~10s
-  if(landed){
+  try {
+    const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=' + n);
+    if(!r.ok){
+      b.className = 'btn bad'; b.textContent = '失败';
+      toast('生成失败: ' + (r.err||''), 'bad'); reset(2200);
+      return;
+    }
+    if(r.token) rememberToken(r.token);
     b.className = 'btn ok'; b.textContent = '已生成';
-    toast('已生成到主背包: ' + id + (n > 1 ? ' ×' + n : ''), 'ok');
+    toast('已生成: ' + id + (n > 1 ? ' ×' + n : ''), 'ok');
     if(S.view === 'mine') refreshMine();
-    reset(1800);
-  }else{
-    b.className = 'btn bad'; b.textContent = '超时';
-    toast('已入队但未见产物 — 主线程可能被中断或未进存档 (稍后可在「我的生成」查看)', 'bad');
-    reset(2600);
+    reset(1500);
+  } catch(e){
+    b.className = 'btn bad'; b.textContent = '失败';
+    toast('请求失败: ' + e, 'bad'); reset(2200);
   }
-}
-// 轮询 /api/mine 直到该 token 出现 (该路径走主线程, 返回即证明 item 已落地)
-async function waitSpawned(token, tries, gapMs){
-  for(let i=0;i<tries;i++){
-    await new Promise(res => setTimeout(res, gapMs));
-    const m = await apiFetch('/api/mine', API_TIMEOUT);
-    if(m.ok && (m.items||[]).some(x => String(x.token) === String(token))) return true;
-  }
-  return false;
 }
 function rememberToken(t){ S.tokens.add(t); saveTokens(); $('myCount').textContent = S.tokens.size; }
 
 // ===== 取数 =====
 async function refreshMine(){
-  if(!(await checkServer())){ rowList.innerHTML = '<div class="empty">服务器离线 — 启动游戏后重试</div>'; return; }
+  // 不做探针门禁: 直接请求并按真实响应渲染 (探针只会把「主线程暂时卡顿」误报成「服务器离线」, 掩盖真因).
   const j = await apiFetch('/api/mine');            // 已解析对象
   if(!j.ok){ rowList.innerHTML = '<div class="empty">加载失败: ' + esc(j.err||'') + '</div>'; return; }
   const items = (j.items||[]).filter(x => S.tokens.has(x.token));
@@ -866,7 +846,6 @@ async function refreshMine(){
   else $('myCount').textContent = items.length;
 }
 async function refreshInv(){
-  if(!(await checkServer())){ rowList.innerHTML = '<div class="empty">服务器离线 — 启动游戏后重试</div>'; return; }
   const j = await apiFetch('/api/inventory');       // 已解析对象
   if(!j.ok){ rowList.innerHTML = '<div class="empty">加载失败: ' + esc(j.err||'') + '</div>'; return; }
   S.inv = j.items || [];
@@ -939,7 +918,6 @@ function openInstance(uid){
 }
 async function loadInstance(){
   const uid = S.uid;
-  if(!(await checkServer())){ $('dwBody').innerHTML = '<div class="pane-empty">服务器离线 — 启动游戏后重试</div>'; return; }
   const j = await apiFetch('/api/item?uid=' + uid);    // 已解析对象
   if(!j.ok || !j.item){
     const msg = j.err || 'item not found';

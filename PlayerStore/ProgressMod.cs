@@ -32,11 +32,9 @@ namespace ProgressMod
             PurgeLegacyEntries();
             // 配置在游戏启动时即落盘生成, 玩家可提前看到并修改
             MelonPreferences.Save();
-            // 后台运行: Unity 默认在窗口失焦时暂停 Update, 而物品生成的消费队列正是在
-            // OnUpdate 里排空 —— 用户开着浏览器(或任何别的窗口)点"生成"时游戏必然失焦,
-            // 队列就永远不被处理: HTTP 线程独立于 Unity 照常应答(页面因此显示"已连接"),
-            // 但请求始终没人消费, 表现为"连上了却生成不了"。
-            // 打开后台运行后, 主线程失焦时继续跑, 浏览器可以一直留在前台。
+            // 失焦时保持 Update 运行: 生成/读取队列都在 OnUpdate 排空, 默认失焦即暂停,
+            // 会让切到浏览器操作时队列不被消费. 与生成成功与否无关 —— 队列本就会在
+            // 重新获得焦点后继续消费, 这里只是让它不必等待.
             try { UnityEngine.Application.runInBackground = true; }
             catch (Exception e) { MelonLogger.Warning($"[Spawn] runInBackground 设置失败: {e.Message}"); }
             StartSpawnServer();
@@ -110,7 +108,8 @@ namespace ProgressMod
         private static readonly System.Collections.Concurrent.ConcurrentQueue<MainThreadJob> PendingJobs =
             new System.Collections.Concurrent.ConcurrentQueue<MainThreadJob>();
 
-        // HTTP 线程调用: 入队 + 等主线程执行 (最长 timeoutMs). 返回 false = 主线程未响应 (未进存档/卡帧).
+        // HTTP 线程调用: 入队 + 等主线程执行 (最长 timeoutMs). 返回 false = 主线程未响应
+        // (失焦暂停 / 大存档卡帧 / 未进存档 都会超时, 故不在此断言具体成因).
         // 事件驱动 (非轮询) ⇒ 无 10ms 量化延迟, 且无「超时后结果残留」的字典泄漏 (作业对象由本线程独占持有).
         private static bool RunOnMainThread(Func<object> work, out object result, int timeoutMs = 5000)
         {
@@ -118,7 +117,13 @@ namespace ProgressMod
             PendingJobs.Enqueue(job);
             try
             {
-                if (!job.Done.Wait(timeoutMs)) { job.Abandoned = true; result = null; return false; }
+                if (!job.Done.Wait(timeoutMs))
+                {
+                    job.Abandoned = true;
+                    result = null;
+                    MelonLogger.Warning($"[Spawn] 主线程 {timeoutMs}ms 未响应 (待处理作业 {PendingJobs.Count})");
+                    return false;
+                }
                 result = job.Result;
                 return true;
             }
@@ -375,7 +380,7 @@ namespace ProgressMod
                 code = 200;
                 return;
             }
-            resp = new { ok = false, err = "主线程未响应 (是否在存档?)" };
+            resp = new { ok = false, err = "主线程未响应 (待处理作业 " + PendingJobs.Count + ")" };
             code = 500;
         }
 
@@ -422,7 +427,7 @@ namespace ProgressMod
                 code = 200;
                 return;
             }
-            resp = new { ok = false, err = "主线程未响应 (是否在存档?)" };
+            resp = new { ok = false, err = "主线程未响应 (待处理作业 " + PendingJobs.Count + ")" };
             code = 500;
         }
 
@@ -444,7 +449,7 @@ namespace ProgressMod
                 return ditem == null ? null : DumpItem(ditem);
             }, out object dump))
             {
-                resp = new { ok = false, err = "dump timeout (主线程未响应, 是否在存档?)" };
+                resp = new { ok = false, err = "dump timeout (主线程未响应, 待处理作业 " + PendingJobs.Count + ")" };
                 code = 400;
                 return;
             }
