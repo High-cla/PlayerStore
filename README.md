@@ -202,13 +202,13 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 
 ```
 .app  100vh flex column
-├── .topbar   54px   只放全局项: 品牌 / 搜索 / 状态灯 / 密度切换
+├── .topbar   64px   只放全局项: 品牌 / 搜索 / 状态灯 / 密度切换
 └── .body     flex row, min-height:0
-    ├── .sidebar  234px  左栏分类导航 (自身 overflow-y); ≤900px 转横向分类条
+    ├── .sidebar  248px  左栏分类导航 (自身 overflow-y); ≤900px 转横向分类条
     └── .content  flex column
         ├── .toolbar    三视图切换 (图鉴 / 库存 / 我的生成) + 刷新 + 计数
         ├── .view-extra 视图专属过滤条 (按需填充)
-        └── .scroll-area 内容区滚动容器 (grid 或 row-list); 同时承载整列环境光
+        └── .scroll-area 内容区滚动容器 (grid 或 row-list)
 .drawer  448px 右侧覆盖层 — 任意物品的唯一详情/编辑入口
 ```
 
@@ -219,26 +219,31 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 - **视图由 `setView(v)` 统一切换**，内容渲染分发到 `renderCatalog` / `renderInventory` / `renderMine`。注意 `renderInventory` / `renderMine` 只在对应视图激活时才写 DOM（`refreshXxx` 结束后按 `S.view` 决定是否渲染）。
 - **抽屉统一承接两种语义**：图鉴条目 = 只读信息（`openCatalog`）；库存实例 = 基本信息 / 标签 / 特性 三 tab，可编辑（`openInstance` → `loadInstance`）。`openInstance` 返回 Promise 便于测试与串接。
 
-- **设计令牌**：`<style>` 开头的 `:root{...}` 是颜色 / 间距 / 圆角 / 字号 / 表面 / 层级 / 族色的唯一定义处，改配色只改这里。
-  - **视觉方向 = 深色 + 渐变过渡 + 零图片**。零图片是硬约束：全页不得出现 `<img>` / `<svg>` / `<canvas>` / `url()` 背景（游戏贴图是 IL2CPP 内部资源路径 `Items/xxx`，**不是 web 可访问的 URL，也不打算提取**）。视觉信息全部由排版、族色光与渐变承载。
-  - **渐变是照明系统，不是装饰**：`.scroll-area` 顶部两道径向环境光 → 卡片是这束光下的承光面（卡体纵向渐变 + 卡顶 2px 族色渐变边 + 族色辉光 `.13` + 右下角 202deg 过渡）→ CTA / 导航激活 / 抽屉顶边同样是渐变。**不要在卡片上加左侧色条**（claude-design 明令的反模式），族色身份一律走卡顶渐变边与光。
-  - 文本色按 WCAG AA 校准（小字 ≥4.5）。注意**辉光会提亮实际底色**，测对比度必须把族色按 `.13` 混入卡片底色再算——按纯灰底测会得到虚高值。
-  - **暖色只作为"光"存在于卡片**：卡片承光面 `--card-*` 与外壳同为中性冷灰；暖味来自四样东西 —— 卡顶 2px 族色渐变边、族色辉光 `.13`、卡内暖文字 `--fgc/--fgc2/--fgc3`、暖族标识色。四者**只被 `.card` 作用域消费**；外壳（顶栏 / 导航 / 工具栏 / 抽屉 / 行列表 / toast / 滚动条）一律用 `--bg/--surface/--border/--fg*`。两组令牌分开定义 —— 改卡片不牵连外壳。新增组件时按归属选令牌，别把 `--fgc*` 用在外壳上。静态检查：`grep -nE '(--card-top|--fgc)' docs/items_browser.html`，消费处必须全带 `.card` 前缀。
-- **族色系统（8 暖色族 + 中性）**：26 个类别收敛成 `--f-<族>-{1,2}` 8 族（ember / rose / amber / moss / orange / copper / plum / sand）+ `--f-none-*`，色相全部落在 340°–55° 暖区。`CAT_FAMILY`（JS）做类别→族映射，`famOfItem` / `famOfId` 求族，元素带 `fam-*` 类即获得 `--g1/--g2`。`--c-<category 小写>` 仍存在，是**族色的族内别名**，供导航色点与分类 chip 复用（`catColor` 读的仍是 `--c-*`，未改）。
-  - 新增类别必须同时进 `CAT_ZH`（中文名）/ `CAT_GROUPS`（导航分组）/ `CAT_TOKEN`（色点）/**`CAT_FAMILY`（族色，漏了会落 'none' 中性族）**，并给 `--c-<category>` 指向某个 `--f-*`。
-  - `ID_FAMILY` 是 `id → 族` 的预建 Map（库存行只有 id）：**逐行 `ITEMS.find` 是 O(rows × 481)，不要那样写**。
-- **分类导航分组**：27 个分类在 `CAT_GROUPS` 里归为 5 组（装备与武器 / 物资与材料 / 工具与模块 / 生活与交易 / 生成器）。新增分类必须同时进 `CAT_ZH`（中文名）与 `CAT_GROUPS`（否则不在导航中出现）与 `CAT_TOKEN`（配色）。
+- **设计语言 = NVIDIA 单色暗色**（权威依据 `docs/nvdesign.md`，改视觉前先读它）。`<style>` 开头的 `:root{...}` 是令牌唯一定义处，改配色只改这里。
+  - **单色是硬规则**：`--primary`（NVIDIA Green `#76b900`）承担全部 CTA / 激活态 / 链接 / 焦点环。**分类之间不用色相区分**——文档原话 "Don't add a second accent color for variety. The system is intentionally one-color."
+  - **层级只靠字重（400/700）与字号**，不靠底色深浅、不靠色相 tint（文档原话 "Build hierarchy from font weight (400 vs 700) and size, **not from color tinting**"）。
+  - **卡片 = canvas + 1px hairline**：纯黑底上卡片**无填充面、无投影、无渐变**，只用 1px `--hairline-2`(`#5e5e5e`，文档指定的暗色卡缘色) 描边分隔。hover 提亮描边到 `--ink`，不加底色。
+  - **极端棱角**：所有交互元素 `--r:2px`；无胶囊、无圆角卡片、无左侧色条。
+  - **零图片是硬约束**（承自用户指令）：全页不得出现 `<img>` / `<svg>` / `<canvas>` / `url()` 背景。游戏贴图是 IL2CPP 内部资源路径（`Items/xxx`），**不是 web 可访问的 URL，也不打算提取**。视觉信息全部由排版与描边承载。静态检查：`grep -cE '<img|<svg|<canvas|url\(' docs/items_browser.html`。
+  - **零渐变**：全页 `background-image` 不含 gradient（静态检查：浏览器里数 `getComputedStyle(e).backgroundImage.includes('gradient')` 应为 0）。
+  - 文本色按 WCAG **AA** 校准（小字 ≥4.5）。暗色下按纯黑底计算即可（无辉光提亮，故不需要再合成族色）。实测最差 6.08（抽屉 `label` 与 `.card-id`）。
+- **分类与导航**：26 个类别由 `CAT_ZH` 给中文名、`CAT_GROUPS` 归为 5 组（装备与武器 / 物资与材料 / 工具与模块 / 生活与交易 / 生成器）。新增类别**只需同时进 `CAT_ZH` 与 `CAT_GROUPS`**（色点已随单色体系删除，不再需要配任何颜色令牌）。导航里只有"全部物品 / 收藏"两项 + 5 个分组，激活态 = 绿字 + 700（窄屏为绿色下划线）。
 - **API 层**：所有请求经 `apiFetch(path, ms)`（`AbortController` 超时 8s、探针 15s；响应非 JSON 容错；统一 `{ok, err}` 形状）。**它返回的是已解析对象，调用方不要再 `.json()`**——那会抛 `TypeError`，且会被外层 `try/catch` 吞成"加载失败"（v0.5.7 修复过此类回归）。新增端点必须走它，不要再直接 `fetch(API + …)`。
 - **服务器状态探针**：`/api/health` 只证明 HTTP 线程存活（不触主线程）；`checkServer()` 会再打一次 `/api/mine` 证明主线程可达，二者皆通才显示绿点。主线程停摆（未进存档 / 窗口失焦）时点「生成」只入队而无产物，故 `spawnItem` 拿到 token 后轮询 `/api/mine` 确认落地才报「已生成」，超时报错而非假成功。
 - **卡片不是按钮**：卡片是 `role="group"`（无 `tabindex`），**点卡片正文 / 名称 / 描述都不开抽屉**；详情只由右下角「详情」按钮（`data-detail`）打开。**勿把 `onclick` 加回卡片本体**。
 - **卡片按钮排**：普通物品 = 生成 / 生成十个 / 详情（`data-spawn`，十个那只是 `data-count="10"`；`.foot-right` 把详情推到右侧）；`_instruction` 图纸卡 = 提示文字 + 详情。`spawnItem(id, btn, count)` 第三参是数量，直接进 `/api/spawn?...&count=n`（后端已限 1–999；省略即 1，向后兼容）。按钮复位靠 `b.dataset.orig` 记录原始类，**只在首次记录**（生成中 / 已生成会改写 `className`，每次都记会把状态类当成原类，幽灵按钮会被染成实心）。
 - **无障碍**：全站 `:focus-visible` 焦点环；**库存行**可键盘打开（Enter/Space）；分类导航重建 DOM 后会回填焦点（`renderNav` 尾部的 `focused` 逻辑，勿删）；toast `role="status" aria-live="polite"`；Escape 关抽屉；`/` 聚焦搜索。
-- **卡片等高由构造保证**：`.card-desc` 固定 `height:38px` + `-webkit-line-clamp:2`；`.card-cats` 与 `.card-foot` 各有 `min-height`（23px / 42px），因为 16 个 `_instruction` 卡既无分类 chip、foot 又只有一行提示文字——不补 min-height 会让它们矮 23px（实测 210 vs 233）。**删这三个尺寸中的任何一个，等高都会破**。
-- **卡片字体**：卡片用 IBM Plex Mono（与设计稿 slice-dark.html 同款），通过 `@font-face` + **base64 内嵌**在文件里，不是外链 `fonts/`。所以 HTML 拷到任何设备、任何目录都自带字体（实测：只拷 HTML 到空目录，`document.fonts.check('400 16px "IBM Plex Mono"')` 仍为 true、零外部字体请求）。
-  - 内嵌的只有 **latin 子集**，中文仍走 `--font` 栈的 Noto Sans SC 等系统字体；两者互补，缺一不可。
-  - 只内嵌 **400 / 600 两档**（卡片实际用到的字重）。加字重需同时补 `@font-face` 与 `.card{--mono}` 栈。
-  - 作用域：`.card{--mono:...}` 覆盖 `:root` 的值，子元素（`.card-id` / `.cat-chip` / `.btn`）继承 ⇒ **抽屉、导航、工具栏仍是 `:root` 的 Cascadia Mono**。因为 `.btn` 是卡片与抽屉共用的类，靠这层作用域隔离，改卡片字体不会波及抽屉。
-- **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。compact 下描述整块隐藏，故卡片高度不再等高（紧凑模式按内容收缩，属预期）。
+- **卡片等高由构造保证**（实测 481 卡全 282px）：`.card-desc` 固定 `height:50px` + `-webkit-line-clamp:2`；`.card-name` / `.card-en` / `.card-id` 各锁 1 行（`-webkit-line-clamp:1`）；`.card-cats` 有 `min-height:26px`、`.card-foot` 有 `min-height:60px`——16 个 `_instruction` 卡既无分类 chip、foot 又只有一行提示文字，不补 min-height 就会矮一截。**删这些尺寸中的任何一个，等高都会破**。
+- **字体：全站单一字族 Inter**（文档 typography 规则：no serif / no display variant / **no monospace** / no italic）。通过 `@font-face` + **base64 内嵌** 400/700 两档，不是外链 `fonts/`。所以 HTML 拷到任何设备、任何目录都自带字体（实测 `document.fonts` 报 `400:loaded` / `700:loaded`，零外部字体请求）。
+  - 内嵌的只有 **latin 子集**，中文回退到 `--font` 栈的 `Noto Sans SC` → `PingFang SC` → `Microsoft YaHei`（覆盖 Win/macOS/Android）。两者互补，缺一不可。
+  - **不要给任何元素设 `font-family:monospace`**：`<code class="card-id">` 的浏览器默认字体就是等宽，所以 `.card-id` 必须显式写 `font-family:var(--font)`（删掉就会泄漏 monospace，静态检查 `monoLeak` 应为 0）。
+  - 新增字重需同时补 `@font-face` 与 `:root --font` 栈。
+- **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。compact 下描述整块隐藏、卡片 padding 收窄（grid 列宽 340→268px），故卡片高度不再等高（紧凑模式按内容收缩，属预期）。
+- **跨设备加固**（改动样式时勿回退）：
+  - `<meta viewport>` 带 `viewport-fit=cover`——没有它 `env(safe-area-inset-*)` 恒为 0，刘海屏避让失效。顶栏与 toast 用 `max(…, env(safe-area-inset-*))` 避让安全区。
+  - **≤900px 时输入控件字号提到 16px**：iOS Safari 对 `font-size < 16px` 的输入框聚焦时会自动缩放整个页面且不还原。新增输入控件必须纳入这条规则。
+  - **所有 `:hover` 规则统一收在文件末尾的 `@media (hover:hover){…}` 块里**：触摸设备上 hover 会粘住（点过的按钮永久保持高亮），且与 `:focus-visible` 叠成双重高亮。新增 hover 规则必须写进该块，不要散落在组件旁边。
+  - 触控目标 ≥44px（实测 0 个过小目标）；`.app` 用 `100dvh` 优先 `100vh` 兜底，避免移动端地址栏收缩时溢出。
 - `esc()` 转义 `& < > " '` 五类；`localStorage` 键 `itemFavs` / `mySpawnTokens` / `ps_density`。
 
 - 物品中文名来源：游戏本地化包 `Probably-Stolen-ZH-*/translation/localization_master.csv`（`table=Item`, `key=item_<id>_name`）。
