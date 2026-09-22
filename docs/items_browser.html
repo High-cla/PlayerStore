@@ -813,7 +813,7 @@ async function spawnItem(id, btn, count){
     const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=' + n);
     if(!r.ok){ toast('生成失败: ' + (r.err||''), 'bad'); return; }
     if(r.token) rememberToken(r.token);
-    toast('已生成: ' + id + (n > 1 ? ' ×' + n : ''), 'ok');
+    toast('已生成: ' + id, 'ok');
     if(S.view === 'mine') refreshMine();
   } catch(e){
     toast('请求失败: ' + e, 'bad');
