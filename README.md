@@ -223,7 +223,7 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
   - **视觉方向 = 深色 + 渐变过渡 + 零图片**。零图片是硬约束：全页不得出现 `<img>` / `<svg>` / `<canvas>` / `url()` 背景（游戏贴图是 IL2CPP 内部资源路径 `Items/xxx`，**不是 web 可访问的 URL，也不打算提取**）。视觉信息全部由排版、族色光与渐变承载。
   - **渐变是照明系统，不是装饰**：`.scroll-area` 顶部两道径向环境光 → 卡片是这束光下的承光面（卡体纵向渐变 + 卡顶 2px 族色渐变边 + 族色辉光 `.13` + 右下角 202deg 过渡）→ CTA / 导航激活 / 抽屉顶边同样是渐变。**不要在卡片上加左侧色条**（claude-design 明令的反模式），族色身份一律走卡顶渐变边与光。
   - 文本色按 WCAG AA 校准（小字 ≥4.5）。注意**辉光会提亮实际底色**，测对比度必须把族色按 `.13` 混入卡片底色再算——按纯灰底测会得到虚高值。
-  - **暖色只作用于卡片**：`--card-*`（承光面渐变）与 `--fgc/--fgc2/--fgc3`（卡内文字）**只被 `.card` 作用域消费**；外壳（顶栏 / 导航 / 工具栏 / 抽屉 / 行列表 / toast / 滚动条）一律用中性冷灰的 `--bg/--surface/--border/--fg*`。两组令牌分开定义 —— 改卡片不牵连外壳。新增组件时按归属选令牌，别把 `--fgc*` 用在外壳上。静态检查：`grep -nE '(--card-top|--fgc)' docs/items_browser.html`，消费处必须全带 `.card` 前缀。
+  - **暖色只作为"光"存在于卡片**：卡片承光面 `--card-*` 与外壳同为中性冷灰；暖味来自四样东西 —— 卡顶 2px 族色渐变边、族色辉光 `.13`、卡内暖文字 `--fgc/--fgc2/--fgc3`、暖族标识色。四者**只被 `.card` 作用域消费**；外壳（顶栏 / 导航 / 工具栏 / 抽屉 / 行列表 / toast / 滚动条）一律用 `--bg/--surface/--border/--fg*`。两组令牌分开定义 —— 改卡片不牵连外壳。新增组件时按归属选令牌，别把 `--fgc*` 用在外壳上。静态检查：`grep -nE '(--card-top|--fgc)' docs/items_browser.html`，消费处必须全带 `.card` 前缀。
 - **族色系统（8 暖色族 + 中性）**：26 个类别收敛成 `--f-<族>-{1,2}` 8 族（ember / rose / amber / moss / orange / copper / plum / sand）+ `--f-none-*`，色相全部落在 340°–55° 暖区。`CAT_FAMILY`（JS）做类别→族映射，`famOfItem` / `famOfId` 求族，元素带 `fam-*` 类即获得 `--g1/--g2`。`--c-<category 小写>` 仍存在，是**族色的族内别名**，供导航色点与分类 chip 复用（`catColor` 读的仍是 `--c-*`，未改）。
   - 新增类别必须同时进 `CAT_ZH`（中文名）/ `CAT_GROUPS`（导航分组）/ `CAT_TOKEN`（色点）/**`CAT_FAMILY`（族色，漏了会落 'none' 中性族）**，并给 `--c-<category>` 指向某个 `--f-*`。
   - `ID_FAMILY` 是 `id → 族` 的预建 Map（库存行只有 id）：**逐行 `ITEMS.find` 是 O(rows × 481)，不要那样写**。
