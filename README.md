@@ -196,13 +196,36 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 
 ### 前端结构
 
-`docs/items_browser.html` 是零依赖单文件页（内联 CSS + 内联 JS，无构建步骤）：
+`docs/items_browser.html` 是零依赖单文件页（内联 CSS + 内联 JS，无构建步骤）。
 
-- **设计令牌**：`<style>` 开头的 `:root{...}` 是颜色/间距/圆角/字号/类别身份色的唯一定义处，改配色只改这里。文本色按 WCAG AA 校准（小字 ≥4.5，UI 元素 ≥3.0）；类别身份色为 `--c-<category 小写>`（如 `--c-medical`），active 态文字用 `color-mix(… 88%, #fff)` 提高对比度并附 `@supports` 回退，JS 侧 `CAT_TOKEN` 只做键名映射、不存色值。
-- **API 层**：所有请求经 `apiFetch(path, ms)`（`AbortController` 超时 8s、探针 15s；响应非 JSON 容错；统一 `{ok, err}` 形状）。新增端点必须走它，不要再直接 `fetch(API + …)`。
-- **服务器状态探针**：`/api/health` 只证明 HTTP 线程存活（不触主线程）；`checkServer()` 会再打一次 `/api/mine` 证明主线程可达，二者皆通才显示绿点。主线程停摆（未进存档 / 窗口失焦）时点「生成」只入队而无产物，故 `spawnItem` 拿到 token 后轮询 `/api/mine` 确认落地才报「已生成 ✓」，超时报错而非假成功。
-- **无障碍**：全站 `:focus-visible` 焦点环；卡片与库存行 `role="button" tabindex="0"`（Enter/Space 打开）；toast `role="status" aria-live="polite"`；Escape 关闭详情/检查器；分类切换后恢复焦点。
-- `esc()` 转义 `& < > " '` 五类；`localStorage` 键 `itemFavs` / `mySpawnTokens` 维持不变。
+**布局是固定外壳工作台，不是文档流**——改结构前先理解这一点，否则会把功能重新打散：
+
+```
+.app  100vh flex column
+├── .topbar   60px   只放全局项: 品牌 / 搜索 / 状态灯 / 密度切换
+└── .body     flex row, min-height:0
+    ├── .sidebar  248px  左栏分类导航 (自身 overflow-y)
+    └── .content  flex column
+        ├── .toolbar    三视图切换 (图鉴 / 库存 / 我的生成) + 刷新 + 计数
+        ├── .view-extra 视图专属过滤条 (按需填充)
+        └── .scroll-area 内容区滚动容器 (grid 或 row-list)
+.drawer  480px 右侧覆盖层 — 任意物品的唯一详情/编辑入口
+```
+
+要点：
+
+- **`body{overflow:hidden}`**，滚动只发生在 `.sidebar` / `.scroll-area` / `.drawer-body` 三处。新增面板不要插进文档流，用视图或抽屉。
+- **页面本身不滚动**；`min-height:0` 是 flex 子项能滚动的必要条件，勿删。
+- **视图由 `setView(v)` 统一切换**，内容渲染分发到 `renderCatalog` / `renderInventory` / `renderMine`。注意 `renderInventory` / `renderMine` 只在对应视图激活时才写 DOM（`refreshXxx` 结束后按 `S.view` 决定是否渲染）。
+- **抽屉统一承接两种语义**：图鉴条目 = 只读信息（`openCatalog`）；库存实例 = 基本信息 / 标签 / 特性 三 tab，可编辑（`openInstance` → `loadInstance`）。`openInstance` 返回 Promise 便于测试与串接。
+
+- **设计令牌**：`<style>` 开头的 `:root{...}` 是颜色 / 间距 / 圆角 / 字号 / 表面 / 层级 / 类别身份色的唯一定义处，改配色只改这里。文本色按 WCAG AA 校准（小字 ≥4.5，UI 元素 ≥3.0，实测全站最低 5.52）；类别身份色为 `--c-<category 小写>`（如 `--c-medical`），只作小面积点缀（色点 / 描边），**不作大面积背景**，故无色值对比度约束；JS 侧 `CAT_TOKEN` 只做键名映射、不存色值。
+- **分类导航分组**：27 个分类在 `CAT_GROUPS` 里归为 5 组（装备与武器 / 物资与材料 / 工具与模块 / 生活与交易 / 生成器）。新增分类必须同时进 `CAT_ZH`（中文名）与 `CAT_GROUPS`（否则不在导航中出现）与 `CAT_TOKEN`（配色）。
+- **API 层**：所有请求经 `apiFetch(path, ms)`（`AbortController` 超时 8s、探针 15s；响应非 JSON 容错；统一 `{ok, err}` 形状）。**它返回的是已解析对象，调用方不要再 `.json()`**——那会抛 `TypeError`，且会被外层 `try/catch` 吞成"加载失败"（v0.5.7 修复过此类回归）。新增端点必须走它，不要再直接 `fetch(API + …)`。
+- **服务器状态探针**：`/api/health` 只证明 HTTP 线程存活（不触主线程）；`checkServer()` 会再打一次 `/api/mine` 证明主线程可达，二者皆通才显示绿点。主线程停摆（未进存档 / 窗口失焦）时点「生成」只入队而无产物，故 `spawnItem` 拿到 token 后轮询 `/api/mine` 确认落地才报「已生成」，超时报错而非假成功。
+- **无障碍**：全站 `:focus-visible` 焦点环；卡片与库存行可键盘打开（Enter/Space）；分类导航重建 DOM 后会回填焦点（`renderNav` 尾部的 `focused` 逻辑，勿删）；toast `role="status" aria-live="polite"`；Escape 关抽屉；`/` 聚焦搜索。
+- **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。
+- `esc()` 转义 `& < > " '` 五类；`localStorage` 键 `itemFavs` / `mySpawnTokens` / `ps_density`。
 
 - 物品中文名来源：游戏本地化包 `Probably-Stolen-ZH-*/translation/localization_master.csv`（`table=Item`, `key=item_<id>_name`）。
 - 新版新增物品（如 `fridge` / `beis_icecream`）若翻译包未收录，则中文名需人工补（当前：冰箱 / 贝伊斯冰淇淋）。

@@ -488,6 +488,8 @@ function catCounts(){
 // ===== 左栏导航 =====
 function renderNav(){
   const counts = catCounts();
+  // renderNav 重建 DOM, 记住当前焦点以便键盘连续切换分类
+  const focused = (document.activeElement && document.activeElement.dataset) ? document.activeElement.dataset.cat : null;
   const row = (key, label, n, dot) => `
     <button class="nav-item ${S.cat===key?'active':''}" type="button" data-cat="${esc(key)}" aria-pressed="${S.cat===key}">
       ${dot ? `<i class="swatch" style="background:${dot}"></i>` : ''}
@@ -509,6 +511,11 @@ function renderNav(){
     S.cat = b.dataset.cat;
     if(S.view !== 'catalog') setView('catalog'); else { renderNav(); renderContent(); }
   });
+  // 焦点回填: 键盘连续切换分类时焦点不丢 (与重构前行为一致)
+  if(focused){
+    const again = navList.querySelector('.nav-item[data-cat="' + CSS.escape(focused) + '"]');
+    if(again) again.focus();
+  }
 }
 
 // ===== 视图 =====
