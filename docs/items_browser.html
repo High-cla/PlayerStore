@@ -12,12 +12,20 @@
    令牌是本文件配色与尺度的唯一定义处, 改这里即可整体换肤。
    ============================================================ */
 :root{
-  /* ---- 表面与光 (深色 + 渐变过渡) ----
-     整列顶部一道环境光, 卡片是这束光下的承光面; 渐变是照明系统, 不是装饰. */
+  /* ---- 表面与光 (中性外壳 + 暖色卡片) ----
+     外壳(顶栏/导航/工具栏/抽屉/toast/滚动条)保持中性冷灰, 与上一版一致;
+     暖色只作用于卡片: 承光面渐变 + 族色辉光 + 卡内文字.
+     两组色分开定义 —— 改卡片不牵连外壳; 改外壳不动卡片.
+     渐变是照明系统, 不是装饰: 整列顶部一道环境光, 卡片是这束光下的承光面. */
   --bg:#0a0b0d; --bg-2:#0e1013; --surface:#12151a; --surface-2:#1b1f26; --surface-3:#242a33;
   --border:#252b34; --border-strong:#333b46; --border-3:#454e5c;
-  /* 前景 — 按卡片实际底色(已叠加 13% 族色辉光)校准 AA, 全页最差 4.90 */
+  /* 承光面 (只被 .card 消费) —— 暖褐渐变 */
+  --card-top:#211a15; --card-mid:#181310; --card-bot:#14100d;
+  --card-hover-top:#2d241c; --card-hover-mid:#231c16; --card-hover-bot:#1b1511;
+  /* 外壳前景 — 中性冷灰 */
   --fg:#eef0f3; --fg2:#a7b0bc; --fg3:#9aa4b1;
+  /* 卡内文字 — 暖色, 按承光面底色(含 13% 族色辉光)校准 AA */
+  --fgc:#fdf7f1; --fgc2:#c8b8a8; --fgc3:#b6a390;
   --accent:#ffa03d; --accent-2:#ff5c3d;
   --accent-ink:#1a0e06; --accent-soft:rgba(255,160,61,.14);
   --ok:#3ecf7a; --warn:#ffc247; --bad:#ef5a5a;
@@ -30,42 +38,43 @@
   --topbar:54px; --nav:234px; --drawer:448px; --z-drawer:40; --z-toast:90;
   --font:"Noto Sans SC","Source Han Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
   --mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
-  /* ---- 8 色族 + 中性 ----
+  /* ---- 8 暖色族 + 暖中性 ----
      类别身份 = 族色 = 卡片发光色. --c-* 是族色的族内具名别名, 供导航色点/分类 chip 复用,
-     改族色时只改 --f-* 一处 (catColor 读的仍是 --c-*). */
-  --f-ember-1:#ff8a4d;  --f-ember-2:#ff4d4d;
-  --f-rose-1:#ff6b9d;   --f-rose-2:#e0487e;
-  --f-amber-1:#ffc247;  --f-amber-2:#ff9a1f;
-  --f-lime-1:#b6e84a;   --f-lime-2:#7fd13b;
-  --f-orange-1:#ffa94d; --f-orange-2:#ff7a1f;
-  --f-steel-1:#9fb3cc;  --f-steel-2:#6f88a8;
-  --f-violet-1:#b79cff; --f-violet-2:#8b6bff;
-  --f-cyan-1:#4fd1e8;   --f-cyan-2:#2aa8f0;
-  --f-none-1:#8a93a0;   --f-none-2:#5f6875;
-  --c-access_cards:var(--f-violet-1); --c-ammunition_explosives:var(--f-ember-1);
-  --c-armor:var(--f-steel-1); --c-chemicals:var(--f-amber-1);
-  --c-containers:var(--f-steel-1); --c-currency:var(--f-amber-1);
-  --c-documents:var(--f-violet-1); --c-energy_cells:var(--f-violet-1);
-  --c-equipment:var(--f-ember-1); --c-farming:var(--f-lime-1);
+     改族色时只改 --f-* 一处 (catColor 读的仍是 --c-*).
+     色相全部落在 340°–55° 暖区: 红-珊瑚-金-琥珀-橙-铜-梅-沙. */
+  --f-ember-1:#ff7a4d;  --f-ember-2:#e03a26;
+  --f-rose-1:#ff9aa8;   --f-rose-2:#d1556e;
+  --f-amber-1:#ffc766;  --f-amber-2:#f59a1f;
+  --f-moss-1:#cfd178;   --f-moss-2:#9aa548;
+  --f-orange-1:#ffa951; --f-orange-2:#f5731c;
+  --f-copper-1:#d9a273; --f-copper-2:#a8703f;
+  --f-plum-1:#cba0c4;   --f-plum-2:#9a6a94;
+  --f-sand-1:#e8cfa0;   --f-sand-2:#bfa068;
+  --f-none-1:#b3a596;   --f-none-2:#7e7268;
+  --c-access_cards:var(--f-plum-1); --c-ammunition_explosives:var(--f-ember-1);
+  --c-armor:var(--f-copper-1); --c-chemicals:var(--f-amber-1);
+  --c-containers:var(--f-copper-1); --c-currency:var(--f-amber-1);
+  --c-documents:var(--f-plum-1); --c-energy_cells:var(--f-plum-1);
+  --c-equipment:var(--f-ember-1); --c-farming:var(--f-moss-1);
   --c-food_drink:var(--f-orange-1); --c-goods:var(--f-orange-1);
-  --c-husbandry:var(--f-lime-1); --c-lottery:var(--f-cyan-1);
-  --c-machines_storage:var(--f-steel-1); --c-materials:var(--f-amber-1);
+  --c-husbandry:var(--f-moss-1); --c-lottery:var(--f-sand-1);
+  --c-machines_storage:var(--f-copper-1); --c-materials:var(--f-amber-1);
   --c-medical:var(--f-rose-1); --c-medical_chemical:var(--f-rose-1);
-  --c-misc:var(--f-cyan-1); --c-modules:var(--f-violet-1);
-  --c-supplies:var(--f-lime-1); --c-tools:var(--f-orange-1);
-  --c-weapons:var(--f-ember-1); --c-weapon_mods:var(--f-steel-1);
-  --c-random_drop:var(--f-cyan-1); --c-prebuilt:var(--f-cyan-1);
-  --c-new_items:var(--f-cyan-1);
+  --c-misc:var(--f-sand-1); --c-modules:var(--f-plum-1);
+  --c-supplies:var(--f-moss-1); --c-tools:var(--f-orange-1);
+  --c-weapons:var(--f-ember-1); --c-weapon_mods:var(--f-copper-1);
+  --c-random_drop:var(--f-sand-1); --c-prebuilt:var(--f-sand-1);
+  --c-new_items:var(--f-sand-1);
 }
 /* 族类: 卡片/抽屉带上 .fam-* 即获得 --g1/--g2, 卡顶渐变边与辉光都取自它们 */
 .fam-ember {--g1:var(--f-ember-1); --g2:var(--f-ember-2)}
 .fam-rose  {--g1:var(--f-rose-1);  --g2:var(--f-rose-2)}
 .fam-amber {--g1:var(--f-amber-1); --g2:var(--f-amber-2)}
-.fam-lime  {--g1:var(--f-lime-1);  --g2:var(--f-lime-2)}
+.fam-moss  {--g1:var(--f-moss-1);  --g2:var(--f-moss-2)}
 .fam-orange{--g1:var(--f-orange-1);--g2:var(--f-orange-2)}
-.fam-steel {--g1:var(--f-steel-1); --g2:var(--f-steel-2)}
-.fam-violet{--g1:var(--f-violet-1);--g2:var(--f-violet-2)}
-.fam-cyan  {--g1:var(--f-cyan-1);  --g2:var(--f-cyan-2)}
+.fam-copper{--g1:var(--f-copper-1);--g2:var(--f-copper-2)}
+.fam-plum  {--g1:var(--f-plum-1);  --g2:var(--f-plum-2)}
+.fam-sand  {--g1:var(--f-sand-1);  --g2:var(--f-sand-2)}
 .fam-none  {--g1:var(--f-none-1);  --g2:var(--f-none-2)}
 *{margin:0;padding:0;box-sizing:border-box}
 [hidden]{display:none!important}
@@ -187,7 +196,7 @@ input,select,textarea{font:inherit}
 .grid.compact{grid-template-columns:repeat(auto-fill,minmax(196px,1fr))}
 
 /* ---------- 卡片: 环境光下的承光面 ---------- */
-.card{position:relative;background:linear-gradient(180deg,#1b1f26 0%,#161a1f 46%,#13161b 100%);
+.card{position:relative;background:linear-gradient(180deg,var(--card-top) 0%,var(--card-mid) 46%,var(--card-bot) 100%);
   border-right:1px solid var(--border);border-bottom:1px solid var(--border);
   padding:var(--s4) 15px var(--s3);cursor:pointer;display:flex;flex-direction:column;gap:var(--s2);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 -10px 28px -20px var(--g1,var(--f-none-1));
@@ -203,14 +212,14 @@ input,select,textarea{font:inherit}
     linear-gradient(202deg,transparent 48%,color-mix(in srgb,var(--g1,var(--f-none-1)) 24%,transparent) 100%);
   opacity:.13;transition:opacity .22s ease}
 .card>*{position:relative;z-index:1}
-.card:hover{background:linear-gradient(180deg,#262c36 0%,#1d2229 48%,#181c22 100%);
+.card:hover{background:linear-gradient(180deg,var(--card-hover-top) 0%,var(--card-hover-mid) 48%,var(--card-hover-bot) 100%);
   box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--g1,var(--f-none-1)) 38%,transparent),
              0 10px 30px -14px color-mix(in srgb,var(--g2,var(--f-none-2)) 66%,transparent),
              0 -12px 34px -18px var(--g1,var(--f-none-1))}
 .card:hover::after{opacity:.26}
 /* 键盘可达: 卡片本身是 role=button */
 .card:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-.card-name{font-size:var(--tmd);font-weight:600;color:#f5f7f9;padding-right:34px;
+.card-name{font-size:var(--tmd);font-weight:600;color:var(--fgc);padding-right:34px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-en{font-size:var(--txs);color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-cats{display:flex;flex-wrap:wrap;gap:5px;min-height:23px}
@@ -227,7 +236,10 @@ input,select,textarea{font:inherit}
   -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;height:38px;
   padding-top:var(--s2);border-top:1px solid var(--border)}
 .card-desc:empty::before{content:"暂无描述";color:var(--fg3);font-style:italic}
-.card-foot{margin-top:auto;padding-top:var(--s3);display:flex;align-items:center;gap:var(--s2);min-height:42px}
+/* 按钮排: 生成 / 生成十个 / 详情 —— 允许换行, 窄卡不会横向溢出 */
+.card-foot{margin-top:auto;padding-top:var(--s3);display:flex;align-items:center;
+  gap:var(--s2);flex-wrap:wrap;min-height:42px}
+.foot-right{margin-left:auto;display:flex;gap:var(--s2)}
 .fav{position:absolute;top:9px;right:9px;width:26px;height:26px;border-radius:var(--r1);
   display:grid;place-items:center;font-size:15px;color:var(--fg3);z-index:3;
   transition:background .15s ease,color .15s ease}
@@ -257,6 +269,16 @@ input,select,textarea{font:inherit}
 .grid.compact .card-name{font-size:var(--txs)}
 .grid.compact .card-desc{display:none}
 .grid.compact .card-id{font-size:10px}
+
+/* 卡片内文字走暖色令牌 (--fgc*), 外壳文字仍用 --fg* —— 暖色不外泄到背景/导航/抽屉 */
+.card .card-en,.card .card-desc,.card .card-id,.card .cat-chip{color:var(--fgc2)}
+.card .card-desc:empty::before,.card .fav{color:var(--fgc3)}
+.card .card-id{background:rgba(255,255,255,.06)}
+.card .cat-chip{background:rgba(255,255,255,.05)}
+.card .card-desc{border-top-color:rgba(255,255,255,.07)}
+.card .fav:hover{background:rgba(255,255,255,.1)}
+.card .btn.ghost{color:var(--fgc2)}
+.card .btn.ghost:hover{color:var(--fgc);background:rgba(255,255,255,.06)}
 
 /* ---------- 行列表 (库存 / 我的生成) ---------- */
 .row-list{padding:var(--s4);display:flex;flex-direction:column;gap:6px}
@@ -579,13 +601,13 @@ function catColor(c){
 // 避免每类一色时整页霓虹乱闪, 也保证同类物品视觉成组.
 const CAT_FAMILY = {
   WEAPONS:'ember', AMMUNITION_EXPLOSIVES:'ember', EQUIPMENT:'ember',
-  ARMOR:'steel', CONTAINERS:'steel', MACHINES_STORAGE:'steel', WEAPON_MODS:'steel',
+  ARMOR:'copper', CONTAINERS:'copper', MACHINES_STORAGE:'copper', WEAPON_MODS:'copper',
   MATERIALS:'amber', CHEMICALS:'amber', CURRENCY:'amber',
   MEDICAL:'rose', MEDICAL_CHEMICAL:'rose',
-  SUPPLIES:'lime', FARMING:'lime', HUSBANDRY:'lime',
+  SUPPLIES:'moss', FARMING:'moss', HUSBANDRY:'moss',
   FOOD_DRINK:'orange', GOODS:'orange', TOOLS:'orange',
-  MODULES:'violet', ACCESS_CARDS:'violet', DOCUMENTS:'violet', ENERGY_CELLS:'violet',
-  LOTTERY:'cyan', MISC:'cyan', RANDOM_DROP:'cyan', PREBUILT:'cyan', NEW_ITEMS:'cyan'
+  MODULES:'plum', ACCESS_CARDS:'plum', DOCUMENTS:'plum', ENERGY_CELLS:'plum',
+  LOTTERY:'sand', MISC:'sand', RANDOM_DROP:'sand', PREBUILT:'sand', NEW_ITEMS:'sand'
 };
 // id → 类别, 预建一次 (库存行只有 id, 逐行 find 是 O(rows × 481))
 const ID_FAMILY = new Map();
@@ -731,7 +753,9 @@ function renderCatalog(){
     const id = i.stableId || '';
     const on = S.fav.has(id);
     const isInstr = id.endsWith('_instruction');
-    return `<article class="card ${famCls(famOfItem(i))}" data-id="${esc(id)}" role="button" tabindex="0" aria-label="${esc(i.nameZh||i.nameEn||id)}">
+    // 卡片本身不是按钮: 点空白处不弹抽屉 (抽屉只由「详情」按钮开).
+    // role=group + aria-label 保证屏幕阅读器仍能成组朗读.
+    return `<article class="card ${famCls(famOfItem(i))}" data-id="${esc(id)}" role="group" aria-label="${esc(i.nameZh||i.nameEn||id)}">
       <button class="fav ${on?'on':''}" type="button" data-fav="${esc(id)}" aria-pressed="${on}" aria-label="收藏">${on?'★':'☆'}</button>
       <h3 class="card-name">${esc(i.nameZh || i.nameEn || id)}</h3>
       <p class="card-en">${esc(i.nameEn||'')}</p>
@@ -739,16 +763,16 @@ function renderCatalog(){
       <code class="card-id">${esc(id)}</code>
       <p class="card-desc">${esc(i.descriptionZh||i.descriptionEn||'')}</p>
       <div class="card-foot">${isInstr
-        ? '<span class="pill-note">图纸 — 不可直接生成</span>'
-        : `<button class="btn" type="button" data-spawn="${esc(id)}">生成</button>`}</div>
+        ? `<span class="pill-note">图纸 — 不可直接生成</span>
+           <span class="foot-right"><button class="btn ghost" type="button" data-detail="${esc(id)}">详情</button></span>`
+        : `<button class="btn" type="button" data-spawn="${esc(id)}">生成</button>
+           <button class="btn ghost" type="button" data-spawn="${esc(id)}" data-count="10">生成十个</button>
+           <span class="foot-right"><button class="btn ghost" type="button" data-detail="${esc(id)}">详情</button></span>`}</div>
     </article>`;
   }).join('');
-  grid.querySelectorAll('.card').forEach(c => {
-    c.onclick = () => openCatalog(c.dataset.id);
-    c.onkeydown = e => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); openCatalog(c.dataset.id); } };
-  });
-  grid.querySelectorAll('.fav').forEach(b => b.onclick = e => { e.stopPropagation(); toggleFav(b.dataset.fav); });
-  grid.querySelectorAll('[data-spawn]').forEach(b => b.onclick = e => { e.stopPropagation(); spawnItem(b.dataset.spawn, b); });
+  grid.querySelectorAll('.fav').forEach(b => b.onclick = () => toggleFav(b.dataset.fav));
+  grid.querySelectorAll('[data-detail]').forEach(b => b.onclick = () => openCatalog(b.dataset.detail));
+  grid.querySelectorAll('[data-spawn]').forEach(b => b.onclick = () => spawnItem(b.dataset.spawn, b, Number(b.dataset.count) || 1));
 }
 function renderInventory(){
   $('count').textContent = S.inv.length ? S.inv.length + ' 项' : '—';
@@ -858,12 +882,14 @@ async function checkServer(){
 }
 // 生成 = 入队; /api/spawn 只回 {ok, token}. 真正落地要轮询 /api/mine 看到该 token,
 // 否则主线程停摆时会假成功 (收到入队回执就报「已生成」).
-async function spawnItem(id, btn){
-  const b = btn, orig = b.textContent;
+async function spawnItem(id, btn, count){
+  const b = btn, orig = b.textContent, n = Math.max(1, Math.min(999, Math.floor(count) || 1));
+  // 原始类只在首次记录: 生成中/已生成会改写 className, 每次都记会把状态类当成原类
+  if(!b.dataset.orig) b.dataset.orig = b.className;
   if(!(await checkServer())){ toast('服务器未就绪 — 请进入存档并保持窗口在前台', 'bad'); return; }
   b.disabled = true; b.className = 'btn'; b.textContent = '生成中…';
-  const reset = ms => setTimeout(()=>{ b.className='btn'; b.textContent=orig; b.disabled=false; }, ms);
-  const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=1');
+  const reset = ms => setTimeout(()=>{ b.className = b.dataset.orig || 'btn'; b.textContent=orig; b.disabled=false; }, ms);
+  const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=' + n);
   if(!r.ok){
     b.className = 'btn bad'; b.textContent = '失败';
     toast('生成失败: ' + (r.err||''), 'bad'); reset(2200);
@@ -873,7 +899,7 @@ async function spawnItem(id, btn){
   const landed = r.token ? await waitSpawned(r.token, 40, 250) : true;   // 最多 ~10s
   if(landed){
     b.className = 'btn ok'; b.textContent = '已生成';
-    toast('已生成到主背包: ' + id, 'ok');
+    toast('已生成到主背包: ' + id + (n > 1 ? ' ×' + n : ''), 'ok');
     if(S.view === 'mine') refreshMine();
     reset(1800);
   }else{

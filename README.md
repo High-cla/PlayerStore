@@ -222,14 +222,17 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 - **设计令牌**：`<style>` 开头的 `:root{...}` 是颜色 / 间距 / 圆角 / 字号 / 表面 / 层级 / 族色的唯一定义处，改配色只改这里。
   - **视觉方向 = 深色 + 渐变过渡 + 零图片**。零图片是硬约束：全页不得出现 `<img>` / `<svg>` / `<canvas>` / `url()` 背景（游戏贴图是 IL2CPP 内部资源路径 `Items/xxx`，**不是 web 可访问的 URL，也不打算提取**）。视觉信息全部由排版、族色光与渐变承载。
   - **渐变是照明系统，不是装饰**：`.scroll-area` 顶部两道径向环境光 → 卡片是这束光下的承光面（卡体纵向渐变 + 卡顶 2px 族色渐变边 + 族色辉光 `.13` + 右下角 202deg 过渡）→ CTA / 导航激活 / 抽屉顶边同样是渐变。**不要在卡片上加左侧色条**（claude-design 明令的反模式），族色身份一律走卡顶渐变边与光。
-  - 文本色按 WCAG AA 校准（小字 ≥4.5）。注意**辉光会提亮实际底色**，测对比度必须把族色按 `.13` 混入卡片底色再算——按纯灰底测会得到虚高值。当前实测全页最低 **4.778**（`animal_cage` 英文名）。
-- **族色系统（8 族 + 中性）**：26 个类别收敛成 `--f-<族>-{1,2}` 8 族（ember / rose / amber / lime / orange / steel / violet / cyan）+ `--f-none-*`。`CAT_FAMILY`（JS）做类别→族映射，`famOfItem` / `famOfId` 求族，元素带 `fam-*` 类即获得 `--g1/--g2`。`--c-<category 小写>` 仍存在，是**族色的族内别名**，供导航色点与分类 chip 复用（`catColor` 读的仍是 `--c-*`，未改）。
+  - 文本色按 WCAG AA 校准（小字 ≥4.5）。注意**辉光会提亮实际底色**，测对比度必须把族色按 `.13` 混入卡片底色再算——按纯灰底测会得到虚高值。
+  - **暖色只作用于卡片**：`--card-*`（承光面渐变）与 `--fgc/--fgc2/--fgc3`（卡内文字）**只被 `.card` 作用域消费**；外壳（顶栏 / 导航 / 工具栏 / 抽屉 / 行列表 / toast / 滚动条）一律用中性冷灰的 `--bg/--surface/--border/--fg*`。两组令牌分开定义 —— 改卡片不牵连外壳。新增组件时按归属选令牌，别把 `--fgc*` 用在外壳上。静态检查：`grep -nE '(--card-top|--fgc)' docs/items_browser.html`，消费处必须全带 `.card` 前缀。
+- **族色系统（8 暖色族 + 中性）**：26 个类别收敛成 `--f-<族>-{1,2}` 8 族（ember / rose / amber / moss / orange / copper / plum / sand）+ `--f-none-*`，色相全部落在 340°–55° 暖区。`CAT_FAMILY`（JS）做类别→族映射，`famOfItem` / `famOfId` 求族，元素带 `fam-*` 类即获得 `--g1/--g2`。`--c-<category 小写>` 仍存在，是**族色的族内别名**，供导航色点与分类 chip 复用（`catColor` 读的仍是 `--c-*`，未改）。
   - 新增类别必须同时进 `CAT_ZH`（中文名）/ `CAT_GROUPS`（导航分组）/ `CAT_TOKEN`（色点）/**`CAT_FAMILY`（族色，漏了会落 'none' 中性族）**，并给 `--c-<category>` 指向某个 `--f-*`。
   - `ID_FAMILY` 是 `id → 族` 的预建 Map（库存行只有 id）：**逐行 `ITEMS.find` 是 O(rows × 481)，不要那样写**。
 - **分类导航分组**：27 个分类在 `CAT_GROUPS` 里归为 5 组（装备与武器 / 物资与材料 / 工具与模块 / 生活与交易 / 生成器）。新增分类必须同时进 `CAT_ZH`（中文名）与 `CAT_GROUPS`（否则不在导航中出现）与 `CAT_TOKEN`（配色）。
 - **API 层**：所有请求经 `apiFetch(path, ms)`（`AbortController` 超时 8s、探针 15s；响应非 JSON 容错；统一 `{ok, err}` 形状）。**它返回的是已解析对象，调用方不要再 `.json()`**——那会抛 `TypeError`，且会被外层 `try/catch` 吞成"加载失败"（v0.5.7 修复过此类回归）。新增端点必须走它，不要再直接 `fetch(API + …)`。
 - **服务器状态探针**：`/api/health` 只证明 HTTP 线程存活（不触主线程）；`checkServer()` 会再打一次 `/api/mine` 证明主线程可达，二者皆通才显示绿点。主线程停摆（未进存档 / 窗口失焦）时点「生成」只入队而无产物，故 `spawnItem` 拿到 token 后轮询 `/api/mine` 确认落地才报「已生成」，超时报错而非假成功。
-- **无障碍**：全站 `:focus-visible` 焦点环；卡片与库存行可键盘打开（Enter/Space）；分类导航重建 DOM 后会回填焦点（`renderNav` 尾部的 `focused` 逻辑，勿删）；toast `role="status" aria-live="polite"`；Escape 关抽屉；`/` 聚焦搜索。
+- **卡片不是按钮**：卡片是 `role="group"`（无 `tabindex`），**点卡片正文 / 名称 / 描述都不开抽屉**；详情只由右下角「详情」按钮（`data-detail`）打开。**勿把 `onclick` 加回卡片本体**。
+- **卡片按钮排**：普通物品 = 生成 / 生成十个 / 详情（`data-spawn`，十个那只是 `data-count="10"`；`.foot-right` 把详情推到右侧）；`_instruction` 图纸卡 = 提示文字 + 详情。`spawnItem(id, btn, count)` 第三参是数量，直接进 `/api/spawn?...&count=n`（后端已限 1–999；省略即 1，向后兼容）。按钮复位靠 `b.dataset.orig` 记录原始类，**只在首次记录**（生成中 / 已生成会改写 `className`，每次都记会把状态类当成原类，幽灵按钮会被染成实心）。
+- **无障碍**：全站 `:focus-visible` 焦点环；**库存行**可键盘打开（Enter/Space）；分类导航重建 DOM 后会回填焦点（`renderNav` 尾部的 `focused` 逻辑，勿删）；toast `role="status" aria-live="polite"`；Escape 关抽屉；`/` 聚焦搜索。
 - **卡片等高由构造保证**：`.card-desc` 固定 `height:38px` + `-webkit-line-clamp:2`；`.card-cats` 与 `.card-foot` 各有 `min-height`（23px / 42px），因为 16 个 `_instruction` 卡既无分类 chip、foot 又只有一行提示文字——不补 min-height 会让它们矮 23px（实测 210 vs 233）。**删这三个尺寸中的任何一个，等高都会破**。
 - **密度变体**：`setDensity` 同时给 `#grid` 与 `#rowList` 加 `.compact`，持久化在 `localStorage.ps_density`。compact 下描述整块隐藏，故卡片高度不再等高（紧凑模式按内容收缩，属预期）。
 - `esc()` 转义 `& < > " '` 五类；`localStorage` 键 `itemFavs` / `mySpawnTokens` / `ps_density`。
