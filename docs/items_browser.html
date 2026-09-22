@@ -789,7 +789,8 @@ function toast(msg, cls){
   _toastTimer = setTimeout(()=>{ t.className = 'toast'; }, 2600);
 }
 // 两级探针: /api/health 只证明 HTTP 线程存活 (不触主线程); /api/mine 走主线程,
-// 才能证明主线程可达 (未进存档/窗口失焦时主线程排空停摆, 此时点「生成」只会入队而无产物).
+// 才能证明主线程可达 (未进存档时主线程排空停摆, 此时点「生成」只会入队而无产物).
+// 注: 窗口失焦导致的停摆已由 mod 侧 Application.runInBackground = true 解决, 故此提示只提「进入存档」.
 let _mainThreadOk = false;
 async function checkServer(){
   const h = await apiFetch('/api/health', API_HEALTH_TIMEOUT);
@@ -808,7 +809,7 @@ async function checkServer(){
   }
   _mainThreadOk = false;
   $('svDot').className = 'dot warn';
-  $('svText').textContent = 'HTTP 已连接, 主线程未响应 — 请进入存档并保持窗口在前台';
+  $('svText').textContent = 'HTTP 已连接, 主线程未响应 — 请进入存档';
   return false;
 }
 // 生成 = 入队; /api/spawn 只回 {ok, token}. 真正落地要轮询 /api/mine 看到该 token,
@@ -817,7 +818,7 @@ async function spawnItem(id, btn, count){
   const b = btn, orig = b.textContent, n = Math.max(1, Math.min(999, Math.floor(count) || 1));
   // 原始类只在首次记录: 生成中/已生成会改写 className, 每次都记会把状态类当成原类
   if(!b.dataset.orig) b.dataset.orig = b.className;
-  if(!(await checkServer())){ toast('服务器未就绪 — 请进入存档并保持窗口在前台', 'bad'); return; }
+  if(!(await checkServer())){ toast('服务器未就绪 — 请进入存档', 'bad'); return; }
   b.disabled = true; b.className = 'btn'; b.textContent = '生成中…';
   const reset = ms => setTimeout(()=>{ b.className = b.dataset.orig || 'btn'; b.textContent=orig; b.disabled=false; }, ms);
   const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=' + n);

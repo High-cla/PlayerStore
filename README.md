@@ -35,6 +35,11 @@ ProgressMod + InventorySorter + NetworkUnlockMod 单仓库（melons for *Probabl
 - **网页资源内嵌在 DLL 里**：`docs/items_browser.html` / `items_data_full.js` / `tag_zh.js` 经 csproj 的 `EmbeddedResource` 打包（`LogicalName` 前缀 `web.`），由 `TryRouteWeb` 从 `GetManifestResourceStream` 直接发出。**改 docs/ 后必须重新构建 ProgressMod**，否则 DLL 里仍是旧页面。
 - 云端 Pages（https://high-cla.github.io/PlayerStore/items_browser.html）仍在，作为不开游戏时查阅图鉴用；它连的是 `localhost:26880`，游戏跑着时同样能用。
 - **通信链**：浏览器 fetch → 本地 HTTP → ProgressMod → 主背包
+- **可以在游戏中把浏览器留在前台**：mod 启动时设 `Application.runInBackground = true`。
+  Unity 默认在窗口失焦时暂停 `Update`，而生成队列正是在 `OnUpdate` 里排空 —— 不设这一条，
+  切到浏览器点"生成"只会入队不落地：HTTP 线程独立于 Unity 照常应答（页面显示"已连接"），
+  但主线程停摆，表现为**"连上了却生成不了"**。前端 `/api/mine` 二级探针会把它显示为黄灯
+  「HTTP 已连接, 主线程未响应」。
 - **生成逻辑**：
   ```csharp
   if (!TrySpawnPrebuiltMachine(id, out item))       // 机器件: 直调原版 PreBuiltItemHelper.CreateX 工厂

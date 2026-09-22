@@ -32,6 +32,13 @@ namespace ProgressMod
             PurgeLegacyEntries();
             // 配置在游戏启动时即落盘生成, 玩家可提前看到并修改
             MelonPreferences.Save();
+            // 后台运行: Unity 默认在窗口失焦时暂停 Update, 而物品生成的消费队列正是在
+            // OnUpdate 里排空 —— 用户开着浏览器(或任何别的窗口)点"生成"时游戏必然失焦,
+            // 队列就永远不被处理: HTTP 线程独立于 Unity 照常应答(页面因此显示"已连接"),
+            // 但请求始终没人消费, 表现为"连上了却生成不了"。
+            // 打开后台运行后, 主线程失焦时继续跑, 浏览器可以一直留在前台。
+            try { UnityEngine.Application.runInBackground = true; }
+            catch (Exception e) { MelonLogger.Warning($"[Spawn] runInBackground 设置失败: {e.Message}"); }
             StartSpawnServer();
         }
 
