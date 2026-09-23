@@ -40,13 +40,13 @@
      canvas #ffffff→#000 ; surface-soft #f7f7f7→#0d0d0d ; surface-elevated →#1a1a1a
      hairline #cccccc→#2a2a2a ; hairline-strong #5e5e5e 保留
      ink #000→#fff ; body #1a1a1a→rgba(255,255,255,.72)
-     mute #757575→#8a8a8a ; stone #898989→#9a9a9a ; ash #a7a7a7→#6e6e6e
+     mute #757575→#8a8a8a ; stone #898989→#9a9a9a ; ash #a7a7a7→#8a8a8a
      link-blue 只用于浅色画布正文; 暗底链接按文档走 primary 绿 ⇒ 不需要蓝色
    ============================================================================ */
 :root{
   --bg:#000; --surface:#0d0d0d; --surface-2:#1a1a1a; --surface-3:#262626;
   --hairline:#2a2a2a; --hairline-2:#5e5e5e;
-  --ink:#fff; --body:rgba(255,255,255,.72); --mute:#8a8a8a; --stone:#9a9a9a; --ash:#6e6e6e;
+  --ink:#fff; --body:rgba(255,255,255,.72); --mute:#8a8a8a; --stone:#9a9a9a; --ash:#8a8a8a;
   --primary:#76b900; --primary-dark:#5a8d00;
   --error:#e52020; --warning:#df6500; --success:#3f8500;
   --r:2px;
@@ -160,8 +160,7 @@ input,select,textarea{font:inherit}
    卡片无填充面 —— 中灰底色整体删除, 不引入任何新颜色。 */
 .card{position:relative;display:flex;flex-direction:column;gap:var(--s2);
   border:1px solid var(--hairline-2);border-radius:var(--r);padding:var(--s4) 15px var(--s3);
-  cursor:pointer;background:none}
-.card:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+  background:none}
 /* hover 只在有真指针的设备上生效: 触摸设备上 hover 会粘住, 且同时触发 focus 环双重高亮 */
 .card>*{position:relative}
 /* 等高构造: 标题/英文名/ID 各锁 1 行 + 描述锁 2 行 —— 高度由结构决定, 不由数据决定
@@ -197,12 +196,11 @@ input,select,textarea{font:inherit}
   background:var(--primary);color:#000;font-weight:700;font-size:11px;line-height:1;
   display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .btn:active{background:var(--primary-dark)}
-.btn:disabled{opacity:.6;cursor:progress}
-.btn.ok{background:var(--success);color:#fff}
-.btn.bad{background:var(--error);color:#fff}
 /* button-outline: 透明底 + 白字 + 2px 绿边 (文档原文: text ink, 2px solid primary) */
 .btn.ghost{background:transparent;color:var(--ink);border:2px solid var(--primary);
   padding:0 11px;font-weight:700}
+/* button-ghost-link (文档 L169): 卡片底部导航affordance — 绿字无边框, 与 outline 拉开层级 */
+.btn.link{background:transparent;border:0;color:var(--primary);padding:0 6px;font-weight:700}
 /* destructive(文档 semantic 而非独立色): 描边红字 */
 .btn.danger{background:transparent;color:var(--error);border:1px solid var(--error)}
 .pill-note{font-size:11px;line-height:1.4;color:var(--mute);display:inline-flex;align-items:center;gap:5px}
@@ -360,8 +358,9 @@ input,select,textarea{font:inherit}
 .view-tab:hover{color:var(--ink);border-color:var(--hairline-2)}
 .text-btn:hover{color:var(--ink);border-color:var(--hairline-2)}
 .fav:hover{color:var(--warning);border-color:var(--hairline-2)}
-.btn:hover{background:#8ad100}
+.btn:hover{background:var(--primary-dark)}
 .btn.ghost:hover{background:rgba(118,185,0,.12);color:var(--ink)}
+.btn.link:hover{color:var(--ink)}
 .btn.danger:hover{background:var(--error);color:#fff}
 .row:hover{border-color:var(--ink)}
 .mini-btn:hover{color:var(--ink);border-color:var(--ink)}
@@ -432,7 +431,7 @@ input,select,textarea{font:inherit}
 </div>
 
 <!-- 数据带版本戳: 数据更新时必须同步 bump, 否则浏览器按 max-age 缓存旧副本 -->
-<script src="items_data_full.js?v=20260921"></script>
+<script src="items_data_full.js?v=20260923"></script>
 <script src="tag_zh.js?v=20260916"></script>
 <script>
 // mod 生成引擎合成卡 (参照 ProbablyStolenItemManager.GeneratedEntries): 随机掉落表 + 预置变体
@@ -692,10 +691,10 @@ function renderCatalog(){
       <p class="card-desc">${esc(i.descriptionZh||i.descriptionEn||'')}</p>
       <div class="card-foot">${isInstr
         ? `<span class="pill-note">图纸 — 不可直接生成</span>
-           <span class="foot-right"><button class="btn ghost" type="button" data-detail="${esc(id)}">详情</button></span>`
+           <span class="foot-right"><button class="btn link" type="button" data-detail="${esc(id)}">详情</button></span>`
         : `<button class="btn" type="button" data-spawn="${esc(id)}">生成</button>
            <button class="btn ghost" type="button" data-spawn="${esc(id)}" data-count="10">生成十个</button>
-           <span class="foot-right"><button class="btn ghost" type="button" data-detail="${esc(id)}">详情</button></span>`}</div>
+           <span class="foot-right"><button class="btn link" type="button" data-detail="${esc(id)}">详情</button></span>`}</div>
     </article>`;
   }).join('');
   grid.querySelectorAll('.fav').forEach(b => b.onclick = () => toggleFav(b.dataset.fav));
