@@ -353,21 +353,26 @@ input,select,textarea{font:inherit}
   .row-acts{width:100%}
   .row-acts .mini-btn{flex:1;justify-content:center}
 }
-/* ---------- hover ---------- (桌面工具, 只服务鼠标) */
-.icon-btn:hover{color:var(--ink);border-color:var(--hairline-2)}
-.view-tab:hover{color:var(--ink);border-color:var(--hairline-2)}
-.text-btn:hover{color:var(--ink);border-color:var(--hairline-2)}
-.fav:hover{color:var(--warning);border-color:var(--hairline-2)}
-.btn:hover{background:var(--primary-dark)}
-.btn.ghost:hover{background:rgba(118,185,0,.12);color:var(--ink)}
-.btn.link:hover{color:var(--ink)}
-.btn.danger:hover{background:var(--error);color:#fff}
-.row:hover{border-color:var(--ink)}
-.mini-btn:hover{color:var(--ink);border-color:var(--ink)}
-.mini-btn.danger:hover{background:var(--error);color:#fff}
-.drawer-tabs button:hover{color:var(--ink)}
-.nav-item:hover{color:var(--primary)}
-.card:hover{border-color:var(--ink)}
+/* ---------- hover ----------
+   必须包在 (hover:hover) 内: 触摸设备没有真正的悬停, 但移动端浏览器会在 tap 后
+   "粘住" :hover —— 按钮/卡片停在悬停态, 且与 :focus-visible 同时命中成双重高亮。
+   此前注释自称"只服务鼠标"却无守卫, 属名实不符。 */
+@media (hover:hover){
+  .icon-btn:hover{color:var(--ink);border-color:var(--hairline-2)}
+  .view-tab:hover{color:var(--ink);border-color:var(--hairline-2)}
+  .text-btn:hover{color:var(--ink);border-color:var(--hairline-2)}
+  .fav:hover{color:var(--warning);border-color:var(--hairline-2)}
+  .btn:hover{background:var(--primary-dark)}
+  .btn.ghost:hover{background:rgba(118,185,0,.12);color:var(--ink)}
+  .btn.link:hover{color:var(--ink)}
+  .btn.danger:hover{background:var(--error);color:#fff}
+  .row:hover{border-color:var(--ink)}
+  .mini-btn:hover{color:var(--ink);border-color:var(--ink)}
+  .mini-btn.danger:hover{background:var(--error);color:#fff}
+  .drawer-tabs button:hover{color:var(--ink)}
+  .nav-item:hover{color:var(--primary)}
+  .card:hover{border-color:var(--ink)}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
