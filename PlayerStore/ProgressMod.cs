@@ -4,7 +4,7 @@ using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.15.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.16.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -19,6 +19,7 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgFilterBoost = Cfg.CreateEntry<bool>("FilterBoost", true, "加强滤嘴: 剥离量拉到游戏最大值, 耐久成本降到 1");
         public static readonly MelonPreferences_Entry<bool> CfgUvFullPurify = Cfg.CreateEntry<bool>("UvFullPurify", true, "紫外线灯: 除杀菌外一并清除全部杂质");
         public static readonly MelonPreferences_Entry<bool> CfgPurifierFullPurify = Cfg.CreateEntry<bool>("PurifierFullPurify", true, "海德拉净水器: 清除全部杂质(含原版跳过的高纯度水)");
+        public static readonly MelonPreferences_Entry<bool> CfgPurifyFillToFull = Cfg.CreateEntry<bool>("PurifyFillToFull", true, "净化后: 用100%纯水补满容器到容量上限");
         // 生成物品已改由 HTTP 网页生成器承担(F9 快捷生成在 ca0866d 移除), 旧键由 PurgeLegacyEntries 清出配置。
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
@@ -30,6 +31,7 @@ namespace ProgressMod
         public static bool FilterBoost => CfgFilterBoost.Value;
         public static bool UvFullPurify => CfgUvFullPurify.Value;
         public static bool PurifierFullPurify => CfgPurifierFullPurify.Value;
+        public static bool PurifyFillToFull => CfgPurifyFillToFull.Value;
         public static bool NeverWounded => CfgNeverWounded.Value;
         public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
 
@@ -1707,16 +1709,50 @@ namespace ProgressMod
             "microbe", "physical_contaminant", "chemical_contaminant", "mineral", "heavy_metal", "organic_waste"
         };
 
-        // 清空容器内全部杂质. RemoveContaminantFromContainer(容器, 杂质id, 水量, minPercentage)
-        // 的下限水位是 water*minPercentage/100, 传 0 即按总水量剥离到 0 —— 实际效果就是清空.
-        // 必须先取水量再循环: GetTotalVolume 含杂质体积, 循环中杂质被清零会让总量下降.
+        // 净化到位: 清空全部杂质 + 按需补满 100% 纯水. 紫外线灯与净水器共用同一条路径。
+        // 原版 PurifyToBaseWater 是「部分净化」—— 它按 ci 索引逐槽写 min(c-remove, floor),
+        // 而 floor = c*water/total, 水不满时 floor 不为 0, 剩下的就是那点残余。故这里不依赖
+        // 原版的部分净化结果, 而是直接剥离到零再补满。
+        // RemoveContaminantFromContainer(容器, 杂质id, 水量, minPercentage)
+        // 的写入端公式 (WaterHelper IL op078-119) 是:
+        //     floor = waterAmount * minPercentage / 100
+        //     new   = max(0, max(contaminant - volumeToRemove, min(contaminant, floor)))
+        // 传 minPercentage=0 即 floor=0, volumeToRemove=总水量 => 单轮理论上归零.
+        // 但实测仍会留一点残余, 故此处迭代到收敛: 每轮用「当前」总量作 volumeToRemove 重算,
+        // 直到总水量不再下降为止 (残余存在时下一轮必然仍有量可剥).
+        // 收敛判据用总量而非纯度: GetWaterPurity 对非 LIQUID_CONTAINER_TAG 的容器直接返回 0,
+        // 拿它当判据会让不满足标签的容器白跑满 MaxStripPasses 轮。
         // 只在主线程调用 (触达 native 字段).
+        private const int MaxStripPasses = 8;
+
+        // 补满: GetFreeCapacity = LIQUID_CONTAINER_CAPACITY - GetTotalVolume, 补水用
+        // AddPureWater(=AddWater grade 0, 即 100% 纯水)。容量按水的刻度算, 但 GetTotalVolume
+        // 把杂质体积也计入, 故先剥离再加: 顺序反了会按「含杂质的体积」补水, 反而溢出容量。
+        // 注意 free 取的是剥离之后的值。
+        private static void FillWithPureWater(GameItem container)
+        {
+            int free = WaterHelper.GetFreeCapacity(container);
+            if (free > 0) WaterHelper.AddPureWater(container, free);
+            else if (free < 0) WaterHelper.EmptyContainer(container);   // 已超容量: 清空而非再加水
+        }
+
         private static void StripAllContaminants(GameItem container)
         {
             if (container == null) return;
             int vol = WaterHelper.GetTotalVolume(container);
             if (vol <= 0) return;
-            foreach (string id in AllContaminants) WaterHelper.RemoveContaminantFromContainer(container, id, vol, 0);
+            for (int pass = 0; pass < MaxStripPasses; pass++)
+            {
+                foreach (string id in AllContaminants) WaterHelper.RemoveContaminantFromContainer(container, id, vol, 0);
+                int after = WaterHelper.GetTotalVolume(container);
+                // 收敛判据: 本轮没剥掉任何东西。用容量而非 GetWaterPurity —— 后者对非
+                // LIQUID_CONTAINER_TAG 的容器直接返回 0, 拿它当判据会让这类容器白跑满轮。
+                if (after >= vol) break;
+                vol = after;
+            }
+            // 剥离后按需补满 (顺序关键: 先剥离再取 free —— 容量按水的刻度算, 而 GetTotalVolume
+            // 把杂质体积也计入, 反了会按含杂质的体积补水而溢出容量)。
+            if (PurifyFillToFull) FillWithPureWater(container);
         }
 
         // 紫外线灯: 原版 OnUVUsed 只把 microbe 归零并把其体积并回 water, 对其余 5 类杂质
