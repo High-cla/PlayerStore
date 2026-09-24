@@ -561,7 +561,11 @@ function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,
   .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 // ===== 状态 =====
+// 新生成 token 的宽限期. 服务端快照按需重建, 刚生成的 token 必然暂时不在快照里;
+// 无宽限期就会把新条目当死 token 立即删掉 (表现为「生成后列表始终为空」).
+const TOKEN_GRACE_MS = 8000;
 const S = {
+  tokenAt:{},                        // token -> 本地记录时刻 (跨会话旧 token 无此项 ⇒ 立即清理)
   view:'catalog', cat:'ALL', q:'', subQ:'',
   density: localStorage.getItem('ps_density') || 'comfortable',
   fav:new Set(JSON.parse(localStorage.getItem('itemFavs') || '[]')),
@@ -630,6 +634,10 @@ function setView(v){
   renderNav();
   renderViewExtra();
   renderContent();
+  // 切换即取数: 否则「库存」/「我的生成」会先用上一次的空数组渲染, 要等最长 5s 轮询才出现
+  // (用户感知就是「点进去是空的」). 服务端已不阻塞, 立即返回, 代价可忽略.
+  if(v === 'inventory') refreshInv();
+  else if(v === 'mine') refreshMine();
 }
 function renderViewExtra(){
   if(S.view === 'catalog'){ viewExtra.innerHTML = ''; return; }
@@ -817,30 +825,52 @@ async function spawnItem(id, btn, count){
     if(!r.ok){ toast('生成失败: ' + (r.err||''), 'bad'); return; }
     if(r.token) rememberToken(r.token);
     toast('已生成: ' + id, 'ok');
-    if(S.view === 'mine') refreshMine();
+    // /api/spawn 入队即回, 产物由主线程稍后落到存档, 服务端快照随之重建.
+    // 按钮文字与可用状态全程不变 (支持连续点击), 只在后台补几次刷新把新条目捞回来.
+    refreshMineSoon();
   } catch(e){
     toast('请求失败: ' + e, 'bad');
   }
 }
-function rememberToken(t){ S.tokens.add(t); saveTokens(); $('myCount').textContent = S.tokens.size; }
+function rememberToken(t){ S.tokens.add(t); S.tokenAt[t] = Date.now(); saveTokens(); $('myCount').textContent = S.tokens.size; }
+// 生成后补刷: 产物落地有帧延迟, 单次刷新会看不到. 不阻塞交互, 也不改按钮.
+function refreshMineSoon(){
+  [250, 700, 1600].forEach(ms => setTimeout(() => {
+    refreshMine();   // 非 mine 视图时它只更新计数
+  }, ms));
+}
 
 // ===== 取数 =====
 async function refreshMine(){
   // 不做探针门禁: 直接请求并按真实响应渲染 (探针只会把「主线程暂时卡顿」误报成「服务器离线」, 掩盖真因).
-  const j = await apiFetch('/api/mine');            // 已解析对象
-  if(!j.ok){ rowList.innerHTML = '<div class="empty">加载失败: ' + esc(j.err||'') + '</div>'; return; }
+  // 服务端不在主线程等待, 立即回当前快照; inSave=false 表示快照还没反映存档内状态 → 稍后再取一次.
+  let j = await apiFetch('/api/mine');              // 已解析对象
+  if(j.ok && j.inSave === false){
+    await new Promise(r => setTimeout(r, 400));
+    j = await apiFetch('/api/mine');
+  }
+  if(!j.ok){ if(S.view === 'mine') rowList.innerHTML = '<div class="empty">加载失败: ' + esc(j.err||'') + '</div>'; return; }
   const items = (j.items||[]).filter(x => S.tokens.has(x.token));
   // 服务器已无该 token (被删 / 重启) → 清掉本地死 token, 否则永远留在列表里
   const live = new Set(items.map(x => x.token));
-  [...S.tokens].forEach(t => { if(!live.has(t)) S.tokens.delete(t); });
+  const now = Date.now();
+  [...S.tokens].forEach(t => {
+    if(live.has(t)) { delete S.tokenAt[t]; return; }
+    if(now - (S.tokenAt[t] || 0) > TOKEN_GRACE_MS) S.tokens.delete(t);
+  });
   saveTokens();
   S.mine = items;
   if(S.view === 'mine') renderMine();
-  else $('myCount').textContent = items.length;
+  // 计数口径与 rememberToken 一致: 用本地 token 集合大小, 不受快照滞后影响 (否则新生成期间会抖成 0).
+  else $('myCount').textContent = S.tokens.size;
 }
 async function refreshInv(){
-  const j = await apiFetch('/api/inventory');       // 已解析对象
-  if(!j.ok){ rowList.innerHTML = '<div class="empty">加载失败: ' + esc(j.err||'') + '</div>'; return; }
+  let j = await apiFetch('/api/inventory');         // 已解析对象
+  if(j.ok && j.inSave === false){                   // 快照尚未反映存档内状态 → 稍后再取一次
+    await new Promise(r => setTimeout(r, 400));
+    j = await apiFetch('/api/inventory');
+  }
+  if(!j.ok){ if(S.view === 'inventory') rowList.innerHTML = '<div class="empty">加载失败: ' + esc(j.err||'') + '</div>'; return; }
   S.inv = j.items || [];
   $('invCount').textContent = S.inv.length;
   if(S.view === 'inventory') renderInventory();
@@ -1146,9 +1176,10 @@ document.addEventListener('keydown', e => {
 let _pollTimer = 0;
 function startPolling(){
   clearInterval(_pollTimer);
-  _pollTimer = setInterval(()=>{ if(!document.hidden) checkServer(); }, 5000);
+  // 刷新当前视图而非只探针: 列表随主线程状态自动跟手 (服务端不再阻塞, 代价可控).
+  _pollTimer = setInterval(()=>{ if(!document.hidden) refreshCurrent(); }, 5000);
 }
-document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkServer(); });
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshCurrent(); });
 
 // ===== 启动 =====
 setDensity(S.density);

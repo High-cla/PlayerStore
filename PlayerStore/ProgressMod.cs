@@ -173,6 +173,8 @@ namespace ProgressMod
                         try { job.Done.Set(); } catch { /* 作业对象已被等待方释放 */ }
                     }
                 }
+                // 读路径快照重建放最后: 不让它拖慢已排队的作业.
+                RefreshSnapshots();
             }
             catch { /* IL2CPP 异常: 保持原值 */ }
         }
@@ -352,91 +354,116 @@ namespace ProgressMod
             };
         }
 
-        // GET /api/mine → 列出本次会话生成且仍在跟踪的物品 (token 引用) 枚举 SpawnedItems + 读 GameItem 字段全部在主线程作业内完成: 前者与 SpawnItem 同锁域 (免并发改写 抛 InvalidOperationException), 后者避免跨线程 native 读取.
+        // ==== 读路径快照 (照生成路径的形态: HTTP 线程绝不等待主线程) ====
+        // /api/spawn 入队即回, 从不阻塞; 而 /api/mine 与 /api/inventory 原先让 HTTP 线程 RunOnMainThread 同步等 5s.
+        // 主线程一忙 (失焦暂停 / 大存档卡帧 / 未进存档) 两个请求同时超时, 网页「我的生成」与「库存」一起变空 ——
+        // 用户看到「加载失败: 主线程未响应 (待处理作业 0)」, 即作业已被取走却没能及时完成.
+        // 改为同一形态: 主线程按需重建快照, HTTP 线程只读快照引用并立即返回, 永不阻塞.
+        private sealed class ReadSnapshot
+        {
+            public volatile object Mine;
+            public volatile object Inv;
+            public volatile bool InSave;   // false = 快照尚未反映存档内状态 (未进存档/刚启动), 前端据此短重试
+        }
+        private static readonly ReadSnapshot Snapshot = new ReadSnapshot();
+        private static volatile bool _wantMine;
+        private static volatile bool _wantInv;
+        private static long _lastSnapshotMs;
+        private const int SnapshotMinIntervalMs = 120;   // 重建节流: 请求洪峰只触发一次重建, 不放大主线程开销
+
+        // GET /api/mine → 读主线程维护的快照, 立即返回 (不阻塞 HTTP 线程). inSave=false 表示快照未反映存档内状态.
         private static void RouteMine(out object resp, out int code)
         {
-            if (!RunOnMainThread(() =>
+            _wantMine = true;                                   // 置位请求重建; 本次先回当前快照
+            resp = new { ok = true, items = Snapshot.Mine, inSave = Snapshot.InSave };
+            code = 200;
+        }
+
+        // GET /api/inventory → 读主线程维护的快照, 立即返回 (不阻塞 HTTP 线程).
+        private static void RouteInventory(out object resp, out int code)
+        {
+            _wantInv = true;
+            resp = new { ok = true, items = Snapshot.Inv, inSave = Snapshot.InSave };
+            code = 200;
+        }
+
+        // 仅主线程调用 (OnUpdate). 有需求且过了节流窗口才重建.
+        private static void RefreshSnapshots()
+        {
+            if (!_wantMine && !_wantInv) return;
+            long now = System.Environment.TickCount64;
+            if (now - _lastSnapshotMs < SnapshotMinIntervalMs) return;
+            _lastSnapshotMs = now;
+            bool inSave;
+            try { inSave = EmporiumEntry.Instance != null; } catch { inSave = false; }
+            Snapshot.InSave = inSave;
+            if (_wantMine) { _wantMine = false; Snapshot.Mine = BuildMineSnapshot(); }
+            if (_wantInv) { _wantInv = false; Snapshot.Inv = BuildInvSnapshot(); }
+        }
+
+        // 构建「我的生成」快照 (仅主线程): 枚举 SpawnedItems + 读 GameItem 字段.
+        private static object BuildMineSnapshot()
+        {
+            var list = new System.Collections.Generic.List<object>();
+            var dead = new System.Collections.Generic.List<int>();
+            foreach (var kv in SpawnedItems)
             {
-                var list = new System.Collections.Generic.List<object>();
-                var dead = new System.Collections.Generic.List<int>();
-                foreach (var kv in SpawnedItems)
+                var it = kv.Value;
+                if (it == null) { dead.Add(kv.Key); continue; }
+                int u;
+                try { u = it.uniqueId; }
+                catch { dead.Add(kv.Key); continue; }
+                // uid==0 = native 对象已不可读 (被游戏侧消耗/丢弃/销毁, 或存档重载). 此类 token 已无意义: 保留会让网页端收到 uid=0 的死条目, 点「完整检查器」必然 400, 且因服务端 仍在返回该 token, 前端 refreshMine() 的死 token 清理永不触发.
+                if (u == 0) { dead.Add(kv.Key); continue; }
+                var b = ItemBrief(it);
+                list.Add(new
                 {
-                    var it = kv.Value;
-                    if (it == null) { dead.Add(kv.Key); continue; }
-                    int u;
+                    token = kv.Key,
+                    uid = u,
+                    id = b.id,
+                    name = b.name,
+                    count = b.count,
+                    unitValue = b.unitValue,
+                    shortDescription = SafeStr(() => it.shortDescription, "")
+                });
+            }
+            foreach (var k in dead) SpawnedItems.Remove(k);
+            return (object)list;
+        }
+
+        // 构建库存快照 (仅主线程): EnumeratePlayerInventories / InvLabel / ReadInventoryItems 都触达 native 对象.
+        private static object BuildInvSnapshot()
+        {
+            var seen = new System.Collections.Generic.HashSet<int>();
+            var list = new System.Collections.Generic.List<object>();
+            foreach (var inv in EnumeratePlayerInventories())
+            {
+                if (inv == null) continue;
+                string invName = InvLabel(inv);
+                foreach (var it in ReadInventoryItems(inv))
+                {
+                    if (it == null) continue;
+                    int u = 0;
                     try { u = it.uniqueId; }
-                    catch { dead.Add(kv.Key); continue; }
-                    // uid==0 = native 对象已不可读 (被游戏侧消耗/丢弃/销毁, 或存档重载). 此类 token 已无意义: 保留会让网页端收到 uid=0 的死条目, 点「完整检查器」必然 400, 且因服务端 仍在返回该 token, 前端 refreshMine() 的死 token 清理永不触发.
-                    if (u == 0) { dead.Add(kv.Key); continue; }
+                    catch
+                    {
+                        // 静默数据丢失: 读不到 uniqueId 的物品会被下面 u == 0 过滤, 整条记录从 /api/inventory 响应里消失 (网页看不到该物品). 该路径由 HTTP 请求触发, 不在每帧热路径上, 故记警告便于定位而非静默吞掉.
+                        MelonLogger.Warning("[ItemOp] inventory: 读取 item.uniqueId 失败, 跳过该物品");
+                    }
+                    if (u == 0 || !seen.Add(u)) continue;
                     var b = ItemBrief(it);
                     list.Add(new
                     {
-                        token = kv.Key,
                         uid = u,
                         id = b.id,
                         name = b.name,
                         count = b.count,
                         unitValue = b.unitValue,
-                        shortDescription = SafeStr(() => it.shortDescription, "")
+                        inv = invName
                     });
                 }
-                foreach (var k in dead) SpawnedItems.Remove(k);
-                return (object)list;
-            }, out object result, 5000, out bool overloaded))
-            {
-                resp = new { ok = true, items = result };
-                code = 200;
-                return;
             }
-            // 过载(队列已满, 可退避重试)与超时(主线程真的没响应)是两种失败, 用状态码区分.
-            resp = new { ok = false, err = overloaded ? "server busy (队列已满 " + PendingJobs.Count + "/" + MaxPendingJobs + "), 请稍后重试" : "主线程未响应 (待处理作业 " + PendingJobs.Count + ")" };
-            code = overloaded ? 503 : 500;
-        }
-
-        // GET /api/inventory → 枚举玩家全部库存物品 (主背包+柜台+文档+垃圾桶) EnumeratePlayerInventories / InvLabel / ReadInventoryItems 都触达 native 对象, 必须主线程.
-        private static void RouteInventory(out object resp, out int code)
-        {
-            if (!RunOnMainThread(() =>
-            {
-                var seen = new System.Collections.Generic.HashSet<int>();
-                var list = new System.Collections.Generic.List<object>();
-                foreach (var inv in EnumeratePlayerInventories())
-                {
-                    if (inv == null) continue;
-                    string invName = InvLabel(inv);
-                    foreach (var it in ReadInventoryItems(inv))
-                    {
-                        if (it == null) continue;
-                        int u = 0;
-                        try { u = it.uniqueId; }
-                        catch
-                        {
-                            // 静默数据丢失: 读不到 uniqueId 的物品会被下面 u == 0 过滤, 整条记录从 /api/inventory 响应里消失 (网页看不到该物品). 该路径由 HTTP 请求触发, 不在每帧热路径上, 故记警告便于定位而非静默吞掉.
-                            MelonLogger.Warning("[ItemOp] inventory: 读取 item.uniqueId 失败, 跳过该物品");
-                        }
-                        if (u == 0 || !seen.Add(u)) continue;
-                        var b = ItemBrief(it);
-                        list.Add(new
-                        {
-                            uid = u,
-                            id = b.id,
-                            name = b.name,
-                            count = b.count,
-                            unitValue = b.unitValue,
-                            inv = invName
-                        });
-                    }
-                }
-                return (object)list;
-            }, out object result, 5000, out bool overloaded))
-            {
-                resp = new { ok = true, items = result };
-                code = 200;
-                return;
-            }
-            // 过载(队列已满, 可退避重试)与超时(主线程真的没响应)是两种失败, 用状态码区分.
-            resp = new { ok = false, err = overloaded ? "server busy (队列已满 " + PendingJobs.Count + "/" + MaxPendingJobs + "), 请稍后重试" : "主线程未响应 (待处理作业 " + PendingJobs.Count + ")" };
-            code = overloaded ? 503 : 500;
+            return (object)list;
         }
 
         // GET /api/item?uid=n → DumpItem 含 native 方法调用, 必须主线程执行. 闭包只捕获 uid (纯值), GameItem 引用在主线程作业内解析, 不跨线程传递.
