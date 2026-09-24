@@ -61,8 +61,7 @@ public class Core : MelonMod
 		}
 	}
 
-	// 建占用图并把 fixedItems(容器原位)先占上: 各布局器 occ 起手式完全同构, 抽出来. W/H 取自 occ 自身维度,
-	// 避免「传参 W/H」与「occ.GetLength」两套口径漂移.
+	// 建占用图并把 fixedItems(容器原位)先占上: 各布局器 occ 起手式完全同构, 抽出来. W/H 取自 occ 自身维度, 避免「传参 W/H」与「occ.GetLength」两套口径漂移.
 	private static bool[,] InitOcc(GridContext g)
 	{
 		bool[,] occ = new bool[g.W, g.H];
@@ -104,8 +103,7 @@ public class Core : MelonMod
 
 	internal static MelonPreferences_Category Cfg;
 
-	// 用户配置只剩两项: 自动排序开关 + 排序快捷键。
-	// 其余原配置项按实测最优解固化为下方常量(分支保留, 便于日后回调), 不再暴露给玩家。
+	// 用户配置只剩两项: 自动排序开关 + 排序快捷键。 其余原配置项按实测最优解固化为下方常量(分支保留, 便于日后回调), 不再暴露给玩家。
 	internal static MelonPreferences_Entry<bool> AutoSortLastOpened;
 
 	internal static MelonPreferences_Entry<string> SortHotkey;
@@ -115,8 +113,7 @@ public class Core : MelonMod
 
 	internal static MelonPreferences_Entry<float> NativePosY;
 
-	// ---- 固化常量(原 MelonPreferences 项; 值 = 原默认最优解) ----
-	// 恒真的两项不留常量(无分支可挂): 原 Enabled(功能总开关)与 ShowBackground(显示常驻背景存储)均固定为开。
+	// ---- 固化常量(原 MelonPreferences 项; 值 = 原默认最优解) ---- 恒真的两项不留常量(无分支可挂): 原 Enabled(功能总开关)与 ShowBackground(显示常驻背景存储)均固定为开。
 	private const bool KeepContainersConst = false; // 原 KeepContainersInPlace: 容器(含液体瓶)也参与排序
 
 	private const bool SkipBarterConst = true; // 原 SkipBarterWindows: 不给交易/选择弹窗加排序按钮
@@ -154,25 +151,17 @@ public class Core : MelonMod
 
 	private static readonly List<System.Action> _rootedActions = new List<Action>();
 
-	// ---- 「最后打开的容器」与自动排序状态 ----
-	// 原生 PixelWindow.focusStamp 是全局自增焦点戳(每次 ToFront/提权 +1, 见 PixelWindow.ToFront),
-	// 故 visibleWindows 中 focusStamp 最大者 = 玩家最近打开/最前的那个窗口。
+	// ---- 「最后打开的容器」与自动排序状态 ---- 原生 PixelWindow.focusStamp 是全局自增焦点戳(每次 ToFront/提权 +1, 见 PixelWindow.ToFront), 故 visibleWindows 中 focusStamp 最大者 = 玩家最近打开/最前的那个窗口。
 
-	// 自动排序: 只在窗口「从无到有」出现时触发一次(而非每次聚焦, 免得玩家拿东西时被重排);
-	// 首轮 tick 只登记不触发(开游戏时已有一堆常驻窗口, 不能当成「刚打开」)。
+	// 自动排序: 只在窗口「从无到有」出现时触发一次(而非每次聚焦, 免得玩家拿东西时被重排); 首轮 tick 只登记不触发(开游戏时已有一堆常驻窗口, 不能当成「刚打开」)。
 	private static readonly HashSet<long> _seenWindows = new HashSet<long>();
 
 	private static bool _autoWarmup = true;
 
-	// 上一 tick「从无到有」出现的窗口(可能有多个)。执行时再筛「可排序」者, 取 focusStamp 最大者排序。
-	// 不能只存一个: 工具提示/系统 UI 会与真容器同 tick 出现且 focusStamp 更高, 若在 diff 阶段就定死
-	// 单个目标, 真容器会被顶掉并随即被登记进 _seenWindows ⇒ 从此永不再触发(自动排序时灵时不灵)。
+	// 上一 tick「从无到有」出现的窗口(可能有多个)。执行时再筛「可排序」者, 取 focusStamp 最大者排序。 不能只存一个: 工具提示/系统 UI 会与真容器同 tick 出现且 focusStamp 更高, 若在 diff 阶段就定死 单个目标, 真容器会被顶掉并随即被登记进 _seenWindows ⇒ 从此永不再触发(自动排序时灵时不灵)。
 	private static readonly List<PixelWindow> _pendingAuto = new List<PixelWindow>();
 
-	// 本次排序内冻结的「将成堆」件集合。同类合并的被合并件在应用阶段被搬到代表件同位, 游戏随即合并,
-	// 于是代表件在下一次排序时 unitCount>1。若不冻结, 第一次排序(自动)会让代表件参与精修, 第二次排序
-	// (手动)则因 Stacked 为真而跳过精修 (TryFillRefine 只处理非堆叠件) ⇒ 同一容器两次布局不同。
-	// null = 不在排序中, 按活状态判定。
+	// 本次排序内冻结的「将成堆」件集合。同类合并的被合并件在应用阶段被搬到代表件同位, 游戏随即合并, 于是代表件在下一次排序时 unitCount>1。若不冻结, 第一次排序(自动)会让代表件参与精修, 第二次排序 (手动)则因 Stacked 为真而跳过精修 (TryFillRefine 只处理非堆叠件) ⇒ 同一容器两次布局不同。 null = 不在排序中, 按活状态判定。
 	private static HashSet<GameItem> _sortStacked;
 
 	// 排序快捷键解析缓存(配置字符串变了才重新解析)
@@ -182,8 +171,7 @@ public class Core : MelonMod
 
 	private static int[] _hkMods = new int[0];
 
-	// NativeWarn 去重: OnUpdate 每 0.25s 调一次 RefreshNativeUI/TrackOpenedContainers,
-	// 若异常持续存在会每 tick 刷屏。只记「类型 + 消息」变化过的, 持续同类异常不重复打印。
+	// NativeWarn 去重: OnUpdate 每 0.25s 调一次 RefreshNativeUI/TrackOpenedContainers, 若异常持续存在会每 tick 刷屏。只记「类型 + 消息」变化过的, 持续同类异常不重复打印。
 	private static string _nativeWarnSig;
 
 	public override void OnInitializeMelon()
@@ -203,8 +191,7 @@ public class Core : MelonMod
 		MelonPreferences.Save();
 	}
 
-	// 清掉旧版遗留配置项(旧键仍会留在 MelonPreferences.cfg 里; 新版不再使用)。
-	// 反射调用 DeleteEntry: 没有该 API 的 MelonLoader 上安全跳过(残留旧键无害)。
+	// 清掉旧版遗留配置项(旧键仍会留在 MelonPreferences.cfg 里; 新版不再使用)。 反射调用 DeleteEntry: 没有该 API 的 MelonLoader 上安全跳过(残留旧键无害)。
 	private static void PurgeLegacyEntries()
 	{
 		try
@@ -234,7 +221,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: 反射探测, 静默回退
 		}
 	}
 
@@ -272,9 +258,7 @@ public class Core : MelonMod
 			{
 				RefreshNativeUI();
 				TrackOpenedContainers();
-				// 本轮成功 ⇒ 清掉上次的异常签名, 否则「同样的故障再次发生」会被当成持续异常永久静默
-				// (例: 容器A抛NRE→告警; 关闭A恢复正常; 再开A抛同一NRE→无日志)。去重只应作用于
-				// 连续失败期间, 不该跨过中间的成功轮次。
+				// 本轮成功 ⇒ 清掉上次的异常签名, 否则「同样的故障再次发生」会被当成持续异常永久静默 (例: 容器A抛NRE→告警; 关闭A恢复正常; 再开A抛同一NRE→无日志)。去重只应作用于 连续失败期间, 不该跨过中间的成功轮次。
 				_nativeWarnSig = null;
 			}
 			catch (System.Exception ex)
@@ -284,9 +268,7 @@ public class Core : MelonMod
 		}
 	}
 
-	// 刷新/自动排序链路的异常出口。原先为空函数体 ⇒ 整条 UI 刷新路径的异常被完全吞掉,
-	// 「排序不生效但毫无提示」无从排查。按类型+消息去重后落 Warning(连续失败期间不刷屏);
-	// 去重状态由调用方在成功轮次清零, 故故障再次复发仍会告警(见 OnUpdate)。
+	// 刷新/自动排序链路的异常出口。原先为空函数体 ⇒ 整条 UI 刷新路径的异常被完全吞掉, 「排序不生效但毫无提示」无从排查。按类型+消息去重后落 Warning(连续失败期间不刷屏); 去重状态由调用方在成功轮次清零, 故故障再次复发仍会告警(见 OnUpdate)。
 	private static void NativeWarn(System.Exception ex)
 	{
 		if (ex == null)
@@ -304,17 +286,6 @@ public class Core : MelonMod
 
 	private static void RefreshNativeUI()
 	{
-		//IL_004f: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0056: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0097: Unknown result type (might be due to invalid IL or missing references)
-		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0074: Unknown result type (might be due to invalid IL or missing references)
-		//IL_0289: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02c2: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02c7: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02ce: Unknown result type (might be due to invalid IL or missing references)
-		//IL_02df: Unknown result type (might be due to invalid IL or missing references)
 		CustomUIManager instance = CustomUIManager.Instance;
 		if ((Object)(object)instance == (Object)null || (Object)(object)instance.buttonPrefab == (Object)null || (Object)(object)instance.windowPrefab == (Object)null)
 		{
@@ -372,7 +343,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 	}
 
@@ -409,7 +379,6 @@ public class Core : MelonMod
 							}
 							catch
 							{
-								// ponytail: IL2CPP native probe, silent fallback
 							}
 						});
 			_rootedActions.Add(val2);
@@ -441,7 +410,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 	}
 
@@ -454,8 +422,7 @@ public class Core : MelonMod
 		return false;
 	}
 
-	// 原生 UI 已是唯一形态(原 UseNativeUI 配置固化 true): 旧的 IMGUI 面板与其 FaceClicked 已删除.
-	// 按钮列表由 RefreshNativeUI 渲染, 见上方.
+	// 原生 UI 已是唯一形态(原 UseNativeUI 配置固化 true): 旧的 IMGUI 面板与其 FaceClicked 已删除. 按钮列表由 RefreshNativeUI 渲染, 见上方.
 	private static string Trunc(string s, int max)
 	{
 		if (string.IsNullOrEmpty(s))
@@ -487,7 +454,6 @@ public class Core : MelonMod
 				}
 				catch
 				{
-					// ponytail: IL2CPP native probe, silent fallback
 				}
 				if (val2 == null)
 				{
@@ -514,15 +480,13 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return result;
 	}
 
 	private static GameInventory ResolveInventory(PixelWindow win)
 	{
-		// 逐条探测(顺序即优先级): child -> childElement -> children -> 动物笼; 任一步异常静默跳过下探.
-		// 拆段: 每段各自独立的 native 探测 + try/catch, 见下方四个 helper.
+		// 逐条探测(顺序即优先级): child -> childElement -> children -> 动物笼; 任一步异常静默跳过下探. 拆段: 每段各自独立的 native 探测 + try/catch, 见下方四个 helper.
 		GameInventory v = ResolveFromChild(win);
 		if (v != null)
 		{
@@ -555,7 +519,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return null;
 	}
@@ -574,7 +537,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return null;
 	}
@@ -601,7 +563,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return null;
 	}
@@ -628,7 +589,6 @@ public class Core : MelonMod
 						}
 						catch
 						{
-							// ponytail: IL2CPP native probe, silent fallback
 						}
 						if (val5 != null)
 						{
@@ -640,7 +600,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return null;
 	}
@@ -681,7 +640,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		try
 		{
@@ -701,12 +659,10 @@ public class Core : MelonMod
 			}
 			catch
 			{
-				// ponytail: IL2CPP native probe, silent fallback
 			}
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 	}
 
@@ -727,7 +683,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return false;
 	}
@@ -753,7 +708,6 @@ public class Core : MelonMod
 				}
 				catch
 				{
-					// ponytail: IL2CPP native probe (minX/minY/orientation), silent fallback to coordinates below
 				}
 				try
 				{
@@ -765,7 +719,6 @@ public class Core : MelonMod
 				}
 				catch
 				{
-					// ponytail: IL2CPP native probe (flipped), silent fallback
 				}
 			}
 			snapped.Add((it, x, y, o, flip));
@@ -855,11 +808,7 @@ public class Core : MelonMod
 			Toast("only containers here, left in place");
 			return;
 		}
-		// 排序池规范化: childItems 的遍历序是外部输入(childItems 只是游戏内部列表的拷贝), 不该参与布局决策。
-		// 但 List.Sort 是不稳定排序, 且多处比较器只比格数/边长(偏序) —— tie 的归属完全由输入序决定,
-		// 于是同一容器只要 childItems 顺序一变, 布局就可能变(离线实测: 只打乱输入序, 110/270 会话布局改变)。
-		// SizeCompare 以 uid 收尾(全序), 故按它定序后, 所有派生列表(candidate/singles/paired/order)都
-		// 成为排序池的确定函数, 布局不再吃输入序。仅当 ident/name/uid/bbox 全同才并列 —— 那两件可互换。
+		// 排序池规范化: childItems 的遍历序是外部输入(childItems 只是游戏内部列表的拷贝), 不该参与布局决策。 但 List.Sort 是不稳定排序, 且多处比较器只比格数/边长(偏序) —— tie 的归属完全由输入序决定, 于是同一容器只要 childItems 顺序一变, 布局就可能变(离线实测: 只打乱输入序, 110/270 会话布局改变)。 SizeCompare 以 uid 收尾(全序), 故按它定序后, 所有派生列表(candidate/singles/paired/order)都 成为排序池的确定函数, 布局不再吃输入序。仅当 ident/name/uid/bbox 全同才并列 —— 那两件可互换。
 		sortPool.Sort(SizeCompare);
 		// 位置快照(供失败恢复): 记录排序前每个物品的 minX/minY/orientation/flipped
 		List<(GameItem, int, int, int, bool)> original = SnapshotOriginals(sortPool);
@@ -888,9 +837,7 @@ public class Core : MelonMod
 			}
 			// 应用布局(同类合并致放 -> 堆叠顺序落位 -> Validate -> toast); 拆出 SortInventory 第三段: 复杂度 -8
 			ApplyLayout(inv, sortPool, keptContainers, layout, mergeRepIdx, mergeAbsorb, mode, tucked, relocated2);
-			// BuildMask 读形状时清零真实物品的 minX/minY/orientation 且不还原(见 TryReadNativeCells), 故
-			// 「不入 layout 且未被同类合并吸收」的件会停在 (0,0,0) 与已落位件重叠 —— 与 TryResidualLayout
-			// 「不入 layout ⇒ 原地不动」的契约相悖。此处只把这些件按入口快照复位, 不改任何布局口径。
+			// BuildMask 读形状时清零真实物品的 minX/minY/orientation 且不还原(见 TryReadNativeCells), 故 「不入 layout 且未被同类合并吸收」的件会停在 (0,0,0) 与已落位件重叠 —— 与 TryResidualLayout 「不入 layout ⇒ 原地不动」的契约相悖。此处只把这些件按入口快照复位, 不改任何布局口径。
 			RestoreUnplaced(sortPool, layout, mergeAbsorb, original);
 		}
 		catch (System.Exception ex2)
@@ -926,8 +873,7 @@ public class Core : MelonMod
 		{
 			masks[it2] = BuildMask(it2);
 		}
-		// 同类合并视图: 相同 ident + 相同形状(Gw0xGh0 + C0) 的多件只占一份布局(代表件),
-		// 其余在应用阶段调 StackItemUnchecked 并入代表件. 大幅减少地面占用, 释放连续空域(实测 BEST 从不劣化).
+		// 同类合并视图: 相同 ident + 相同形状(Gw0xGh0 + C0) 的多件只占一份布局(代表件), 其余在应用阶段调 StackItemUnchecked 并入代表件. 大幅减少地面占用, 释放连续空域(实测 BEST 从不劣化).
 		mergeRepIdx = new Dictionary<string, int>();
 		for (int mi = 0; mi < sortPool.Count; mi++)
 		{
@@ -939,8 +885,7 @@ public class Core : MelonMod
 				mergeRepIdx[mkey] = mi;
 			}
 		}
-		// 被合并件清单: 非代表件的下标。sortPool 已按 SizeCompare 规范化, 故代表件 = 同 key 的首件
-		// (uid 最小者), 与 childItems 输入序无关 —— 否则「谁是代表件」会随输入序漂移, 布局随之改变。
+		// 被合并件清单: 非代表件的下标。sortPool 已按 SizeCompare 规范化, 故代表件 = 同 key 的首件 (uid 最小者), 与 childItems 输入序无关 —— 否则「谁是代表件」会随输入序漂移, 布局随之改变。
 		mergeAbsorb = new List<int>();
 		HashSet<int> mergeRepSet = new HashSet<int>(mergeRepIdx.Values);
 		for (int mi = 0; mi < sortPool.Count; mi++)
@@ -950,11 +895,7 @@ public class Core : MelonMod
 				mergeAbsorb.Add(mi);
 			}
 		}
-		// 冻结本次排序的「将成堆」集合: 应用阶段会把被合并件搬到代表件同位, 游戏随即合并,
-		// 使代表件在本函数返回后 unitCount>1。但此刻读活值仍是 1, 于是同一次排序内
-		// 「精修是否跳过代表件」(TryFillRefine 只看 Stacked) 会在下一次排序时翻转 ——
-		// 这正是自动排序(第一次)与手动按钮(第二次)结果不同的原因。此处按「合并后稳态」提前冻结。
-		// 判据: 本就是堆叠件, 或将被并入代表件的件, 或吸收了至少一件的代表件(单件代表不算)。
+		// 冻结本次排序的「将成堆」集合: 应用阶段会把被合并件搬到代表件同位, 游戏随即合并, 使代表件在本函数返回后 unitCount>1。但此刻读活值仍是 1, 于是同一次排序内 「精修是否跳过代表件」(TryFillRefine 只看 Stacked) 会在下一次排序时翻转 —— 这正是自动排序(第一次)与手动按钮(第二次)结果不同的原因。此处按「合并后稳态」提前冻结。 判据: 本就是堆叠件, 或将被并入代表件的件, 或吸收了至少一件的代表件(单件代表不算)。
 		_sortStacked = new HashSet<GameItem>();
 		foreach (GameItem it2 in sortPool)
 		{
@@ -1042,10 +983,7 @@ public class Core : MelonMod
 			Dictionary<GameItem, Placement> layoutBanded = LayoutBanded(tagOrder, tagGroups, new GridContext(w, h, masks, keptContainers));
 			if (layoutBanded != null)
 			{
-				// 横带成功后也做同一精修层(以前只有 LayoutDense 会精修 ⇒ 横带成功路径零塞缝):
-				// 小件优先释放自身格 → 塞进「能容纳它的最小空矩」 → 空矩内取最贴邻位.
-				// 采纳条件(新空矩 >= 起始空矩 且 贴邻不降)在 TryFillRefine 内部, 非劣化才改位 ⇒
-				// 最大空矩单调不减, 拆散(贴邻下降)恒 0, 落地重叠/压未动件/越界 与横带原结果同(逐件用 occ 精确校验).
+				// 横带成功后也做同一精修层(以前只有 LayoutDense 会精修 ⇒ 横带成功路径零塞缝): 小件优先释放自身格 → 塞进「能容纳它的最小空矩」 → 空矩内取最贴邻位. 采纳条件(新空矩 >= 起始空矩 且 贴邻不降)在 TryFillRefine 内部, 非劣化才改位 ⇒ 最大空矩单调不减, 拆散(贴邻下降)恒 0, 落地重叠/压未动件/越界 与横带原结果同(逐件用 occ 精确校验).
 				Dictionary<GameItem, Placement> refinedBanded = TryFillRefine(layoutBanded, new GridContext(w, h, masks, keptContainers));
 				if (refinedBanded != null)
 				{
@@ -1108,8 +1046,7 @@ public class Core : MelonMod
 		Dictionary<GameItem, Placement> layout = null;
 		if (bandedLayout != null && denseLayout != null)
 		{
-			// task-6 容差定夺: 横带全放 且 横带空矩 >= 密集空矩 - tol*密集空矩 ⇒ 选横带(保「同类聚带」产品目标),
-			// 否则选密集. tol = BandedToleranceConst, 离线曲线见 InventorySorter/tscripts/bench_banded.py
+			// task-6 容差定夺: 横带全放 且 横带空矩 >= 密集空矩 - tol*密集空矩 ⇒ 选横带(保「同类聚带」产品目标), 否则选密集. tol = BandedToleranceConst, 离线曲线见 InventorySorter/tscripts/bench_banded.py
 			long areaBanded = EmptyAreaOfLayout(bandedLayout, new GridContext(w, h, masks, keptContainers));
 			long areaDense = EmptyAreaOfLayout(denseLayout, new GridContext(w, h, masks, keptContainers));
 			if (areaBanded >= areaDense - (long)(areaDense * BandedToleranceConst))
@@ -1143,9 +1080,7 @@ public class Core : MelonMod
 	{
 		mode = null;
 		relocated2 = 0;
-		// 降级残局(Residual): 全放失败不再整包放弃 — 大件各选最贴合位, 小件尽力塞缝, 放不下的留原位.
-		// 严格布局器"任一放不下整候选作废"; 此处失败件留位且占位作障碍, 落地永不与未动件重叠.
-		// 超大网格坐标扫描过贵(主线程), 维持原 abort.
+		// 降级残局(Residual): 全放失败不再整包放弃 — 大件各选最贴合位, 小件尽力塞缝, 放不下的留原位. 严格布局器"任一放不下整候选作废"; 此处失败件留位且占位作障碍, 落地永不与未动件重叠. 超大网格坐标扫描过贵(主线程), 维持原 abort.
 		Dictionary<GameItem, Placement> degradeLayout = null;
 		if ((long)w * h < 5000)
 		{
@@ -1173,8 +1108,7 @@ public class Core : MelonMod
 		string mode, int tucked, int relocated2)
 	{
 		int num = 0;
-		// 同类合并应用: 布局成功后, 被合并件致放到代表件同一位置(重叠) — 游戏堆叠机制自动合并为一格.
-		// 代表件位置 = layout[rep]; 每个被合并件找同 ident 代表, PlaceItem 到代表件的 X/Y/O.
+		// 同类合并应用: 布局成功后, 被合并件致放到代表件同一位置(重叠) — 游戏堆叠机制自动合并为一格. 代表件位置 = layout[rep]; 每个被合并件找同 ident 代表, PlaceItem 到代表件的 X/Y/O.
 		if (mergeAbsorb.Count > 0)
 		{
 			foreach (int ai in mergeAbsorb)
@@ -1226,10 +1160,7 @@ public class Core : MelonMod
 		Toast($"{mode} {layout.Count}/{sortPool.Count} item(s)" + ((mode == "degraded") ? $", {relocated2} tucked into gaps" : "") + ((mode == "grouped" && tucked > 0) ? $", {tucked} tucked into gaps" : "") + ((num > 0) ? $", {num} rotated" : "") + ((keptContainers.Count > 0) ? $"  ({keptContainers.Count} kept)" : ""));
 	}
 
-	// 未落位件复位: TryReadNativeCells 在读形状前对每件真实物品调 SetTransform(0,0,flag,0) 且不还原
-	// (GameItem.modifiedShape 是自有字段而非副本) ⇒ 布局阶段所有件坐标/朝向恒为 0, 布局算法正依赖该口径
-	// (CurOri / NativeOrderCompare 位置键 / 残局原格标记), 故不还原真值; 只在应用阶段后把「未被 layout 覆盖
-	// 且未被合并吸收」的件按入口快照复位, 消除 (0,0,0) 重叠。
+	// 未落位件复位: TryReadNativeCells 在读形状前对每件真实物品调 SetTransform(0,0,flag,0) 且不还原 (GameItem.modifiedShape 是自有字段而非副本) ⇒ 布局阶段所有件坐标/朝向恒为 0, 布局算法正依赖该口径 (CurOri / NativeOrderCompare 位置键 / 残局原格标记), 故不还原真值; 只在应用阶段后把「未被 layout 覆盖 且未被合并吸收」的件按入口快照复位, 消除 (0,0,0) 重叠。
 	private static void RestoreUnplaced(
 		List<GameItem> sortPool, Dictionary<GameItem, Placement> layout, List<int> mergeAbsorb,
 		List<(GameItem it, int x, int y, int o, bool f)> original)
@@ -1289,10 +1220,7 @@ public class Core : MelonMod
 		}
 	}
 
-	// 同类聚带(横带)布局: 逐 tag 连续横带(带底 = 前带 bottom), 带内用 MFR 池落位 —— 产品目标: 同类聚在一起.
-	// task-6 修复(近满包原先 0/93 全失败): ①支撑改自支撑(HasSupportSelf, 厚件/首件可放)
-	// ②落位失败先重算 MFR 池(增量 ShrinkRects 切块会丢空间) ③仍失败则全网格自支撑 first-fit(带底压缩/回退).
-	// 逐 tag 连续带语义不变(同 tag 件不跨带交错): 只有整件在带区放不下时才允许落到带外空位; 任一件彻底无处可放 ⇒ 整次返回 null.
+	// 同类聚带(横带)布局: 逐 tag 连续横带(带底 = 前带 bottom), 带内用 MFR 池落位 —— 产品目标: 同类聚在一起. task-6 修复(近满包原先 0/93 全失败): ①支撑改自支撑(HasSupportSelf, 厚件/首件可放) ②落位失败先重算 MFR 池(增量 ShrinkRects 切块会丢空间) ③仍失败则全网格自支撑 first-fit(带底压缩/回退). 逐 tag 连续带语义不变(同 tag 件不跨带交错): 只有整件在带区放不下时才允许落到带外空位; 任一件彻底无处可放 ⇒ 整次返回 null.
 	private static Dictionary<GameItem, Placement> LayoutBanded(List<string> order, Dictionary<string, List<GameItem>> buckets, GridContext grid)
 	{
 		int W = grid.W;
@@ -1363,8 +1291,7 @@ public class Core : MelonMod
 
 	private static Dictionary<GameItem, Placement> LayoutDense(List<GameItem> flat, GridContext grid)
 	{
-		// 算法组合: 并行跑多个独立布局器, 各返回完整 Placement 字典, 取"剩余最大连续空矩"最大者.
-		// 拆段: 候选收集 / 同精修层 + 择优, 各为独立阶段方法(见下).
+		// 算法组合: 并行跑多个独立布局器, 各返回完整 Placement 字典, 取"剩余最大连续空矩"最大者. 拆段: 候选收集 / 同精修层 + 择优, 各为独立阶段方法(见下).
 		List<Dictionary<GameItem, Placement>> candidates = CollectDenseCandidates(flat, grid);
 		return PickBestPolished(candidates, grid);
 	}
@@ -1375,22 +1302,13 @@ public class Core : MelonMod
 		int W = grid.W;
 		int H = grid.H;
 		Dictionary<GameItem, ItemMask> masks = grid.masks;
-		// 算法组合: 并行跑多个独立布局器, 各返回完整 Placement 字典, 取"剩余最大连续空矩"最大者.
-		// 数据驱动(verify_all 胜出统计): PairGrounded/GreedyBottom 从不胜出(0/12)已删除;
-		// MinHole(胜6) + GrowTouch(胜5) + Shelf(胜5) 互补覆盖全部组, 组合零损失.
+		// 算法组合: 并行跑多个独立布局器, 各返回完整 Placement 字典, 取"剩余最大连续空矩"最大者. 数据驱动(verify_all 胜出统计): PairGrounded/GreedyBottom 从不胜出(0/12)已删除; MinHole(胜6) + GrowTouch(胜5) + Shelf(胜5) 互补覆盖全部组, 组合零损失.
 		List<Dictionary<GameItem, Placement>> candidates = new List<Dictionary<GameItem, Placement>>();
 		// 配对单元(用于 MinHole 级联/堆叠叠放). 大仓才配对(配对 O(n^2) 有开销).
 		List<object> paired = (W * H >= 100) ? BuildUnits(flat, masks) : null;
 		List<object> singles = new List<object>(flat);
 		singles.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
-		// ===== 原生语义候选(第 5 候选, 与旧 4 布局器同池) =====
-		// 对齐游戏原生 InventorySortHelper.Sort 语义(docs/NATIVE_SORT_SPEC.md §3.2/§7 §9): 大件先占好位,
-		// 小件按"行主序第一个能放的位置"自然落进缝隙(逐件 first-fit, 无评分/无 waste 比较).
-		// 取舍(v5, Lead 裁定): 旧版"原生全放即早退"会把更优且更稳的择优换掉(实测空矩和 20003 vs 基线 20056,
-		// churn 54.2% vs 8.7%), 但原生在部分会话确实更优(逐会话 更好 30 / 更差 60) ⇒ 改为把原生当第 5 个候选,
-		// 与旧 4 布局器候选**同池 + 同精修层**择优: 取两者最优, 只在原生真正胜出时才承担它的位移代价.
-		// 入选条件 = 原生全放(leftover==0), 否则作废(与原生"放不下即中止"一致, 也不引入部分布局).
-		// 候选顺序 = 追加到旧候选之后 ⇒ 空矩持平时优先保留旧布局器结果(原生须严格更优才顶替, churn 更小).
+		// ===== 原生语义候选(第 5 候选, 与旧 4 布局器同池) ===== 对齐游戏原生 InventorySortHelper.Sort 语义(docs/NATIVE_SORT_SPEC.md §3.2/§7 §9): 大件先占好位, 小件按"行主序第一个能放的位置"自然落进缝隙(逐件 first-fit, 无评分/无 waste 比较). 取舍(v5, Lead 裁定): 旧版"原生全放即早退"会把更优且更稳的择优换掉(实测空矩和 20003 vs 基线 20056, churn 54.2% vs 8.7%), 但原生在部分会话确实更优(逐会话 更好 30 / 更差 60) ⇒ 改为把原生当第 5 个候选, 与旧 4 布局器候选**同池 + 同精修层**择优: 取两者最优, 只在原生真正胜出时才承担它的位移代价. 入选条件 = 原生全放(leftover==0), 否则作废(与原生"放不下即中止"一致, 也不引入部分布局). 候选顺序 = 追加到旧候选之后 ⇒ 空矩持平时优先保留旧布局器结果(原生须严格更优才顶替, churn 更小).
 		LayoutNativeFirstFit(flat, grid, out Dictionary<GameItem, Placement> dictNative, out int nativeLeftover);
 		bool hasNative = dictNative != null && nativeLeftover == 0;
 		long gridCells = (long)W * H;
@@ -1426,8 +1344,7 @@ public class Core : MelonMod
 		List<Dictionary<GameItem, Placement>> candidates, List<GameItem> flat, GridContext grid,
 		List<object> paired, Dictionary<GameItem, ItemMask> masks)
 	{
-		// 数据驱动(修复MinHole模拟bug后重扫描): MinHole 单算法胜0/空矩3239 已被包围, 删除(省算力 O(W^2H^2) 最贵).
-		// GrowTouch + Guillotine(死洞惩罚) + LeftBottom + MFR: 组合 120/120 全胜 空矩9964.
+		// 数据驱动(修复MinHole模拟bug后重扫描): MinHole 单算法胜0/空矩3239 已被包围, 删除(省算力 O(W^2H^2) 最贵). GrowTouch + Guillotine(死洞惩罚) + LeftBottom + MFR: 组合 120/120 全胜 空矩9964.
 		if (TryGrowTouch(flat, grid, out Dictionary<GameItem, Placement> dictGT))
 		{
 			candidates.Add(dictGT);
@@ -1446,9 +1363,7 @@ public class Core : MelonMod
 		{
 			candidates.Add(dictMFR);
 		}
-		// 配对落地(PGSplit 思路): 互补配对单元整体落地, 数据驱动 9x7/10x10/14x21 胜出.
-		// paired 已在 W*H>=100 构建(1134). 配对失败→SplitFailedUnit 拆死锁单元(配对拆两单件)重试,
-		// 等价测试 pack_pg_split 的"配对失败拆单件救回"逻辑. 单件也放不下则丢弃候选, 由单件算法兜底.
+		// 配对落地(PGSplit 思路): 互补配对单元整体落地, 数据驱动 9x7/10x10/14x21 胜出. paired 已在 W*H>=100 构建(1134). 配对失败→SplitFailedUnit 拆死锁单元(配对拆两单件)重试, 等价测试 pack_pg_split 的"配对失败拆单件救回"逻辑. 单件也放不下则丢弃候选, 由单件算法兜底.
 		if (paired != null)
 		{
 			paired.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
@@ -1471,8 +1386,7 @@ public class Core : MelonMod
 	// 同精修层 + 按最大连续空矩择优; 拆出 LayoutDense 第二段: 复杂度 -10
 	private static Dictionary<GameItem, Placement> PickBestPolished(List<Dictionary<GameItem, Placement>> candidates, GridContext grid)
 	{
-		// 同一精修层比较: 每个候选先各自 TryFillRefine(小件塞缝; 采纳条件保证各自非劣化), 再按最大连续空矩择优.
-		// 否则"该候选是否被精修过"会左右胜负, 比较不公平. 代价 = 候选数(<=6)次精修; W*H>5000 时 TryFillRefine 原样返回.
+		// 同一精修层比较: 每个候选先各自 TryFillRefine(小件塞缝; 采纳条件保证各自非劣化), 再按最大连续空矩择优. 否则"该候选是否被精修过"会左右胜负, 比较不公平. 代价 = 候选数(<=6)次精修; W*H>5000 时 TryFillRefine 原样返回.
 		List<Dictionary<GameItem, Placement>> polished = new List<Dictionary<GameItem, Placement>>(candidates.Count);
 		foreach (Dictionary<GameItem, Placement> raw in candidates)
 		{
@@ -1561,20 +1475,7 @@ public class Core : MelonMod
 	}
 
 
-	// ===== 原生首选落位(LayoutNativeFirstFit): 对齐游戏原生 InventorySortHelper.Sort 的落位语义 =====
-	// 语义证据 docs/NATIVE_SORT_SPEC.md, 逐条对应: §7 排序键 / §3.2 控制流 / §5.2-5.3 层掩码 / §6 CellCount / §9 伪代码.
-	//   排序键 = 物品占格数(CellCount = 形状局部非零单元数) 降序 → identifier(string.Compare Ordinal) →
-	//            当前格行主序下标(y*W+x);
-	//   落位   = 逐件"外 y 内 x"从 (0,0) 行主序扫描, 第一个能放的位置即胜出 ——
-	//            无评分、无 waste 比较、无最大空矩比较(与旧 4 布局器 + LargestEmptyArea 择优的根本差别);
-	//            扫描域 = [0, W-bboxW] × [0, H-bboxH](原生 maxX/maxY 口径, L 形也按 bbox 夹取);
-	//            锚点 = 形状 min 角(原生 b.SetPosition(x,y), 与本文件 CellsOf 局部坐标同构);
-	//   占用   = 单层占用(等价原生 itemLayers 全 0/1 位掩码; §5.2/§5.3 的 1<<(v&31) 退化为布尔占用).
-	// 与原生两处有意差异(我方宽容, 用户裁定"大件最优 + 小件尽力塞缝"):
-	//   ① 原生任一物品找不到位 → 整次 return false 中止; 我方记 leftover 继续排更小的件, 并由调用方决定取舍;
-	//   ② 原生只用物品当前朝向(排序不改朝向); 我方当前朝向全网格扫不到时再试其余朝向, 换取填充率.
-	// 安全不变量(与旧候选同口径): occ 起手只标 fixedItems(容器原位), 每件落位前 CellsFree 校验 + 界内夹取 →
-	//   布局必然满足既有校验(不重叠、不压容器、界内); leftover>0 时调用方整次弃用, 不存在压住未移动件的泄漏.
+	// ===== 原生首选落位(LayoutNativeFirstFit): 对齐游戏原生 InventorySortHelper.Sort 的落位语义 ===== 语义证据 docs/NATIVE_SORT_SPEC.md, 逐条对应: §7 排序键 / §3.2 控制流 / §5.2-5.3 层掩码 / §6 CellCount / §9 伪代码. 排序键 = 物品占格数(CellCount = 形状局部非零单元数) 降序 → identifier(string.Compare Ordinal) → 当前格行主序下标(y*W+x); 落位 = 逐件"外 y 内 x"从 (0,0) 行主序扫描, 第一个能放的位置即胜出 —— 无评分、无 waste 比较、无最大空矩比较(与旧 4 布局器 + LargestEmptyArea 择优的根本差别); 扫描域 = [0, W-bboxW] × [0, H-bboxH](原生 maxX/maxY 口径, L 形也按 bbox 夹取); 锚点 = 形状 min 角(原生 b.SetPosition(x,y), 与本文件 CellsOf 局部坐标同构); 占用 = 单层占用(等价原生 itemLayers 全 0/1 位掩码; §5.2/§5.3 的 1<<(v&31) 退化为布尔占用). 与原生两处有意差异(我方宽容, 用户裁定"大件最优 + 小件尽力塞缝"): ① 原生任一物品找不到位 → 整次 return false 中止; 我方记 leftover 继续排更小的件, 并由调用方决定取舍; ② 原生只用物品当前朝向(排序不改朝向); 我方当前朝向全网格扫不到时再试其余朝向, 换取填充率. 安全不变量(与旧候选同口径): occ 起手只标 fixedItems(容器原位), 每件落位前 CellsFree 校验 + 界内夹取 → 布局必然满足既有校验(不重叠、不压容器、界内); leftover>0 时调用方整次弃用, 不存在压住未移动件的泄漏.
 	private static void LayoutNativeFirstFit(
 		List<GameItem> allItems, GridContext grid,
 		out Dictionary<GameItem, Placement> layout, out int leftover)
@@ -1614,8 +1515,7 @@ public class Core : MelonMod
 		}
 	}
 
-	// 原生排序键(§7): 占格数降序 → identifier Ordinal → 当前格行主序下标(§7 第三键).
-	// 末键 uniqueId 收尾: 原生比较器对相同前两键物品不保证次序, 我方 List.Sort 不稳定, 用 uniqueId 定序防抖动.
+	// 原生排序键(§7): 占格数降序 → identifier Ordinal → 当前格行主序下标(§7 第三键). 末键 uniqueId 收尾: 原生比较器对相同前两键物品不保证次序, 我方 List.Sort 不稳定, 用 uniqueId 定序防抖动.
 	private static int NativeOrderCompare(GameItem a, GameItem b, Dictionary<GameItem, ItemMask> masks, int W)
 	{
 		int ca = masks[a].C0.Count;
@@ -1683,20 +1583,11 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return 0;
 	}
 
-	// ===== 降级残局(Residual): 全放失败不再整包放弃 =====
-	// 语义(离线 tscripts/bench_residual 对拍): 每件大先小后, 各自选"最贴合"空位(脚印浪费最小, 平手 y 再 x)
-	// = 尽力把物品塞进能容纳的最小缝隙; 与严格布局器(任一放不下整候选作废)不同, 失败/无更优位则留原位.
-	// 安全: 处理前预订全部物品(含 absorbed)当前 bbox 占位, 每件释放自身预订后选位, 原地不动者恢复占位 —
-	// 保证落位永不与未动件重叠; 吸收件(同类被合并)原格全程保留, 应用阶段由 merge 重叠堆到代表件上.
-	// ===== 残局填充精修(FillRefine): 填充算法放最后 =====
-	// 语义(用户裁定 1+2): 不做预分类; 排完胜出布局后, 对每个非堆叠件(独占格可安全释放/重放)小件优先逐件
-	// 释放自身格 → 找"能容纳它的最小空矩"(塞最小洞) → 在该空矩内取"贴邻已占物/壁最多"的位(贴邻),
-	// 全局最大连续空矩不降才采纳(否则维持原位). 复用精确格, 逐件用 occ 校验不重叠, 安全不变量与残局一致.
+	// ===== 降级残局(Residual): 全放失败不再整包放弃 ===== 语义(离线 tscripts/bench_residual 对拍): 每件大先小后, 各自选"最贴合"空位(脚印浪费最小, 平手 y 再 x) = 尽力把物品塞进能容纳的最小缝隙; 与严格布局器(任一放不下整候选作废)不同, 失败/无更优位则留原位. 安全: 处理前预订全部物品(含 absorbed)当前 bbox 占位, 每件释放自身预订后选位, 原地不动者恢复占位 — 保证落位永不与未动件重叠; 吸收件(同类被合并)原格全程保留, 应用阶段由 merge 重叠堆到代表件上. ===== 残局填充精修(FillRefine): 填充算法放最后 ===== 语义(用户裁定 1+2): 不做预分类; 排完胜出布局后, 对每个非堆叠件(独占格可安全释放/重放)小件优先逐件 释放自身格 → 找"能容纳它的最小空矩"(塞最小洞) → 在该空矩内取"贴邻已占物/壁最多"的位(贴邻), 全局最大连续空矩不降才采纳(否则维持原位). 复用精确格, 逐件用 occ 校验不重叠, 安全不变量与残局一致.
 	private static Dictionary<GameItem, Placement> TryFillRefine(
 		Dictionary<GameItem, Placement> placed, GridContext grid)
 	{
@@ -1900,8 +1791,7 @@ public class Core : MelonMod
 		int H = grid.H;
 		Dictionary<GameItem, ItemMask> masks = grid.masks;
 		relocated = 0;
-		// 当前精确格: BuildMask 按当前 flip 快照 C0, C1..C3 = C0 的 0/90/180/270 旋转;
-		// 世界朝向 = ShapeOf.orientation, 精确格 = CellsOf(m, orientation)
+		// 当前精确格: BuildMask 按当前 flip 快照 C0, C1..C3 = C0 的 0/90/180/270 旋转; 世界朝向 = ShapeOf.orientation, 精确格 = CellsOf(m, orientation)
 		List<(int, int)> CurCells(ItemMask mm, GameItem it)
 		{
 			int o = 0;
@@ -1912,14 +1802,12 @@ public class Core : MelonMod
 			}
 			catch
 			{
-				// ponytail: IL2CPP native probe, silent fallback
 			}
 			List<(int, int)> cs = CellsOf(mm, o);
 			return (cs != null && cs.Count > 0) ? cs : mm.C0;
 		}
 		bool[,] occ = InitOcc(grid);
-		// 预订全部物品(含 absorbed)当前精确格: 未处理件/留位件/吸收件原格永不被压.
-		// 必须用精确格而非 bbox: bbox 覆盖邻件实占格, 误清后会让后续件落位重叠.
+		// 预订全部物品(含 absorbed)当前精确格: 未处理件/留位件/吸收件原格永不被压. 必须用精确格而非 bbox: bbox 覆盖邻件实占格, 误清后会让后续件落位重叠.
 		foreach (GameItem it in allItems)
 		{
 			ItemMask mr = masks[it];
@@ -1979,12 +1867,7 @@ public class Core : MelonMod
 				continue;
 			}
 			long waste = (long)gw * gh - cs.Count;
-			// 每个朝向只扫到「首个可行 y 行」为止, 该行内取首个可行 x 即停:
-			// waste 与 (ori,x,y) 无关(四朝向 gw*gh 与 cs.Count 同值 ⇒ 全局常数), 故 key 比较实际退化为
-			// 「最小 y 再最小 x」⇒ 朝向内首个可行位就是该朝向的字典序最小可行位。
-			// 成本: 有解时 CellsFree 由约 2.05M 次降至 4~3016 次; 无解时仍需枚举完(保持等价的下界)。
-			// 警告: 早退只能做到「朝向内」—— 跨朝向早退是错的(某朝向 y 更优时会被先扫到的朝向顶掉),
-			// 四个朝向必须全部比完再取最小(见 tscripts/probe_tightest_domain.py 的对拍与反例)。
+			// 每个朝向只扫到「首个可行 y 行」为止, 该行内取首个可行 x 即停: waste 与 (ori,x,y) 无关(四朝向 gw*gh 与 cs.Count 同值 ⇒ 全局常数), 故 key 比较实际退化为 「最小 y 再最小 x」⇒ 朝向内首个可行位就是该朝向的字典序最小可行位。 成本: 有解时 CellsFree 由约 2.05M 次降至 4~3016 次; 无解时仍需枚举完(保持等价的下界)。 警告: 早退只能做到「朝向内」—— 跨朝向早退是错的(某朝向 y 更优时会被先扫到的朝向顶掉), 四个朝向必须全部比完再取最小(见 tscripts/probe_tightest_domain.py 的对拍与反例)。
 			bool found = false;
 			for (int y = 0; y + gh <= H && !found; y++)
 			{
@@ -1994,11 +1877,7 @@ public class Core : MelonMod
 					{
 						continue;
 					}
-					// 键按 (waste 最小 → y 最小 → x 最小) 字典序。原式 waste*1000000 + y*100000 + x 隐含
-					// y<10(100000*10 进位到 waste 位), 而 H 来自 GetGridDims 可达 4096/8192。
-					// 注意: 在本调用点 waste 实际是常数(四朝向 gw*gh 与 cs.Count 同值 ⇒ 进位路径不可达),
-					// 故旧式从未产生错误结果 —— 此处是防御性等价改写, 防止日后 waste 变成变量时静默错排。
-					// 改用 W/H 为基, 对任意 W<=128/H<=8192 严格字典序且不溢出 long。
+					// 键按 (waste 最小 → y 最小 → x 最小) 字典序。原式 waste*1000000 + y*100000 + x 隐含 y<10(100000*10 进位到 waste 位), 而 H 来自 GetGridDims 可达 4096/8192。 注意: 在本调用点 waste 实际是常数(四朝向 gw*gh 与 cs.Count 同值 ⇒ 进位路径不可达), 故旧式从未产生错误结果 —— 此处是防御性等价改写, 防止日后 waste 变成变量时静默错排。 改用 W/H 为基, 对任意 W<=128/H<=8192 严格字典序且不溢出 long。
 					long key = ((waste * H) + y) * W + x;
 					if (key < best)
 					{
@@ -2015,13 +1894,7 @@ public class Core : MelonMod
 		return best != long.MaxValue;
 	}
 
-	// 单件布局器共享骨架: 按体积降序 → 逐件(o→py→px)选位, 仅「选择谓词」不同.
-	//   GrowTouch  = 触摸分最大(相邻已占4向 + 贴边计分), 并列取更上(py小)再更左(px小).
-	//                数据驱动: 小网格(11x14 等)常胜, 碎片利用率优于行堆积, 与 MinHole 互补.
-	//   LeftBottom = px 最小优先, 并列取更靠底(py大). 大背包(17x10/11x14)左下锚定漏网胜, 聚左下块留右上.
-	// 两者输出在真实语料上 306/306 逐位不同(胜率 54.9% vs 30.4%), 都是候选竞争的独立布局器, 必须同时保留.
-	// 骨架的三层枚举顺序(o→py→px)与 CellsFree 短路时机必须与拆分前逐字一致, 否则 tie-break 改变;
-	// 该等价性由 tscripts 真实语料(341 会话)回归保证 — 见 verify_all.py 的 pack_grow_touch / pack_left_bottom 镜像.
+	// 单件布局器共享骨架: 按体积降序 → 逐件(o→py→px)选位, 仅「选择谓词」不同. GrowTouch = 触摸分最大(相邻已占4向 + 贴边计分), 并列取更上(py小)再更左(px小). 数据驱动: 小网格(11x14 等)常胜, 碎片利用率优于行堆积, 与 MinHole 互补. LeftBottom = px 最小优先, 并列取更靠底(py大). 大背包(17x10/11x14)左下锚定漏网胜, 聚左下块留右上. 两者输出在真实语料上 306/306 逐位不同(胜率 54.9% vs 30.4%), 都是候选竞争的独立布局器, 必须同时保留. 骨架的三层枚举顺序(o→py→px)与 CellsFree 短路时机必须与拆分前逐字一致, 否则 tie-break 改变; 该等价性由 tscripts 真实语料(341 会话)回归保证 — 见 verify_all.py 的 pack_grow_touch / pack_left_bottom 镜像.
 	private enum PiecePick
 	{
 		GrowTouch,
@@ -2102,11 +1975,9 @@ public class Core : MelonMod
 		return ScanSinglePieces(singles, grid, PiecePick.GrowTouch, out dictionary);
 	}
 
-	// Shelf: 行堆积. 按 w×h 降序, 每物品第一个可行位落在当前行基准之上. 小网格(8x8/14x21)常胜.
-	// 只处理单件(无配对).
+	// Shelf: 行堆积. 按 w×h 降序, 每物品第一个可行位落在当前行基准之上. 小网格(8x8/14x21)常胜. 只处理单件(无配对).
 
-	// Guillotine 切割(GuillotineCut): Free rects 池, 每次选 waste 最小的候选放置, 放置后按割线切碎剩余空间为子矩形.
-	// 碎片池能复用更多细小空间(比 Shelf 行堆积质量高约 60%), 代价是碎片矩形数略多. 只处理单件.
+	// Guillotine 切割(GuillotineCut): Free rects 池, 每次选 waste 最小的候选放置, 放置后按割线切碎剩余空间为子矩形. 碎片池能复用更多细小空间(比 Shelf 行堆积质量高约 60%), 代价是碎片矩形数略多. 只处理单件.
 	private static bool TryGuillotine(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
 		int W = grid.W;
@@ -2117,9 +1988,7 @@ public class Core : MelonMod
 		List<GameItem> order = new List<GameItem>(singles);
 		order.Sort((a, b) => CellCount(a, masks).CompareTo(CellCount(b, masks)) * -1);
 		List<(int x, int y, int w, int h)> freerects = new List<(int x, int y, int w, int h)> { (0, 0, W, H) };
-		// 全局最小物品包围盒: 碎片放不下任何物品(旋转后) 即死洞, 死洞面积计入评分
-		// 碎片 (frw,frh) 能放物品 (gw,gh) 旋转 ⟺ min(gw,gh)<=min(frw,frh) && max(gw,gh)<=max(frw,frh)
-		// 故取全局 minSide = min over items min(gw,gh); maxSide = min over items max(gw,gh)
+		// 全局最小物品包围盒: 碎片放不下任何物品(旋转后) 即死洞, 死洞面积计入评分 碎片 (frw,frh) 能放物品 (gw,gh) 旋转 ⟺ min(gw,gh)<=min(frw,frh) && max(gw,gh)<=max(frw,frh) 故取全局 minSide = min over items min(gw,gh); maxSide = min over items max(gw,gh)
 		int minSide = int.MaxValue, maxSide = int.MaxValue;
 		foreach (GameItem it in order)
 		{
@@ -2237,15 +2106,13 @@ public class Core : MelonMod
 			if (covered) rects.RemoveAt(i);
 		}
 	}
-	// LeftBottom: 左下角锚定(px 最小优先, py 最大优先), 聚成左下紧块留右上整块.
-	// 大背包(17x10/11x14)常胜: 左下凝聚使剩余集中在右上, 好放更大物品. 只处理单件(无配对).
+	// LeftBottom: 左下角锚定(px 最小优先, py 最大优先), 聚成左下紧块留右上整块. 大背包(17x10/11x14)常胜: 左下凝聚使剩余集中在右上, 好放更大物品. 只处理单件(无配对).
 	private static bool TryLeftBottom(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
 		return ScanSinglePieces(singles, grid, PiecePick.LeftBottom, out dictionary);
 	}
 
-	// BestFitMFR: MFR 池最小 waste 选位. 物品落在空闲矩形最小浪费处, 高密度(10x10 total=67)常胜.
-	// 用 FindFreeRects 算空闲矩形池, 每放一件 ShrinkRects 增量切块(免逐件全扫). 只处理单件(无配对).
+	// BestFitMFR: MFR 池最小 waste 选位. 物品落在空闲矩形最小浪费处, 高密度(10x10 total=67)常胜. 用 FindFreeRects 算空闲矩形池, 每放一件 ShrinkRects 增量切块(免逐件全扫). 只处理单件(无配对).
 	private static bool TryPlaceMFR(List<GameItem> singles, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
 		int W = grid.W;
@@ -2285,9 +2152,7 @@ public class Core : MelonMod
 		}
 		int[] heights = _histBuf;
 		int[] stack = _stackBuf;
-		// 复用缓冲区必须每次清零: 直方图法要求 heights 在每个 y 循环开始时全为 0,
-		// 原来只依赖 new int[W] 的初始零值 ⇒ 第二次调用起把上一轮的残留高度在 y=0 又 +1,
-		// 返回值随调用次数单调增长(实测 30→32→56→80, 可超过网格总格数).
+		// 复用缓冲区必须每次清零: 直方图法要求 heights 在每个 y 循环开始时全为 0, 原来只依赖 new int[W] 的初始零值 ⇒ 第二次调用起把上一轮的残留高度在 y=0 又 +1, 返回值随调用次数单调增长(实测 30→32→56→80, 可超过网格总格数).
 		for (int x = 0; x < W; x++)
 		{
 			heights[x] = 0;
@@ -2369,8 +2234,7 @@ public class Core : MelonMod
 		return null;
 	}
 
-	// 落地凝聚堆积(自底向上 skyline): 物品从底部凝聚, 顶部剩余一整块连续矩形
-	// 返回 false 时记录失败的单元(拆件fallback用)
+	// 落地凝聚堆积(自底向上 skyline): 物品从底部凝聚, 顶部剩余一整块连续矩形 返回 false 时记录失败的单元(拆件fallback用)
 	private static bool TryPlaceUnits(List<object> units, GridContext grid, out Dictionary<GameItem, Placement> dictionary)
 	{
 		int W = grid.W;
@@ -2454,8 +2318,7 @@ public class Core : MelonMod
 		return false;
 	}
 
-	// 落地凝聚堆积: 对单单元, 从最深行向浅扫(行内左到右), 4 朝向; 条件 = 无重叠 + 落地支撑.
-	// 最浅可放行受 minRow 约束: 再浅(更小的 y)没有任何支撑来源. 取(最深,最左)位置.
+	// 落地凝聚堆积: 对单单元, 从最深行向浅扫(行内左到右), 4 朝向; 条件 = 无重叠 + 落地支撑. 最浅可放行受 minRow 约束: 再浅(更小的 y)没有任何支撑来源. 取(最深,最左)位置.
 	private static bool PlaceGrounded(bool[,] occ, int W, int H, ItemMask m, int minRow, out int bx, out int by, out int bo)
 	{
 		bx = -1;
@@ -2580,8 +2443,7 @@ public class Core : MelonMod
 				List<(int, int)> cb = CellsOf(mb, ob);
 				int bw = (ob == 1 || ob == 3) ? mb.Gh0 : mb.Gw0;
 				int bh = (ob == 1 || ob == 3) ? mb.Gw0 : mb.Gh0;
-				// B 凸出塞进 A 内凹(bbox 相交咬合) 或 拼在 A 右侧/下方(bbox 边缘相接)
-				// dx/dy 下限保证 B 不整块滑出 A 左上之外, 上限 aw/ah 含标准的右/下并列情形
+				// B 凸出塞进 A 内凹(bbox 相交咬合) 或 拼在 A 右侧/下方(bbox 边缘相接) dx/dy 下限保证 B 不整块滑出 A 左上之外, 上限 aw/ah 含标准的右/下并列情形
 				for (int dx = -(bw - 1); dx <= aw; dx++)
 				{
 					for (int dy = -(bh - 1); dy <= ah - 1; dy++)
@@ -2728,11 +2590,7 @@ public class Core : MelonMod
 				}
 			}
 		}
-		// 去包含: 只留不被其他矩形完全覆盖的。
-		// 原为 O(R^2) 全配对; 改为「按面积降序取候选索引 + 单向剪枝」——
-		// 被包含者面积必 <= 包含者, 故只需考察面积不小于自身的那些矩形。
-		// 与 FindFreeRects(Core.cs:3002 附近)同款。输出顺序保持 next 的 i 升序
-		// (排序只作用于索引数组 byArea, kept 仍按 i 升序收集)。
+		// 去包含: 只留不被其他矩形完全覆盖的。 原为 O(R^2) 全配对; 改为「按面积降序取候选索引 + 单向剪枝」—— 被包含者面积必 <= 包含者, 故只需考察面积不小于自身的那些矩形。 与 FindFreeRects(Core.cs:3002 附近)同款。输出顺序保持 next 的 i 升序 (排序只作用于索引数组 byArea, kept 仍按 i 升序收集)。
 		int n = next.Count;
 		int[] byArea = new int[n];
 		for (int i = 0; i < n; i++)
@@ -2928,7 +2786,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		// native 网格读取(含 SetTransform 副作用, 及抛异常时的 list.Clear 回退); 拆出 ReadMask 第一段
 		if (val2 != null && TryReadNativeCells(val, val2, list, out bw, out bh))
@@ -2963,7 +2820,6 @@ public class Core : MelonMod
 			}
 			catch
 			{
-				// ponytail: IL2CPP native probe, silent fallback
 			}
 			val2.SetTransform(0, 0, flag, 0);
 			int num = Math.Max(1, val.width);
@@ -2984,7 +2840,6 @@ public class Core : MelonMod
 					}
 					catch
 					{
-						// ponytail: IL2CPP native probe, silent fallback
 					}
 					if (b != 0)
 					{
@@ -3057,11 +2912,7 @@ public class Core : MelonMod
 				stack[++top] = x;
 			}
 		}
-		// 去包含: 只留不被其他矩形完全覆盖的。
-		// 原为 O(R^2) 全配对; 改为「按面积降序取候选索引 + 单向剪枝」——
-		// 被包含者面积必 <= 包含者, 故只需考察面积不小于自身的那些矩形。
-		// 注意: 输出必须保持 rects 的原始顺序(下游 TryPickPlaceSlot 在 waste/贴邻平局时依赖顺序),
-		// 因此排序只作用于索引数组, kept 仍按 i 升序收集。
+		// 去包含: 只留不被其他矩形完全覆盖的。 原为 O(R^2) 全配对; 改为「按面积降序取候选索引 + 单向剪枝」—— 被包含者面积必 <= 包含者, 故只需考察面积不小于自身的那些矩形。 注意: 输出必须保持 rects 的原始顺序(下游 TryPickPlaceSlot 在 waste/贴邻平局时依赖顺序), 因此排序只作用于索引数组, kept 仍按 i 升序收集。
 		int n = rects.Count;
 		int[] byArea = new int[n];
 		for (int i = 0; i < n; i++)
@@ -3106,10 +2957,7 @@ public class Core : MelonMod
 		return kept;
 	}
 
-	// MFR + 连通聚块: 物品落在空闲矩形左上角, 且必须"撑住"(上/左/右邻居已占或靠边界),
-	// 使所有物品从左上角单向生长成实心连通块 — 剩余空间变成右下角一整块连续矩形,
-	// 好放入更大物品. 支撑约束是聚合的关键: 无支撑的物品会散开碎片化剩余空间.
-	// 候选按左上优先(最小 y 再最小 x): 聚成紧实团块.
+	// MFR + 连通聚块: 物品落在空闲矩形左上角, 且必须"撑住"(上/左/右邻居已占或靠边界), 使所有物品从左上角单向生长成实心连通块 — 剩余空间变成右下角一整块连续矩形, 好放入更大物品. 支撑约束是聚合的关键: 无支撑的物品会散开碎片化剩余空间. 候选按左上优先(最小 y 再最小 x): 聚成紧实团块.
 	private static bool FindFreeSpotCells(List<(int x, int y, int w, int h)> rects, bool[,] occ, GridContext grid, List<(int dx, int dy)> cells, int gw, int gh, int minY, out int ox, out int oy, out long waste, bool selfSupport = false)
 	{
 		int W = grid.W;
@@ -3211,13 +3059,7 @@ public class Core : MelonMod
 		return LargestEmptyArea(occ, W, H);
 	}
 
-	// task-6 自支撑版支撑判据(仅横带路径使用; 密集路径仍用上面的 HasSupport, 不改其行为):
-	// 每格需「贴首行/首列」或「邻格(左/上/下)已占」或「邻格属于本件自身」.
-	// 原版自身格不计支撑 ⇒ 厚件在空网格当首件时逐格互不支撑, 整件放不下(离线诊断实测).
-	// 仍非恒真: 漂浮孤立位(四邻无物且不在首行/首列)照旧不放 — 保留「聚成实心块」语义.
-	// 自身格判据: 原用 static HashSet<int> _selfCells 跨调用复用(每次 Clear+回填+哈希查找)。
-	// cells 规模很小(件脚印, 通常 1..6 格), 线性查找比哈希更快, 且消掉共享可变状态
-	// —— 共享缓冲是布局器并行化的硬障碍(并发会直接数据竞争)。
+	// task-6 自支撑版支撑判据(仅横带路径使用; 密集路径仍用上面的 HasSupport, 不改其行为): 每格需「贴首行/首列」或「邻格(左/上/下)已占」或「邻格属于本件自身」. 原版自身格不计支撑 ⇒ 厚件在空网格当首件时逐格互不支撑, 整件放不下(离线诊断实测). 仍非恒真: 漂浮孤立位(四邻无物且不在首行/首列)照旧不放 — 保留「聚成实心块」语义. 自身格判据: 原用 static HashSet<int> _selfCells 跨调用复用(每次 Clear+回填+哈希查找)。 cells 规模很小(件脚印, 通常 1..6 格), 线性查找比哈希更快, 且消掉共享可变状态 —— 共享缓冲是布局器并行化的硬障碍(并发会直接数据竞争)。
 	private static bool HasSelfCell(List<(int dx, int dy)> cells, int dx, int dy)
 	{
 		foreach ((int cx, int cy) in cells)
@@ -3249,8 +3091,7 @@ public class Core : MelonMod
 		return true;
 	}
 
-	// task-6 ③ 带底压缩/回退: 全网格(y 外层, x 内层)取第一个「界内 + 空 + 自支撑」的位(位置优先于朝向 = 原生扫描口径).
-	// 仅在带内 MFR(含重算)都放不下时调用 ⇒ 允许物品落到带区之外的任意空位, 保住 grouped 成功.
+	// task-6 ③ 带底压缩/回退: 全网格(y 外层, x 内层)取第一个「界内 + 空 + 自支撑」的位(位置优先于朝向 = 原生扫描口径). 仅在带内 MFR(含重算)都放不下时调用 ⇒ 允许物品落到带区之外的任意空位, 保住 grouped 成功.
 	private static bool PlaceFirstFit(bool[,] occ, int W, int H, ItemMask m, out int bx, out int by, out int bo, out int bottom)
 	{
 		bx = -1;
@@ -3374,7 +3215,6 @@ public class Core : MelonMod
 			}
 			catch
 			{
-				// ponytail: IL2CPP native probe, silent fallback
 			}
 			if (val == null)
 			{
@@ -3384,7 +3224,6 @@ public class Core : MelonMod
 				}
 				catch
 				{
-					// ponytail: IL2CPP native probe, silent fallback
 				}
 			}
 			if (val == null)
@@ -3403,7 +3242,6 @@ public class Core : MelonMod
 			}
 			catch
 			{
-				// ponytail: IL2CPP native probe, silent fallback
 			}
 			val2.SetTransform(x, y, flag, orient);
 			return true;
@@ -3464,7 +3302,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return "";
 	}
@@ -3499,7 +3336,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		try
 		{
@@ -3513,7 +3349,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return false;
 	}
@@ -3527,7 +3362,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		if (val == null)
 		{
@@ -3537,7 +3371,6 @@ public class Core : MelonMod
 			}
 			catch
 			{
-				// ponytail: IL2CPP native probe, silent fallback
 			}
 		}
 		return val;
@@ -3621,10 +3454,7 @@ public class Core : MelonMod
 		}
 	}
 
-	// 堆叠物品: unitCount > 1 (多份叠在一起); 排序最后放置使其渲染在上层, 至少一格可见
-	// 排序进行中(_sortStacked != null)一律以冻结集合为准: 同类合并的代表件在本次排序结束时必然成堆,
-	// 但合并发生在应用阶段之后, 此刻活 unitCount 仍是 1 —— 若读活值, 同一容器的下一次排序会走另一条
-	// 精修分支, 自动排序与手动按钮的结果就不一致(见 _sortStacked 声明处说明)。
+	// 堆叠物品: unitCount > 1 (多份叠在一起); 排序最后放置使其渲染在上层, 至少一格可见 排序进行中(_sortStacked != null)一律以冻结集合为准: 同类合并的代表件在本次排序结束时必然成堆, 但合并发生在应用阶段之后, 此刻活 unitCount 仍是 1 —— 若读活值, 同一容器的下一次排序会走另一条 精修分支, 自动排序与手动按钮的结果就不一致(见 _sortStacked 声明处说明)。
 	private static bool Stacked(GameItem it)
 	{
 		if (_sortStacked != null)
@@ -3713,8 +3543,7 @@ public class Core : MelonMod
 
 	// ==================== 快捷键 / 最后打开的容器 / 自动排序 ====================
 
-	// 「最后打开的容器」= visibleWindows 中 focusStamp 最大者(原生自增焦点戳, 打开/提权即刷新);
-	// 返回值可能不是可排序容器(例如系统 UI), 由 SortableWindowInventory 再过滤。
+	// 「最后打开的容器」= visibleWindows 中 focusStamp 最大者(原生自增焦点戳, 打开/提权即刷新); 返回值可能不是可排序容器(例如系统 UI), 由 SortableWindowInventory 再过滤。
 	private static PixelWindow LastFocusedWindow()
 	{
 		try
@@ -3740,7 +3569,6 @@ public class Core : MelonMod
 				}
 				catch
 				{
-					// ponytail: IL2CPP native probe, silent fallback
 				}
 				if (w == null)
 				{
@@ -3765,7 +3593,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 			return null;
 		}
 	}
@@ -3787,8 +3614,7 @@ public class Core : MelonMod
 		}
 	}
 
-	// 窗口显示名: 有标题用标题; 无标题的常驻背景存储(主仓库/展示柜等)用容量做标签。
-	// 不写死任何容量尺寸 —— 容器升级/游戏新增容器都自动适配。返回 null = 此窗口不该出现在列表里。
+	// 窗口显示名: 有标题用标题; 无标题的常驻背景存储(主仓库/展示柜等)用容量做标签。 不写死任何容量尺寸 —— 容器升级/游戏新增容器都自动适配。返回 null = 此窗口不该出现在列表里。
 	private static string WindowLabel(PixelWindow win, GameInventory inv)
 	{
 		if (win == null || inv == null)
@@ -3802,7 +3628,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		if (!string.IsNullOrEmpty(text))
 		{
@@ -3830,7 +3655,6 @@ public class Core : MelonMod
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return $"Storage ({cells})";
 	}
@@ -3870,8 +3694,7 @@ public class Core : MelonMod
 	// 自动排序(开关默认关): 只在窗口「从无到有」出现时排一次, 且延后一个 tick(等窗口内容就绪)
 	private static void TrackOpenedContainers()
 	{
-		// 拆段: 收集可见窗口 / 首轮登记 / 执行上一 tick 的 pending / diff 出下一 tick 目标.
-		// 遍历顺序与 _seenWindows 的 Clear/回填时机保持原样(transitive_loop_depth 高, 顺序敏感).
+		// 拆段: 收集可见窗口 / 首轮登记 / 执行上一 tick 的 pending / diff 出下一 tick 目标. 遍历顺序与 _seenWindows 的 Clear/回填时机保持原样(transitive_loop_depth 高, 顺序敏感).
 		List<PixelWindow> wins = CollectVisibleWindows();
 		if (_autoWarmup)
 		{
@@ -3909,13 +3732,11 @@ public class Core : MelonMod
 				}
 				catch
 				{
-					// ponytail: IL2CPP native probe, silent fallback
 				}
 			}
 		}
 		catch
 		{
-			// ponytail: IL2CPP native probe, silent fallback
 		}
 		return wins;
 	}
@@ -3923,9 +3744,7 @@ public class Core : MelonMod
 	// 执行上一 tick 记下的「刚打开的窗口」(延时一个 tick 等窗口内容就绪); 拆出 TrackOpenedContainers 第二段
 	private static void RunPendingAutoSort()
 	{
-		// 上一次 tick 新出现的窗口可能不止一个(工具提示/系统 UI 会与真容器同 tick 出现)。
-		// 此处才筛「可排序」——延时一个 tick 后内容已就绪, 判定才可靠(见 WindowLabel 的 cells/IsInsertLocked 门槛)。
-		// 取 focusStamp 最大者 = 最后打开的那个容器; 无候选则本轮不排。
+		// 上一次 tick 新出现的窗口可能不止一个(工具提示/系统 UI 会与真容器同 tick 出现)。 此处才筛「可排序」——延时一个 tick 后内容已就绪, 判定才可靠(见 WindowLabel 的 cells/IsInsertLocked 门槛)。 取 focusStamp 最大者 = 最后打开的那个容器; 无候选则本轮不排。
 		if (AutoSortLastOpened == null || !AutoSortLastOpened.Value)
 		{
 			_pendingAuto.Clear();
@@ -3947,7 +3766,6 @@ public class Core : MelonMod
 			}
 			catch
 			{
-				// ponytail: IL2CPP native probe, silent fallback
 			}
 			if (bestInv == null || s >= bestStamp)
 			{
