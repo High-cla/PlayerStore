@@ -4,7 +4,7 @@ using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.14.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.15.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -18,6 +18,7 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgPurifyAlwaysPure = Cfg.CreateEntry<bool>("PurifyAlwaysPure", true, "净化器/过滤器: PurifyToBaseWater 永远净化100%纯水");
         public static readonly MelonPreferences_Entry<bool> CfgFilterBoost = Cfg.CreateEntry<bool>("FilterBoost", true, "加强滤嘴: 剥离量拉到游戏最大值, 耐久成本降到 1");
         public static readonly MelonPreferences_Entry<bool> CfgUvFullPurify = Cfg.CreateEntry<bool>("UvFullPurify", true, "紫外线灯: 除杀菌外一并清除全部杂质");
+        public static readonly MelonPreferences_Entry<bool> CfgPurifierFullPurify = Cfg.CreateEntry<bool>("PurifierFullPurify", true, "海德拉净水器: 清除全部杂质(含原版跳过的高纯度水)");
         // 生成物品已改由 HTTP 网页生成器承担(F9 快捷生成在 ca0866d 移除), 旧键由 PurgeLegacyEntries 清出配置。
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
@@ -28,6 +29,7 @@ namespace ProgressMod
         public static bool PurifyAlwaysPure => CfgPurifyAlwaysPure.Value;
         public static bool FilterBoost => CfgFilterBoost.Value;
         public static bool UvFullPurify => CfgUvFullPurify.Value;
+        public static bool PurifierFullPurify => CfgPurifierFullPurify.Value;
         public static bool NeverWounded => CfgNeverWounded.Value;
         public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
 
@@ -1698,29 +1700,60 @@ namespace ProgressMod
             public static void Prefix() { try { if (FilterBoost) EnsureFilterBoost(); } catch { /* IL2CPP 异常: 放弃本次兜底 */ } }
         }
 
+        // 全部 6 类杂质 part id (WaterPremadeHelper 三个分布字典的键即为权威集合).
+        // 供紫外线灯与净水器共用, 避免两处各写一份导致漂移.
+        private static readonly string[] AllContaminants = new string[6]
+        {
+            "microbe", "physical_contaminant", "chemical_contaminant", "mineral", "heavy_metal", "organic_waste"
+        };
+
+        // 清空容器内全部杂质. RemoveContaminantFromContainer(容器, 杂质id, 水量, minPercentage)
+        // 的下限水位是 water*minPercentage/100, 传 0 即按总水量剥离到 0 —— 实际效果就是清空.
+        // 必须先取水量再循环: GetTotalVolume 含杂质体积, 循环中杂质被清零会让总量下降.
+        // 只在主线程调用 (触达 native 字段).
+        private static void StripAllContaminants(GameItem container)
+        {
+            if (container == null) return;
+            int vol = WaterHelper.GetTotalVolume(container);
+            if (vol <= 0) return;
+            foreach (string id in AllContaminants) WaterHelper.RemoveContaminantFromContainer(container, id, vol, 0);
+        }
+
         // 紫外线灯: 原版 OnUVUsed 只把 microbe 归零并把其体积并回 water, 对其余 5 类杂质
         // (physical_contaminant / chemical_contaminant / mineral / heavy_metal / organic_waste)
-        // 完全不作为. Postfix 照 MachinePurifier.PurifyContainer 的做法补一轮移除:
-        // RemoveContaminantFromContainer(容器, 杂质id, 水量, minPercentage) 的下限水位是
-        // water*minPercentage/100, 传 0 即按总水量剥离到 0 —— 实际效果就是清空该杂质.
+        // 完全不作为. Postfix 照 MachinePurifier.PurifyContainer 的做法补一轮移除.
         [HarmonyPatch(typeof(WaterHelper), "OnUVUsed")]
         public static class PatchUvFullPurify
         {
-            private static readonly string[] UvContaminants = new string[6]
-            {
-                "microbe", "physical_contaminant", "chemical_contaminant", "mineral", "heavy_metal", "organic_waste"
-            };
-
             public static void Postfix(GameItem __0)
             {
                 try
                 {
-                    if (!UvFullPurify || __0 == null) return;
-                    int vol = WaterHelper.GetTotalVolume(__0);
-                    if (vol <= 0) return;
-                    foreach (string id in UvContaminants) WaterHelper.RemoveContaminantFromContainer(__0, id, vol, 0);
+                    if (!UvFullPurify) return;
+                    StripAllContaminants(__0);
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] OnUVUsed patch err: {e.Message}"); }
+            }
+        }
+
+        // 海德拉科技微型净水器 (portable_water_purifier, AmenitiesItemDirectory).
+        // 原版 OnPortableWaterPurifierUsed 开头即比对 GetWaterPurity() >= 9800 (0x2648),
+        // 满足则弹 "mech_portable_purifier_already_clean" 并整段跳过 PurifyToBaseWater.
+        // 该纯度 = waterVolume*10000/总容量, 分母含全部杂质, 故 9800 等价于「杂质占比 <= 2%」——
+        // 也就是说只差最后一点点的水反而不给净化, 微量杂质会一直留在容器里。
+        // PatchPurifyToPure 挂在 PurifyToBaseWater 上, 根本不会被这条早退分支触达, 故在此补一刀:
+        // Postfix 在原生流程结束后清空残余杂质; 原版的收费(ChangeDurability)与提示文案保持不动.
+        [HarmonyPatch(typeof(AmenitiesItemDirectory), "OnPortableWaterPurifierUsed")]
+        public static class PatchPurifierFullPurify
+        {
+            public static void Postfix(GameItem __1)
+            {
+                try
+                {
+                    if (!PurifierFullPurify) return;
+                    StripAllContaminants(__1);   // __1 = container (__0 = purifier)
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] OnPortableWaterPurifierUsed patch err: {e.Message}"); }
             }
         }
 
