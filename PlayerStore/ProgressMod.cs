@@ -20,7 +20,6 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgUvFullPurify = Cfg.CreateEntry<bool>("UvFullPurify", true, "紫外线灯: 除杀菌外一并清除全部杂质");
         public static readonly MelonPreferences_Entry<bool> CfgPurifierFullPurify = Cfg.CreateEntry<bool>("PurifierFullPurify", true, "海德拉净水器: 清除全部杂质(含原版跳过的高纯度水)");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyFillToFull = Cfg.CreateEntry<bool>("PurifyFillToFull", true, "净化后: 用100%纯水补满容器到容量上限");
-        // 生成物品已改由 HTTP 网页生成器承担(F9 快捷生成在 ca0866d 移除), 旧键由 PurgeLegacyEntries 清出配置。
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
@@ -38,18 +37,13 @@ namespace ProgressMod
         public override void OnInitializeMelon()
         {
             PurgeLegacyEntries();
-            // 配置在游戏启动时即落盘生成, 玩家可提前看到并修改
             MelonPreferences.Save();
-            // 失焦时保持 Update 运行: 生成/读取队列都在 OnUpdate 排空, 默认失焦即暂停,
-            // 会让切到浏览器操作时队列不被消费. 与生成成功与否无关 —— 队列本就会在
             // 重新获得焦点后继续消费, 这里只是让它不必等待.
             try { UnityEngine.Application.runInBackground = true; }
             catch (Exception e) { MelonLogger.Warning($"[Spawn] runInBackground 设置失败: {e.Message}"); }
             StartSpawnServer();
         }
 
-        // 清掉旧版遗留配置项(旧键仍会留在 MelonPreferences.cfg 里; 新版不再使用)。
-        // 反射调用 DeleteEntry: 没有该 API 的 MelonLoader 上安全跳过(残留旧键无害)。
         private static void PurgeLegacyEntries()
         {
             try
@@ -68,24 +62,18 @@ namespace ProgressMod
                     }
                     catch
                     {
-                        // 该项本就不存在, 忽略
                     }
                 }
             }
             catch
             {
-                // ponytail: 反射探测, 静默回退
             }
         }
 
-        // ============ 生成物品: HTTP 本地服务器 (网页点击生成) ============
-        // 复刻生成逻辑: DirectoryMaster.Item(stableId, true) → MayHaveValidInventorySlot → UncheckedAccept
-        // 主背包 = EmporiumEntry.Instance.invElement (GameGridInventory, 转 GameInventory)
-        // HTTP 线程只入队, 主线程 OnUpdate 消费 (避免 Il2Cpp 跨线程操作)
+        // 复刻生成逻辑: DirectoryMaster.Item(stableId, true) → MayHaveValidInventorySlot → UncheckedAccept, 主背包 = EmporiumEntry.Instance.invElement (GameGridInventory, 转 GameInventory), HTTP 线程只入队, 主线程 OnUpdate 消费 (避免 Il2Cpp 跨线程操作)
         private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, string, int)> PendingSpawns =
             new System.Collections.Concurrent.ConcurrentQueue<(int, string, int)>();
-        // 属性编辑 / 删除操作: (uid, 操作, 字段, 值) 走主线程. uid=item.uniqueId 存档内稳定,
-        // 经 FindItemByUid 查全部库存定位任意物品 (不限本次生成)
+        // 属性编辑 / 删除操作: (uid, 操作, 字段, 值) 走主线程. uid=item.uniqueId 存档内稳定, 经 FindItemByUid 查全部库存定位任意物品 (不限本次生成)
         private enum ItemOpKind { Edit, Delete }
         // 编辑/删除请求参数对象: ApplyItemOp 原先 4 个平铺参数 (uid/kind/field/value), 收敛为一个值对象
         private readonly struct ItemOpRequest
@@ -101,10 +89,7 @@ namespace ProgressMod
         }
         private static readonly System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)> PendingItemOps =
             new System.Collections.Concurrent.ConcurrentQueue<(int, ItemOpKind, string, string)>();
-        // 主线程作业: DumpItem / 库存枚举都含 native 调用 (GetPublicDisplay / EmporiumEntry.Instance /
-        // GameItem 字段...), 跨线程会 AccessViolation (il2cpp_runtime_invoke) 或碰 Unity 主线程约束.
-        // 统一机制: HTTP 线程把「要读什么」封成闭包入队 (闭包只捕获请求参数纯值, 绝不跨线程共享
-        // Il2Cpp 引用), 主线程 OnUpdate 执行并回填结果, HTTP 线程等信号取值.
+        // 主线程作业: DumpItem / 库存枚举都含 native 调用 (GetPublicDisplay / EmporiumEntry.Instance / GameItem 字段...), 跨线程会 AccessViolation (il2cpp_runtime_invoke) 或碰 Unity 主线程约束. 统一机制: HTTP 线程把「要读什么」封成闭包入队 (闭包只捕获请求参数纯值, 绝不跨线程共享, Il2Cpp 引用), 主线程 OnUpdate 执行并回填结果, HTTP 线程等信号取值.
         private sealed class MainThreadJob
         {
             public readonly Func<object> Work;
@@ -115,24 +100,15 @@ namespace ProgressMod
         }
         private static readonly System.Collections.Concurrent.ConcurrentQueue<MainThreadJob> PendingJobs =
             new System.Collections.Concurrent.ConcurrentQueue<MainThreadJob>();
-        // 主线程作业队列长度上限(背压阈值). 32: 单帧处理 32 个纯读作业耗时远低于 5s 超时窗口,
-        // 又能吸收网页端并发的 /api/mine + /api/inventory + /api/item 组合请求.
+        // 主线程作业队列长度上限(背压阈值). 32: 单帧处理 32 个纯读作业耗时远低于 5s 超时窗口,又能吸收网页端并发的 /api/mine + /api/inventory + /api/item 组合请求.
         private const int MaxPendingJobs = 32;
-        // HTTP accept 线程数. 上限受限于两处: (a) 主线程作业队列只有 MaxPendingJobs 个槽,
-        // (b) 每个 accept 线程最多同时持有一个作业 (它在 RunOnMainThread 上阻塞等待). 故取值须
-        // 明显小于 MaxPendingJobs, 否则超时释放的线程会立刻抢占已被拒的槽位. 4 => 网页首屏
-        // (mine + inventory + 静态资源) 可并行, 又给主线程留出 28 个槽的余量.
+        // HTTP accept 线程数. 上限受限于两处: (a) 主线程作业队列只有 MaxPendingJobs 个槽, (b) 每个 accept 线程最多同时持有一个作业 (它在 RunOnMainThread 上阻塞等待). 故取值须明显小于 MaxPendingJobs, 否则超时释放的线程会立刻抢占已被拒的槽位. 4 => 网页首屏 (mine + inventory + 静态资源) 可并行, 又给主线程留出 28 个槽的余量.
         private const int HttpAcceptThreads = 4;
 
-        // HTTP 线程调用: 入队 + 等主线程执行 (最长 timeoutMs). 返回 false = 未响应 (过载/超时由 overloaded 区分)
-        // (失焦暂停 / 大存档卡帧 / 未进存档 都会超时, 故不在此断言具体成因).
-        // 事件驱动 (非轮询) ⇒ 无 10ms 量化延迟, 且无「超时后结果残留」的字典泄漏 (作业对象由本线程独占持有).
+        // HTTP 线程调用: 入队 + 等主线程执行 (最长 timeoutMs). 返回 false = 未响应 (过载/超时由 overloaded 区分) (失焦暂停 / 大存档卡帧 / 未进存档 都会超时, 故不在此断言具体成因). 事件驱动 (非轮询) ⇒ 无 10ms 量化延迟, 且无「超时后结果残留」的字典泄漏 (作业对象由本线程独占持有).
         private static bool RunOnMainThread(Func<object> work, out object result, int timeoutMs, out bool overloaded)
         {
-            // C 方案(背压): 队列已满 = 服务端过载, 立即拒绝而不入队 —— 入队只会让超时更晚发生并
-            // 加重单帧卡顿. 调用方据此回 503, 前端可退避重试.
-            // 用 PendingJobs.Count 而非自维护计数: 不存在「忘记递减 ⇒ 永久 503」的泄漏面. 该值是
-            // 近似量(并发同时入队时可短暂超出上限), 对背压语义无影响.
+            //队列已满 = 服务端过载, 立即拒绝而不入队 —— 入队只会让超时更晚发生并加重单帧卡顿. 调用方据此回 503, 前端可退避重试.用 PendingJobs.Count 而非自维护计数: 不存在「忘记递减 ⇒ 永久 503」的泄漏面. 该值是近似量(并发同时入队时可短暂超出上限), 对背压语义无影响.
             overloaded = PendingJobs.Count >= MaxPendingJobs;
             if (overloaded)
             {
@@ -160,14 +136,11 @@ namespace ProgressMod
                 job.Done.Dispose();
             }
         }
-        // token -> 本次生成实例 (网页端 "我的生成" 追踪). 游戏重启即失效 (物品仍在库存但引用丢失, 由新生成覆盖)
         private static readonly System.Collections.Generic.Dictionary<int, GameItem> SpawnedItems = new System.Collections.Generic.Dictionary<int, GameItem>();
         private static int _spawnTokenSeq;
         private static System.Net.HttpListener _listener;
 
-        // 本地 HTTP 生成服务器端口. 前端物品浏览器另有一份同名硬编码, 位于
-        // docs/items_browser.html:495 (`const API = 'http://localhost:26880'`) —— 改端口时需同步,
-        // 本次重构只收敛 C# 侧 (前端文件不在本任务写入域内).
+        // 本地 HTTP 生成服务器端口. 前端物品浏览器另有一份同名硬编码, 位于docs/items_browser.html:495 (`const API = 'http://localhost:26880'`) —— 改端口时需同步
         private const int ServerPort = 26880;
 
         public override void OnUpdate()
@@ -184,8 +157,7 @@ namespace ProgressMod
                 }
                 while (PendingJobs.TryDequeue(out var job))
                 {
-                    // 主线程执行 native 读取, 结果回填后唤醒等待的 HTTP 线程.
-                    // Abandoned = 请求方已超时放弃 (帧率骤降时可能发生), 跳过无谓的 native 工作.
+                    // 主线程执行 native 读取, 结果回填后唤醒等待的 HTTP 线程. Abandoned = 请求方已超时放弃 (帧率骤降时可能发生), 跳过无谓的 native 工作.
                     if (job.Abandoned) continue;
                     try
                     {
@@ -212,10 +184,7 @@ namespace ProgressMod
                 _listener = new System.Net.HttpListener();
                 _listener.Prefixes.Add($"http://localhost:{ServerPort}/");
                 _listener.Start();
-                // 多线程 accept: 每个线程各自 GetContext 取走下一个排队连接, 处理完再取下一个.
-                // 单线程时 ServerLoop 串行处理 => 任一请求在 RunOnMainThread 上阻塞 5s 期间, 其余连接
-                // 全堆在 HttpListener 内核队列里, 页面并发的 /api/mine + /api/inventory + 静态资源
-                // 被逐个串行化. 多 accept 线程让这些请求能同时在途.
+                // 多线程 accept: 每个线程各自 GetContext 取走下一个排队连接, 处理完再取下一个.单线程时 ServerLoop 串行处理 => 任一请求在 RunOnMainThread 上阻塞 5s 期间, 其余连接, 全堆在 HttpListener 内核队列里, 页面并发的 /api/mine + /api/inventory + 静态资源,  被逐个串行化. 多 accept 线程让这些请求能同时在途.
                 for (int i = 0; i < HttpAcceptThreads; i++)
                 {
                     var t = new System.Threading.Thread(ServerLoop) { IsBackground = true, Name = "ProgressMod.Http" + i };
@@ -223,8 +192,6 @@ namespace ProgressMod
                 }
                 try
                 {
-                    // 打开本地页 —— 页面与数据由本 mod 的 HttpListener 同源发出, 打开即连上,
-                    // 不再依赖云端 Pages (离线可用, 也不会上传任何数据)。
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
                         $"http://localhost:{ServerPort}/")
                     { UseShellExecute = true });
@@ -245,8 +212,7 @@ namespace ProgressMod
                 }
                 catch (Exception e)
                 {
-                    // GetContext 抛出即监听器不可恢复 (已 Dispose / 端口失效). 原实现只 catch 不 break,
-                    // 与注释「监听器停止时跳出」不符: 该路径会变成无退避的紧循环 (100% CPU 空转).
+                    // GetContext 抛出即监听器不可恢复 (已 Dispose / 端口失效). 原实现只 catch 不 break, 与注释「监听器停止时跳出」不符: 该路径会变成无退避的紧循环 (100% CPU 空转).
                     MelonLogger.Warning($"[Spawn] HTTP 监听循环退出: {e.Message}");
                     return;
                 }
@@ -284,8 +250,7 @@ namespace ProgressMod
         }
 
 
-        // 静态网页资源: 由 DLL 内嵌 (csproj EmbeddedResource) —— 本地启动即可打开页面,
-        // 与 /api/* 同源, 无跨域也无网络依赖。命中则写出响应并返回 true。
+        // 静态网页资源: 由 DLL 内嵌 (csproj EmbeddedResource) —— 本地启动即可打开页面, 与 /api/* 同源, 无跨域也无网络依赖。命中则写出响应并返回 true。
         private static readonly System.Collections.Generic.Dictionary<string, string> WebAssets
             = new System.Collections.Generic.Dictionary<string, string>
         {
@@ -329,7 +294,7 @@ namespace ProgressMod
                     res.ContentType = logical.EndsWith(".js")
                         ? "application/javascript; charset=utf-8"
                         : "text/html; charset=utf-8";
-                    res.Headers["Cache-Control"] = "no-store";   // 本地开发: 永远取当前构建
+                    res.Headers["Cache-Control"] = "no-store";
                     res.ContentLength64 = off;
                     res.OutputStream.Write(buf, 0, off);
                     res.OutputStream.Close();
@@ -375,9 +340,7 @@ namespace ProgressMod
             code = 200;
         }
 
-        // 物品字段投影 (id/name/count/unitValue). RouteMine 与 RouteInventory 共用同一组
-        // SafeStr/SafeInt/SafeLong 探针; 抽出一处以免两处各自漂移 (原先 4 行逐字重复).
-        // 只在主线程作业内调用 (探针触达 native 字段).
+        // 物品字段投影 (id/name/count/unitValue). RouteMine 与 RouteInventory 共用同一组 SafeStr/SafeInt/SafeLong 探针; 抽出一处以免两处各自漂移 (原先 4 行逐字重复). 只在主线程作业内调用 (探针触达 native 字段).
         private static dynamic ItemBrief(GameItem it)
         {
             return new
@@ -389,9 +352,7 @@ namespace ProgressMod
             };
         }
 
-        // GET /api/mine → 列出本次会话生成且仍在跟踪的物品 (token 引用)
-        // 枚举 SpawnedItems + 读 GameItem 字段全部在主线程作业内完成: 前者与 SpawnItem 同锁域 (免并发改写
-        // 抛 InvalidOperationException), 后者避免跨线程 native 读取.
+        // GET /api/mine → 列出本次会话生成且仍在跟踪的物品 (token 引用) 枚举 SpawnedItems + 读 GameItem 字段全部在主线程作业内完成: 前者与 SpawnItem 同锁域 (免并发改写 抛 InvalidOperationException), 后者避免跨线程 native 读取.
         private static void RouteMine(out object resp, out int code)
         {
             if (!RunOnMainThread(() =>
@@ -405,9 +366,7 @@ namespace ProgressMod
                     int u;
                     try { u = it.uniqueId; }
                     catch { dead.Add(kv.Key); continue; }
-                    // uid==0 = native 对象已不可读 (被游戏侧消耗/丢弃/销毁, 或存档重载). 此类 token
-                    // 已无意义: 保留会让网页端收到 uid=0 的死条目, 点「完整检查器」必然 400, 且因服务端
-                    // 仍在返回该 token, 前端 refreshMine() 的死 token 清理永不触发.
+                    // uid==0 = native 对象已不可读 (被游戏侧消耗/丢弃/销毁, 或存档重载). 此类 token 已无意义: 保留会让网页端收到 uid=0 的死条目, 点「完整检查器」必然 400, 且因服务端 仍在返回该 token, 前端 refreshMine() 的死 token 清理永不触发.
                     if (u == 0) { dead.Add(kv.Key); continue; }
                     var b = ItemBrief(it);
                     list.Add(new
@@ -434,8 +393,7 @@ namespace ProgressMod
             code = overloaded ? 503 : 500;
         }
 
-        // GET /api/inventory → 枚举玩家全部库存物品 (主背包+柜台+文档+垃圾桶)
-        // EnumeratePlayerInventories / InvLabel / ReadInventoryItems 都触达 native 对象, 必须主线程.
+        // GET /api/inventory → 枚举玩家全部库存物品 (主背包+柜台+文档+垃圾桶) EnumeratePlayerInventories / InvLabel / ReadInventoryItems 都触达 native 对象, 必须主线程.
         private static void RouteInventory(out object resp, out int code)
         {
             if (!RunOnMainThread(() =>
@@ -453,9 +411,7 @@ namespace ProgressMod
                         try { u = it.uniqueId; }
                         catch
                         {
-                            // 静默数据丢失: 读不到 uniqueId 的物品会被下面 u == 0 过滤, 整条记录从
-                            // /api/inventory 响应里消失 (网页看不到该物品). 该路径由 HTTP 请求触发,
-                            // 不在每帧热路径上, 故记警告便于定位而非静默吞掉.
+                            // 静默数据丢失: 读不到 uniqueId 的物品会被下面 u == 0 过滤, 整条记录从 /api/inventory 响应里消失 (网页看不到该物品). 该路径由 HTTP 请求触发, 不在每帧热路径上, 故记警告便于定位而非静默吞掉.
                             MelonLogger.Warning("[ItemOp] inventory: 读取 item.uniqueId 失败, 跳过该物品");
                         }
                         if (u == 0 || !seen.Add(u)) continue;
@@ -483,8 +439,7 @@ namespace ProgressMod
             code = overloaded ? 503 : 500;
         }
 
-        // GET /api/item?uid=n → DumpItem 含 native 方法调用, 必须主线程执行.
-        // 闭包只捕获 uid (纯值), GameItem 引用在主线程作业内解析, 不跨线程传递.
+        // GET /api/item?uid=n → DumpItem 含 native 方法调用, 必须主线程执行. 闭包只捕获 uid (纯值), GameItem 引用在主线程作业内解析, 不跨线程传递.
         private static void RouteItem(System.Net.HttpListenerRequest req, out object resp, out int code)
         {
             var q = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
@@ -558,32 +513,24 @@ namespace ProgressMod
             code = 200;
         }
 
-        // ============ 生成物品: 机器件直调原版工厂, 落点主背包强塞 ============
-        // 生成: 机器件 (printer/furnace/security_alarm/moisture_farm/water_purifier/hydroponic)
-        // 直调 PreBuiltItemHelper.CreateX —— 命中模板 = DirectoryMaster.Item(id) + MachineX.CreateNote
-        // + GraphUtils.TryAcceptAll, 得"带纸条真机器". 用户定调: printer 等本该命中模板, 不命中则产物坏
-        // (变 "?"); 落点不要柜台 (PlayerStore 加权表) → 回主背包 (EmporiumEntry.invElement) 无脑强塞.
-        // 非机器件 → ItemSpawner.Spawn(id). id 三种: stableId | "table:junk" | "prebuilt:xxx"
+        //============ 生成物品: 机器件直调原版工厂, 落点主背包强塞 ============ 生成: 机器件 (printer/furnace/security_alarm/moisture_farm/water_purifier/hydroponic) 直调 PreBuiltItemHelper.CreateX —— 命中模板 = DirectoryMaster.Item(id) + MachineX.CreateNote + GraphUtils.TryAcceptAll, 得"带纸条真机器". 用户定调: printer 等本该命中模板, 不命中则产物坏 (变 "?"); 落点不要柜台 (PlayerStore 加权表) → 回主背包 (EmporiumEntry.invElement) 无脑强塞. 非机器件 → ItemSpawner.Spawn(id). id 三种: stableId | "table:junk" | "prebuilt:xxx"
         private void SpawnItem(int token, string id, int count)
         {
             try
             {
                 if (count < 1) count = 1;
                 if (count > 999) count = 999;
-                // 存档门: 主菜单 sprite/lootTables 未初始化, DirectoryMaster.Item 会 NRE.
-                // EmporiumEntry 只有进入存档才存在 (原实现用其 invElement 判定)
+                //存档门: 主菜单 sprite/lootTables 未初始化, DirectoryMaster.Item 会 NRE. EmporiumEntry 只有进入存档才存在 (原实现用其 invElement 判定)
                 if (EmporiumEntry.Instance == null)
                 {
                     MelonLogger.Warning("[Spawn] 未进入存档 (主菜单无物品资源), 先进入存档再生成");
                     return;
                 }
                 if (!TryResolveInstruction(ref id)) return;
-                // 落点: 主背包 (EmporiumEntry.Instance.invElement, GameGridInventory). 用户裁决:
-                // 不要柜台 (PlayerStore 加权表); 无脑强塞 (MayHave 预检失败仅警告, UncheckedAccept 裁决).
+                //落点: 主背包 (EmporiumEntry.Instance.invElement, GameGridInventory). 用户裁决: 不要柜台 (PlayerStore 加权表); 无脑强塞 (MayHave 预检失败仅警告, UncheckedAccept 裁决).
                 var inv = EmporiumEntry.Instance?.invElement;
                 if (inv == null) { MelonLogger.Warning("[Spawn] 未进入存档, 无主背包容器"); return; }
-                // 逐件独立生成, 每件数量为 1: 不用 SetAmount 堆叠, 避免物品格上标出「×N」.
-                // 每次都要新建实例 —— 同一实例只属于一个库存格.
+                //逐件独立生成, 每件数量为 1: 不用 SetAmount 堆叠, 避免物品格上标出「×N」. 每次都要新建实例 —— 同一实例只属于一个库存格.
                 GameItem first = null;
                 int done = 0;
                 for (int i = 0; i < count; i++)
@@ -615,8 +562,7 @@ namespace ProgressMod
             return true;
         }
 
-        // 按 id 形态生成物品: table:/prebuilt: 走 mod 引擎, 其余 stableId 走原版预置工厂/ItemSpawner.
-        // 返回 false = 已记警告, 调用方直接中止
+        //按 id 形态生成物品: table:/prebuilt: 走 mod 引擎, 其余 stableId 走原版预置工厂/ItemSpawner. 返回 false = 已记警告, 调用方直接中止
         private static bool TryCreateSpawnItem(string id, out GameItem item)
         {
             item = null;
@@ -630,14 +576,10 @@ namespace ProgressMod
                 }
                 return true;
             }
-            // 常规 stableId: 机器件先直调原版预置工厂 = 命中模板 (见 TrySpawnPrebuiltMachine);
-            // 无工厂的非机器走 ItemSpawner.Spawn(id) (ItemManager.cs:3366 原样; Spawn 内部仅 18 个
-            // 生成商品键命中, 其余 = DirectoryMaster.Item(id) 常规商品, furnace 同此且正常显示).
+            //常规 stableId: 机器件先直调原版预置工厂 = 命中模板 (见 TrySpawnPrebuiltMachine); 无工厂的非机器走 ItemSpawner.Spawn(id) (ItemManager.cs:3366 原样; Spawn 内部仅 18 个 生成商品键命中, 其余 = DirectoryMaster.Item(id) 常规商品, furnace 同此且正常显示).
             if (!TrySpawnPrebuiltMachine(id, out item))
             {
-                // 容器类板条箱 (evidence_box/med_box/…): 在 ContainerItemDirectory.InitDirectory 里以惰性
-                // Func<GameItem> 工厂注册, 静态物品表查不到 → ItemSpawner.Spawn 必失败. 必须先走 native 工厂.
-                // (对齐 ProbablyStolenItemManager 0.4.7 TryCreateNativeLootCrate, ItemManager.cs:3681)
+                //容器类板条箱 (evidence_box/med_box/…): 在 ContainerItemDirectory.InitDirectory 里以惰性 Func<GameItem> 工厂注册, 静态物品表查不到 → ItemSpawner.Spawn 必失败. 必须先走 native 工厂. (对齐 ProbablyStolenItemManager 0.4.7 TryCreateNativeLootCrate, ItemManager.cs:3681)
                 if (!TrySpawnNativeLootCrate(id, out item))
                 {
                     try { item = ItemSpawner.Spawn(id); }
@@ -645,10 +587,7 @@ namespace ProgressMod
                 }
             }
             if (item == null) { MelonLogger.Warning($"[Spawn] ItemSpawner 拒绝 {id}"); return false; }
-            // node/module 类模板件不带随机词条 —— 对齐原版引擎第二步: 引擎 (RandomNode/
-            // RandomPerformanceModule) 在 DirectoryMaster.Item(base) 后调 InitRandomEffect 注入随机词条.
-            // 直生非变体模板须在此补, 否则产物是游戏里不存在的裸态模块. (prebuilt 引擎产物已带,
-            // 走上方 TryCreateGeneratedItem 分支, 不会二次注入)
+            //node/module 类模板件不带随机词条 —— 对齐原版引擎第二步: 引擎 (RandomNode/ RandomPerformanceModule) 在 DirectoryMaster.Item(base) 后调 InitRandomEffect 注入随机词条. 直生非变体模板须在此补, 否则产物是游戏里不存在的裸态模块. (prebuilt 引擎产物已带, 走上方 TryCreateGeneratedItem 分支, 不会二次注入)
             try
             {
                 bool isNodeType = false, isModType = false;
@@ -663,11 +602,7 @@ namespace ProgressMod
             return true;
         }
 
-        // 容器类板条箱: 静态物品表 (ItemSpawner.Spawn) 查不到 —— 它们在 ContainerItemDirectory 里以
-        // 惰性 Func<GameItem> 工厂注册 (见 IL2CPP ContainerItemDirectory.InitDirectory). 只能直调 native 工厂.
-        // 5 个已确证存在 (Assembly-CSharp PreBuiltItemHelper.LootCrate*); sci/research/sup/supply_box 走反射
-        // 是 0.4.7 的向前兼容探测 —— 本游戏无此 3 名, 反射失败即回落 ItemSpawner, 无副作用.
-        // (对齐 ProbablyStolenItemManager 0.4.7 TryCreateNativeLootCrate, ItemManager.cs:3681)
+        //容器类板条箱: 静态物品表 (ItemSpawner.Spawn) 查不到 —— 它们在 ContainerItemDirectory 里以 惰性 Func<GameItem> 工厂注册 (见 IL2CPP ContainerItemDirectory.InitDirectory). 只能直调 native 工厂. 5 个已确证存在 (Assembly-CSharp PreBuiltItemHelper.LootCrate*); sci/research/sup/supply_box 走反射 是 0.4.7 的向前兼容探测 —— 本游戏无此 3 名, 反射失败即回落 ItemSpawner, 无副作用. (对齐 ProbablyStolenItemManager 0.4.7 TryCreateNativeLootCrate, ItemManager.cs:3681)
         private static bool TrySpawnNativeLootCrate(string id, out GameItem item)
         {
             item = null;
@@ -692,8 +627,7 @@ namespace ProgressMod
             }
         }
 
-        // 强塞主背包: MayHave 预检只警告(机器件/超大件常报无格但仍可塞), UncheckedAccept 才是裁决.
-        // 返回 false = 已记警告, 调用方直接中止
+        //强塞主背包: MayHave 预检只警告(机器件/超大件常报无格但仍可塞), UncheckedAccept 才是裁决. 返回 false = 已记警告, 调用方直接中止
         private static bool TryAcceptIntoMainInventory(GameInventory inv, GameItem item, string id)
         {
             try
@@ -716,9 +650,7 @@ namespace ProgressMod
             return true;
         }
 
-        // 机器件直调原版预置工厂 (命中模板 → 带纸条真机器). 无对应工厂返回 false, 由调用方回退 Spawn.
-        // 工厂 = DirectoryMaster.Item(id,true) + MachineX.CreateNote(null) + GraphUtils.TryAcceptAll(item,note,-1)
-        // (PreBuiltItemHelper.txt CreatePrinter:12116 同构). SpawnItem 由 OnUpdate 主线程消费调用.
+        //机器件直调原版预置工厂 (命中模板 → 带纸条真机器). 无对应工厂返回 false, 由调用方回退 Spawn. 工厂 = DirectoryMaster.Item(id,true) + MachineX.CreateNote(null) + GraphUtils.TryAcceptAll(item,note,-1) (PreBuiltItemHelper.txt CreatePrinter:12116 同构). SpawnItem 由 OnUpdate 主线程消费调用.
         private static bool TrySpawnPrebuiltMachine(string id, out GameItem item)
         {
             item = null;
@@ -744,9 +676,7 @@ namespace ProgressMod
             }
         }
 
-        // ============ 属性编辑 / 删除: 按 uid 定位任意库存物品 ============
-        // 字段写回照 ProbablyStolenItemManager.ApplyBaseField, 删除照 TryExpelAndDestroy
-        // (overrideLockRemove=true → inventory.Expel → item.Destroy)
+        //============ 属性编辑 / 删除: 按 uid 定位任意库存物品 ============ 字段写回照 ProbablyStolenItemManager.ApplyBaseField, 删除照 TryExpelAndDestroy (overrideLockRemove=true → inventory.Expel → item.Destroy)
         private static void ApplyItemOp(ItemOpRequest req)
         {
             // 局部解构: 保持下方 switch 分支体逐字不变 (低风险收参, 不改写行为)
@@ -835,10 +765,7 @@ namespace ProgressMod
             try { setter(!getter()); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
         }
 
-        // ============ 库存枚举 / 定位 / 删除 (任意库存物品) ============
-        // 全部玩家库存清单 (照 mod GetKnownInventories 主库存集合). 每个返回 GameInventory
-        // 注意: spawn 落点 = EmporiumEntry.invElement (柜台货架/主背包, 本函数第 451 行已枚举);
-        // 其余后柜台/巴扎等容器一并枚举, 供 edit/delete 定位任意库存物品
+        //============ 库存枚举 / 定位 / 删除 (任意库存物品) ============ 全部玩家库存清单 (照 mod GetKnownInventories 主库存集合). 每个返回 GameInventory 注意: spawn 落点 = EmporiumEntry.invElement (柜台货架/主背包, 本函数第 451 行已枚举); 其余后柜台/巴扎等容器一并枚举, 供 edit/delete 定位任意库存物品
         private static System.Collections.Generic.List<GameInventory> EnumeratePlayerInventories()
         {
             var list = new System.Collections.Generic.List<GameInventory>();
@@ -872,15 +799,7 @@ namespace ProgressMod
 
         // 库存类型 → 中文标签 (前端展示在哪)
         //
-        // 顺序敏感 + 惰性: 原实现是 24 个连续的 `if (inv == e.xxxElement) return "标签";`, 首次匹配即返回.
-        // 两个语义必须原样保留, 否则标签会变:
-        //   1) e.xxxElement 是 property getter (get_invElement:733 / get_showcaseElement:779 /
-        //      get_soldElement:2364 / get_trashcanInvElement:2548 ...), 不是字段读取 —— 命中项之后的
-        //      getter 在原实现里根本不会被求值 (部分 getter 未初始化时会分配对象甚至抛异常).
-        //   2) 若某两个 getter 返回同一实例, 顺序决定返回哪个标签.
-        // 故用有序的 (比较委托, 标签) 数组运行时顺序遍历, 而非预建 Dictionary: 预建表会一次性求值
-        // 全部 24 个 getter 且破坏首匹配语义. 比较式 `i == e.xxxElement` 与原文逐字一致 ——
-        // 同一静态类型 (GameInventory vs 各具体库存子类)、同一 operator== 解析, 不做抬高转换.
+        //顺序敏感 + 惰性: 原实现是 24 个连续的 `if (inv == e.xxxElement) return "标签";`, 首次匹配即返回. 两个语义必须原样保留, 否则标签会变: 1) e.xxxElement 是 property getter (get_invElement:733 / get_showcaseElement:779 / get_soldElement:2364 / get_trashcanInvElement:2548 ...), 不是字段读取 —— 命中项之后的 getter 在原实现里根本不会被求值 (部分 getter 未初始化时会分配对象甚至抛异常). 2) 若某两个 getter 返回同一实例, 顺序决定返回哪个标签. 故用有序的 (比较委托, 标签) 数组运行时顺序遍历, 而非预建 Dictionary: 预建表会一次性求值 全部 24 个 getter 且破坏首匹配语义. 比较式 `i == e.xxxElement` 与原文逐字一致 —— 同一静态类型 (GameInventory vs 各具体库存子类)、同一 operator== 解析, 不做抬高转换.
         private sealed class InvLabelEntry
         {
             public readonly Func<GameInventory, EmporiumEntry, bool> Match;
@@ -1010,14 +929,12 @@ namespace ProgressMod
             return list;
         }
 
-        // 删除任意物品: 照原版 ItemManager TryDeleteItem 三重兜底
-        // (parentInventory → 遍历全部库存 → fixture trashcan/drain), 成功 RefreshItemAreas
+        //删除任意物品: 照原版 ItemManager TryDeleteItem 三重兜底 (parentInventory → 遍历全部库存 → fixture trashcan/drain), 成功 RefreshItemAreas
         private static void DeleteItem(GameItem item)
         {
             if (item == null) return;
             int uid = 0;
-            // uid / parentInventory 读失败都不会中断删除本身, 但会显著改变删除路径与日志可读性
-            // (UID 探针只影响日志文本, 是最常被 native 异常打断的一步), 故记警告而非静默.
+            //uid / parentInventory 读失败都不会中断删除本身, 但会显著改变删除路径与日志可读性 (UID 探针只影响日志文本, 是最常被 native 异常打断的一步), 故记警告而非静默.
             try { uid = item.uniqueId; }
             catch
             {
@@ -1029,8 +946,7 @@ namespace ProgressMod
             try { inv = item.parentInventory; }
             catch
             {
-                // 静默数据丢失: parentInventory 读失败会静默跳过「层1」删除路径, 降级到层2/层3;
-                // 物品仍可能被删掉, 但走了非预期路径, 需要能看见.
+                //静默数据丢失: parentInventory 读失败会静默跳过「层1」删除路径, 降级到层2/层3; 物品仍可能被删掉, 但走了非预期路径, 需要能看见.
                 MelonLogger.Warning("[ItemOp] delete: 读取 item.parentInventory 失败, 跳过层1(直连父容器)路径");
             }
             if (inv != null && TryExpelAndDestroy(inv, item))
@@ -1167,10 +1083,7 @@ namespace ProgressMod
             return false;
         }
 
-        // 删除成功后清掉「我的生成」里指向该物品的 token. 网页端 refreshMine() 以「服务端已不再返回
-        // 该 token」为唯一依据清理 localStorage 死 token (items_browser.html:548) —— 此处不删则列表
-        // 永久残留幽灵条目 (uid/name 全空), 且 SpawnedItems 长期持有已 Destroy 的 native 引用阻止回收.
-        // 仅主线程调用 (DeleteItem 只在 OnUpdate 排空路径执行), 与 SpawnedItems 的其他访问同线程, 无需加锁.
+        //删除成功后清掉「我的生成」里指向该物品的 token. 网页端 refreshMine() 以「服务端已不再返回 该 token」为唯一依据清理 localStorage 死 token (items_browser.html:548) —— 此处不删则列表 永久残留幽灵条目 (uid/name 全空), 且 SpawnedItems 长期持有已 Destroy 的 native 引用阻止回收. 仅主线程调用 (DeleteItem 只在 OnUpdate 排空路径执行), 与 SpawnedItems 的其他访问同线程, 无需加锁.
         private static void ForgetSpawned(GameItem item)
         {
             if (item == null || SpawnedItems.Count == 0) return;
@@ -1239,8 +1152,7 @@ namespace ProgressMod
 
         private static void AddItemTag(GameItem item, string keyLabel)
         {
-            // keyLabel 形如 "key|label" — 新 TagState 直入 base dict, 照原版 AddTagToItem (ItemManager.cs:2653) 建后 SetEnabled(true)
-            // (InitTagString 是 TagSystem private 无法直调, 用 ctor 等价且免 TYPE-STRING_ 前缀 warning)
+            //keyLabel 形如 "key|label" — 新 TagState 直入 base dict, 照原版 AddTagToItem (ItemManager.cs:2653) 建后 SetEnabled(true) (InitTagString 是 TagSystem private 无法直调, 用 ctor 等价且免 TYPE-STRING_ 前缀 warning)
             int pipe = keyLabel.IndexOf('|');
             string key = pipe > 0 ? keyLabel.Substring(0, pipe) : keyLabel;
             string label = pipe > 0 ? keyLabel.Substring(pipe + 1) : key;
@@ -1259,9 +1171,7 @@ namespace ProgressMod
             }
         }
 
-        // 照原版 AddPresetFeature/AddFeatureObject (ItemManager.cs:2691/2725): category 命中 preset → 调 ItemFeatureList 工厂得到完整 feature
-        // (规范 category 常量/identifier/featureType/conditions/useCondition/modifiers/display 齐全, 裸 new ItemFeature 缺这些字段 → 游戏内无效);
-        // 再照 AddFeatureObject: FindItemFeatureByID 查重 → parentItemUniqueId=item.uniqueId → AddItemFeature
+        //照原版 AddPresetFeature/AddFeatureObject (ItemManager.cs:2691/2725): category 命中 preset → 调 ItemFeatureList 工厂得到完整 feature (规范 category 常量/identifier/featureType/conditions/useCondition/modifiers/display 齐全, 裸 new ItemFeature 缺这些字段 → 游戏内无效); 再照 AddFeatureObject: FindItemFeatureByID 查重 → parentItemUniqueId=item.uniqueId → AddItemFeature
         private static void AddItemFeatureByCategory(GameItem item, string category)
         {
             try
@@ -1296,8 +1206,7 @@ namespace ProgressMod
             }
         }
 
-        // 原版 FeaturePresets (ItemManager.cs:206-219) 的 12 个预设: 按 preset key / 规范 category 双键 → ItemFeatureList 工厂
-        // (工厂产物 identifier/category 见子 agent ISIL 报告: free→CATEGORY_FREE/free, discount_25→discount, equipment_good→CATEGORY_EQUIPMENT_CONDITION 等)
+        //原版 FeaturePresets (ItemManager.cs:206-219) 的 12 个预设: 按 preset key / 规范 category 双键 → ItemFeatureList 工厂 (工厂产物 identifier/category 见子 agent ISIL 报告: free→CATEGORY_FREE/free, discount_25→discount, equipment_good→CATEGORY_EQUIPMENT_CONDITION 等)
         private static ItemFeature BuildItemFeatureByKey(string key)
         {
             try
@@ -1318,8 +1227,7 @@ namespace ProgressMod
                     case "CATEGORY_GENUINE_CIGARETTE": return ItemFeatureList.CigaretteAuthenticity();
                     case "stamp_authenticity":
                     case "CATEGORY_GENUINE_STAMP": return ItemFeatureList.StampAuthenticity();
-                    // game 0.46D: ItemFeatureList.ModuleStuckFeature 已移除 (module_stuck 现为 ItemCondition,
-                    // 见 ItemConditionList.CreateModuleStuck) — 本方法返回 ItemFeature, 故走裸建兜底.
+                    //game 0.46D: ItemFeatureList.ModuleStuckFeature 已移除 (module_stuck 现为 ItemCondition, 见 ItemConditionList.CreateModuleStuck) — 本方法返回 ItemFeature, 故走裸建兜底.
                     case "discount_25": return ItemFeatureList.Discount(25);
                     case "bargain_markup":
                     case "bargainMarkup": return ItemFeatureList.BargainMarkup(10);
@@ -1551,9 +1459,7 @@ namespace ProgressMod
             return a;
         }
 
-        // ============ 机器进度强制满 ============
-        // 游戏在存档结算时对每台进行中机器调用 ContinueProgressTypeMachine 推进进度。
-        // 前缀: 详细日志 + 强制完成。
+        //============ 机器进度强制满 ============ 游戏在存档结算时对每台进行中机器调用 ContinueProgressTypeMachine 推进进度。 前缀: 详细日志 + 强制完成。
         [HarmonyPatch(typeof(MachineProgressHelper), "ContinueProgressTypeMachine")]
         public static class PatchContinue
         {
@@ -1584,9 +1490,7 @@ namespace ProgressMod
             }
         }
 
-        // ============ 机器推进 hook (真推进点) ============
-        // MachineryHelper.UpdateProcessingTypeMachine 是机器处理推进核心,
-        // 结算时对进行中机器调用。前缀: 设满 CURRENT (若已存在) 并打日志 (只对真机器)。
+        //============ 机器推进 hook (真推进点) ============ MachineryHelper.UpdateProcessingTypeMachine 是机器处理推进核心, 结算时对进行中机器调用。前缀: 设满 CURRENT (若已存在) 并打日志 (只对真机器)。
         [HarmonyPatch(typeof(MachineryHelper), "UpdateProcessingTypeMachine")]
         public static class PatchUpdate
         {
@@ -1617,9 +1521,7 @@ namespace ProgressMod
             }
         }
 
-        // ============ 不消耗耐久 ============
-        // 注: 不再 patch ModuleEffectHelper.Degrade —— 游戏 0.46D 热修后该类静态构造在
-        // HarmonyInit 早期初始化崩溃(Il2Cpp SEH), 且 Degrade 会走 ChangeDurability 主入口, 此处已覆盖.
+        //============ 不消耗耐久 ============ 注: 不再 patch ModuleEffectHelper.Degrade —— 游戏 0.46D 热修后该类静态构造在 HarmonyInit 早期初始化崩溃(Il2Cpp SEH), 且 Degrade 会走 ChangeDurability 主入口, 此处已覆盖.
         [HarmonyPatch(typeof(DurabilityHelper), "ChangeDurability")]
         public static class PatchDurability
         {
@@ -1650,12 +1552,7 @@ namespace ProgressMod
             }
         }
 
-        // 加强滤嘴: 滤嘴行为由 Liquid 表驱动 —— filterVolumeRemoved=每次剥离多少,
-        // filterDurabilityUsage=每次剥离扣多少耐久, filterMinimumPurity=每次剥离的水量阈值.
-        // 原表多数杂质只给 1000 / 2, 这里统一拉到游戏内实测最大值 2000 并把耐久成本压到 1
-        // (配合 NoDurability 即自由过滤).
-        // 刻意不动 particleSize 与 FILTER_SIZE_TAG: HandleFilter 的分支是 filterSize<=particleSize
-        // 才处理, 滤嘴 FILTER_SIZE_TAG=0x16(22) 只拦得住 coarse 杂质; 调大反而会把能拦的变成跳过.
+        //加强滤嘴: 滤嘴行为由 Liquid 表驱动 —— filterVolumeRemoved=每次剥离多少, filterDurabilityUsage=每次剥离扣多少耐久, filterMinimumPurity=每次剥离的水量阈值. 原表多数杂质只给 1000 / 2, 这里统一拉到游戏内实测最大值 2000 并把耐久成本压到 1 (配合 NoDurability 即自由过滤). 刻意不动 particleSize 与 FILTER_SIZE_TAG: HandleFilter 的分支是 filterSize<=particleSize 才处理, 滤嘴 FILTER_SIZE_TAG=0x16(22) 只拦得住 coarse 杂质; 调大反而会把能拦的变成跳过.
         private const int MaxFilterVolumeRemoved = 2000;
         private const int MinFilterDurabilityUsage = 1;
         private static bool _filterBoostDone;
@@ -1668,9 +1565,7 @@ namespace ProgressMod
             if (l.filterDurabilityUsage > MinFilterDurabilityUsage) l.filterDurabilityUsage = MinFilterDurabilityUsage;
         }
 
-        // 兜底: Liquid 表由 Liquid 静态构造里的 InitLiquid 建好。若该静态构造早于本 mod
-        // 打补丁执行, InitLiquid 的 Postfix 就永远不会再来, 路线 1 会静默变成空操作。
-        // 因此首次过滤时补做一次; 常态下只读一个 bool。
+        //兜底: Liquid 表由 Liquid 静态构造里的 InitLiquid 建好。若该静态构造早于本 mod 打补丁执行, InitLiquid 的 Postfix 就永远不会再来, 路线 1 会静默变成空操作。 因此首次过滤时补做一次; 常态下只读一个 bool。
         private static void EnsureFilterBoost()
         {
             if (_filterBoostDone) return;
@@ -1702,33 +1597,16 @@ namespace ProgressMod
             public static void Prefix() { try { if (FilterBoost) EnsureFilterBoost(); } catch { /* IL2CPP 异常: 放弃本次兜底 */ } }
         }
 
-        // 全部 6 类杂质 part id (WaterPremadeHelper 三个分布字典的键即为权威集合).
-        // 供紫外线灯与净水器共用, 避免两处各写一份导致漂移.
+        //全部 6 类杂质 part id (WaterPremadeHelper 三个分布字典的键即为权威集合). 供紫外线灯与净水器共用, 避免两处各写一份导致漂移.
         private static readonly string[] AllContaminants = new string[6]
         {
             "microbe", "physical_contaminant", "chemical_contaminant", "mineral", "heavy_metal", "organic_waste"
         };
 
-        // 净化到位: 清空全部杂质 + 按需补满 100% 纯水. 紫外线灯与净水器共用同一条路径。
-        // 原版 PurifyToBaseWater 是「部分净化」—— 它按 ci 索引逐槽写 min(c-remove, floor),
-        // 而 floor = c*water/total, 水不满时 floor 不为 0, 剩下的就是那点残余。故这里不依赖
-        // 原版的部分净化结果, 而是直接剥离到零再补满。
-        // RemoveContaminantFromContainer(容器, 杂质id, 水量, minPercentage)
-        // 的写入端公式 (WaterHelper IL op078-119) 是:
-        //     floor = waterAmount * minPercentage / 100
-        //     new   = max(0, max(contaminant - volumeToRemove, min(contaminant, floor)))
-        // 传 minPercentage=0 即 floor=0, volumeToRemove=总水量 => 单轮理论上归零.
-        // 但实测仍会留一点残余, 故此处迭代到收敛: 每轮用「当前」总量作 volumeToRemove 重算,
-        // 直到总水量不再下降为止 (残余存在时下一轮必然仍有量可剥).
-        // 收敛判据用总量而非纯度: GetWaterPurity 对非 LIQUID_CONTAINER_TAG 的容器直接返回 0,
-        // 拿它当判据会让不满足标签的容器白跑满 MaxStripPasses 轮。
-        // 只在主线程调用 (触达 native 字段).
+        //净化到位: 清空全部杂质 + 按需补满 100% 纯水. 紫外线灯与净水器共用同一条路径。 原版 PurifyToBaseWater 是「部分净化」—— 它按 ci 索引逐槽写 min(c-remove, floor), 而 floor = c*water/total, 水不满时 floor 不为 0, 剩下的就是那点残余。故这里不依赖 原版的部分净化结果, 而是直接剥离到零再补满。 RemoveContaminantFromContainer(容器, 杂质id, 水量, minPercentage) 的写入端公式 (WaterHelper IL op078-119) 是: floor = waterAmount * minPercentage / 100 new   = max(0, max(contaminant - volumeToRemove, min(contaminant, floor))) 传 minPercentage=0 即 floor=0, volumeToRemove=总水量 => 单轮理论上归零. 但实测仍会留一点残余, 故此处迭代到收敛: 每轮用「当前」总量作 volumeToRemove 重算, 直到总水量不再下降为止 (残余存在时下一轮必然仍有量可剥). 收敛判据用总量而非纯度: GetWaterPurity 对非 LIQUID_CONTAINER_TAG 的容器直接返回 0, 拿它当判据会让不满足标签的容器白跑满 MaxStripPasses 轮。 只在主线程调用 (触达 native 字段).
         private const int MaxStripPasses = 8;
 
-        // 补满: GetFreeCapacity = LIQUID_CONTAINER_CAPACITY - GetTotalVolume, 补水用
-        // AddPureWater(=AddWater grade 0, 即 100% 纯水)。容量按水的刻度算, 但 GetTotalVolume
-        // 把杂质体积也计入, 故先剥离再加: 顺序反了会按「含杂质的体积」补水, 反而溢出容量。
-        // 注意 free 取的是剥离之后的值。
+        //补满: GetFreeCapacity = LIQUID_CONTAINER_CAPACITY - GetTotalVolume, 补水用 AddPureWater(=AddWater grade 0, 即 100% 纯水)。容量按水的刻度算, 但 GetTotalVolume 把杂质体积也计入, 故先剥离再加: 顺序反了会按「含杂质的体积」补水, 反而溢出容量。 注意 free 取的是剥离之后的值。
         private static void FillWithPureWater(GameItem container)
         {
             int free = WaterHelper.GetFreeCapacity(container);
@@ -1745,19 +1623,15 @@ namespace ProgressMod
             {
                 foreach (string id in AllContaminants) WaterHelper.RemoveContaminantFromContainer(container, id, vol, 0);
                 int after = WaterHelper.GetTotalVolume(container);
-                // 收敛判据: 本轮没剥掉任何东西。用容量而非 GetWaterPurity —— 后者对非
-                // LIQUID_CONTAINER_TAG 的容器直接返回 0, 拿它当判据会让这类容器白跑满轮。
+                //收敛判据: 本轮没剥掉任何东西。用容量而非 GetWaterPurity —— 后者对非 LIQUID_CONTAINER_TAG 的容器直接返回 0, 拿它当判据会让这类容器白跑满轮。
                 if (after >= vol) break;
                 vol = after;
             }
-            // 剥离后按需补满 (顺序关键: 先剥离再取 free —— 容量按水的刻度算, 而 GetTotalVolume
-            // 把杂质体积也计入, 反了会按含杂质的体积补水而溢出容量)。
+            //剥离后按需补满 (顺序关键: 先剥离再取 free —— 容量按水的刻度算, 而 GetTotalVolume 把杂质体积也计入, 反了会按含杂质的体积补水而溢出容量)。
             if (PurifyFillToFull) FillWithPureWater(container);
         }
 
-        // 紫外线灯: 原版 OnUVUsed 只把 microbe 归零并把其体积并回 water, 对其余 5 类杂质
-        // (physical_contaminant / chemical_contaminant / mineral / heavy_metal / organic_waste)
-        // 完全不作为. Postfix 照 MachinePurifier.PurifyContainer 的做法补一轮移除.
+        //紫外线灯: 原版 OnUVUsed 只把 microbe 归零并把其体积并回 water, 对其余 5 类杂质 (physical_contaminant / chemical_contaminant / mineral / heavy_metal / organic_waste) 完全不作为. Postfix 照 MachinePurifier.PurifyContainer 的做法补一轮移除.
         [HarmonyPatch(typeof(WaterHelper), "OnUVUsed")]
         public static class PatchUvFullPurify
         {
@@ -1772,13 +1646,7 @@ namespace ProgressMod
             }
         }
 
-        // 海德拉科技微型净水器 (portable_water_purifier, AmenitiesItemDirectory).
-        // 原版 OnPortableWaterPurifierUsed 开头即比对 GetWaterPurity() >= 9800 (0x2648),
-        // 满足则弹 "mech_portable_purifier_already_clean" 并整段跳过 PurifyToBaseWater.
-        // 该纯度 = waterVolume*10000/总容量, 分母含全部杂质, 故 9800 等价于「杂质占比 <= 2%」——
-        // 也就是说只差最后一点点的水反而不给净化, 微量杂质会一直留在容器里。
-        // PatchPurifyToPure 挂在 PurifyToBaseWater 上, 根本不会被这条早退分支触达, 故在此补一刀:
-        // Postfix 在原生流程结束后清空残余杂质; 原版的收费(ChangeDurability)与提示文案保持不动.
+        //海德拉科技微型净水器 (portable_water_purifier, AmenitiesItemDirectory). 原版 OnPortableWaterPurifierUsed 开头即比对 GetWaterPurity() >= 9800 (0x2648), 满足则弹 "mech_portable_purifier_already_clean" 并整段跳过 PurifyToBaseWater. 该纯度 = waterVolume*10000/总容量, 分母含全部杂质, 故 9800 等价于「杂质占比 <= 2%」—— 也就是说只差最后一点点的水反而不给净化, 微量杂质会一直留在容器里。 PatchPurifyToPure 挂在 PurifyToBaseWater 上, 根本不会被这条早退分支触达, 故在此补一刀: Postfix 在原生流程结束后清空残余杂质; 原版的收费(ChangeDurability)与提示文案保持不动.
         [HarmonyPatch(typeof(AmenitiesItemDirectory), "OnPortableWaterPurifierUsed")]
         public static class PatchPurifierFullPurify
         {
@@ -1793,9 +1661,7 @@ namespace ProgressMod
             }
         }
 
-        // ============ 模块加成强化 ============
-        // ModuleHelper.InitModuleItem 是所有模块(含神经模组)初始化入口,
-        // 3 个加成百分比直接乘大。模块创建时调用一次。
+        //============ 模块加成强化 ============ ModuleHelper.InitModuleItem 是所有模块(含神经模组)初始化入口, 3 个加成百分比直接乘大。模块创建时调用一次。
         [HarmonyPatch(typeof(ModuleHelper), "InitModuleItem")]
         public static class PatchModuleBoost
         {
@@ -1817,9 +1683,7 @@ namespace ProgressMod
         }
 
 
-        // ============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============
-        // ScavHelper 负责拾荒受伤掷骰; HealthData 负责伤口结算与恶化.
-        // 统一策略: bool 返回 Postfix 强制 false/0, void 结算 Prefix 跳过.
+        //============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============ ScavHelper 负责拾荒受伤掷骰; HealthData 负责伤口结算与恶化. 统一策略: bool 返回 Postfix 强制 false/0, void 结算 Prefix 跳过.
         [HarmonyPatch(typeof(ScavHelper), "RollMinorWound")] public static class PatchRollMinorWound
         {
             public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
@@ -1853,13 +1717,7 @@ namespace ProgressMod
             public static bool Prefix() { try { return !NeverWounded; } catch { return true; } }
         }
 
-        // ============ 无限拾荒: 次数与冷却不受限 ============
-        // Cpp2IL ISIL 静态分析 (ScavHelper.txt):
-        //   CanScavenge: 内联计算 base(5/7 - IsProficientScavenger) - 折算used - PlayerStore[+536](今日计数), 剩余<=0 返回 false
-        //   GetMaxScavAttempts/GetScavTimeLeft: 同样内联计算 (不互相调用)
-        //   ResetScavenging: PlayerStore[+536] = 0
-        // 核心限制点是 CanScavenge (UI/逻辑都问它), patch 它返回 true 即可;
-        // GetMaxScavAttempts/GetScavTimeLeft 也 patch 9999 (其他调用方可能直接读).
+        //============ 无限拾荒: 次数与冷却不受限 ============ Cpp2IL ISIL 静态分析 (ScavHelper.txt): CanScavenge: 内联计算 base(5/7 - IsProficientScavenger) - 折算used - PlayerStore[+536](今日计数), 剩余<=0 返回 false GetMaxScavAttempts/GetScavTimeLeft: 同样内联计算 (不互相调用) ResetScavenging: PlayerStore[+536] = 0 核心限制点是 CanScavenge (UI/逻辑都问它), patch 它返回 true 即可; GetMaxScavAttempts/GetScavTimeLeft 也 patch 9999 (其他调用方可能直接读).
         [HarmonyPatch(typeof(ScavHelper), "CanScavenge")]
         public static class PatchCanScavenge
         {
