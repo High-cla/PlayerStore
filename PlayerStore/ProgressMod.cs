@@ -4,7 +4,7 @@ using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.12.1", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.13.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -16,6 +16,8 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgNoDurability = Cfg.CreateEntry<bool>("NoDurability", true, "不消耗耐久");
         public static readonly MelonPreferences_Entry<int> CfgModuleBoostMult = Cfg.CreateEntry<int>("ModuleBoostMult", 10, "模块加成倍率");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyAlwaysPure = Cfg.CreateEntry<bool>("PurifyAlwaysPure", true, "净化器/过滤器: PurifyToBaseWater 永远净化100%纯水");
+        public static readonly MelonPreferences_Entry<bool> CfgFilterBoost = Cfg.CreateEntry<bool>("FilterBoost", true, "加强滤嘴: 剥离量拉到游戏最大值, 耐久成本降到 1");
+        public static readonly MelonPreferences_Entry<bool> CfgUvFullPurify = Cfg.CreateEntry<bool>("UvFullPurify", true, "紫外线灯: 除杀菌外一并清除全部杂质");
         // 生成物品已改由 HTTP 网页生成器承担(F9 快捷生成在 ca0866d 移除), 旧键由 PurgeLegacyEntries 清出配置。
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
@@ -24,6 +26,8 @@ namespace ProgressMod
         public static bool NoDurability => CfgNoDurability.Value;
         public static int ModuleBoostMult => CfgModuleBoostMult.Value;
         public static bool PurifyAlwaysPure => CfgPurifyAlwaysPure.Value;
+        public static bool FilterBoost => CfgFilterBoost.Value;
+        public static bool UvFullPurify => CfgUvFullPurify.Value;
         public static bool NeverWounded => CfgNeverWounded.Value;
         public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
 
@@ -1611,6 +1615,84 @@ namespace ProgressMod
                     return false; // 跳过原逻辑
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] PurifyToBaseWater patch err: {e.Message}"); return true; }
+            }
+        }
+
+        // 加强滤嘴: 滤嘴行为由 Liquid 表驱动 —— filterVolumeRemoved=每次剥离多少,
+        // filterDurabilityUsage=每次剥离扣多少耐久, filterMinimumPurity=每次剥离的水量阈值.
+        // 原表多数杂质只给 1000 / 2, 这里统一拉到游戏内实测最大值 2000 并把耐久成本压到 1
+        // (配合 NoDurability 即自由过滤).
+        // 刻意不动 particleSize 与 FILTER_SIZE_TAG: HandleFilter 的分支是 filterSize<=particleSize
+        // 才处理, 滤嘴 FILTER_SIZE_TAG=0x16(22) 只拦得住 coarse 杂质; 调大反而会把能拦的变成跳过.
+        private const int MaxFilterVolumeRemoved = 2000;
+        private const int MinFilterDurabilityUsage = 1;
+        private static bool _filterBoostDone;
+
+        // 单条液态的规范化, 幂等。
+        private static void ApplyFilterBoost(Liquid l)
+        {
+            if (l == null || !l.canBeRemovedByPurifier) return; // water 自身 canRemove=0, 天然跳过
+            if (l.filterVolumeRemoved < MaxFilterVolumeRemoved) l.filterVolumeRemoved = MaxFilterVolumeRemoved;
+            if (l.filterDurabilityUsage > MinFilterDurabilityUsage) l.filterDurabilityUsage = MinFilterDurabilityUsage;
+        }
+
+        // 兜底: Liquid 表由 Liquid 静态构造里的 InitLiquid 建好。若该静态构造早于本 mod
+        // 打补丁执行, InitLiquid 的 Postfix 就永远不会再来, 路线 1 会静默变成空操作。
+        // 因此首次过滤时补做一次; 常态下只读一个 bool。
+        private static void EnsureFilterBoost()
+        {
+            if (_filterBoostDone) return;
+            Il2CppSystem.Collections.Generic.List<Liquid> all = Liquid.Liquids;
+            if (all == null) return; // 表尚未就绪, 保持未完成以便下次重试
+            foreach (Liquid l in all) ApplyFilterBoost(l);
+            _filterBoostDone = true;
+        }
+
+        [HarmonyPatch(typeof(Liquid), "InitLiquid")]
+        public static class PatchFilterBoost
+        {
+            public static void Postfix(Il2CppSystem.Collections.Generic.List<Liquid> __result)
+            {
+                try
+                {
+                    if (!FilterBoost || __result == null) return;
+                    foreach (Liquid l in __result) ApplyFilterBoost(l);
+                    _filterBoostDone = true;
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] InitLiquid patch err: {e.Message}"); }
+            }
+        }
+
+        // 兜底入口: 过滤是这两个字段唯一的消费点, 保证首次过滤前一定已规范化。
+        [HarmonyPatch(typeof(WaterHelper), "HandleFilter")]
+        public static class PatchFilterBoostOnUse
+        {
+            public static void Prefix() { try { if (FilterBoost) EnsureFilterBoost(); } catch { /* IL2CPP 异常: 放弃本次兜底 */ } }
+        }
+
+        // 紫外线灯: 原版 OnUVUsed 只把 microbe 归零并把其体积并回 water, 对其余 5 类杂质
+        // (physical_contaminant / chemical_contaminant / mineral / heavy_metal / organic_waste)
+        // 完全不作为. Postfix 照 MachinePurifier.PurifyContainer 的做法补一轮移除:
+        // RemoveContaminantFromContainer(容器, 杂质id, 水量, minPercentage) 的下限水位是
+        // water*minPercentage/100, 传 0 即按总水量剥离到 0 —— 实际效果就是清空该杂质.
+        [HarmonyPatch(typeof(WaterHelper), "OnUVUsed")]
+        public static class PatchUvFullPurify
+        {
+            private static readonly string[] UvContaminants = new string[6]
+            {
+                "microbe", "physical_contaminant", "chemical_contaminant", "mineral", "heavy_metal", "organic_waste"
+            };
+
+            public static void Postfix(GameItem __0)
+            {
+                try
+                {
+                    if (!UvFullPurify || __0 == null) return;
+                    int vol = WaterHelper.GetTotalVolume(__0);
+                    if (vol <= 0) return;
+                    foreach (string id in UvContaminants) WaterHelper.RemoveContaminantFromContainer(__0, id, vol, 0);
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] OnUVUsed patch err: {e.Message}"); }
             }
         }
 
