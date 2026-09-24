@@ -8,7 +8,7 @@
 """
 import json, re, sys, os
 
-DUMP = 'D:/steam/steamapps/common/Probably Stolen Playtest/Mods/inv_shape_dump.txt'
+DUMP = 'D:/steam/steamapps/common/Probably Stolen Demo/Mods/inv_shape_dump.txt'
 CATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'xmod', 'item-catalog.json')
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'full_item_catalog.json')
 

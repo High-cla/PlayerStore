@@ -307,6 +307,18 @@ dotnet build NetworkUnlockMod/NetworkUnlockMod.csproj -c Release
 
 **发布必须 `-c Release`**：`dotnet build` 不带 `-c` 时默认 `Debug`，产物带 `DebuggableAttribute`、未优化、体积明显偏大（ProgressMod Debug 73216 B / Release 68608 B）。v0.5.1–v0.5.3 三个 release 的资产曾误用 Debug 构建（源码逻辑等价，但非发布配置）——已由 v0.5.4 起改以 Release 发布。
 
+## 开发文档
+
+动手改这个仓库之前先读对应的那篇——每一篇都是踩过坑换来的。
+
+| 文档 | 何时读 |
+| --- | --- |
+| `docs/TOOLING_PITFALLS.md` | **反编译 / 检索 / 构建 / 验证之前的必读**。dump 三段管线怎么建、ISIL 怎么读、哪些工具坑会给出**错误结论**（不报错但骗人） |
+| `docs/nvdesign.md` | 改网页视觉之前（设计语言权威依据） |
+| `docs/NATIVE_SORT_SPEC.md` | 改 InventorySorter 排序算法之前 |
+| `docs/ITEM_GEN_REFACTOR_REPORT.md` | 改物品生成逻辑之前（网页生成器的重构依据） |
+| `docs/SESSION_HANDOFF_2026-09-05.md` | 历史交接记录。**注意其中的游戏路径 `Probably Stolen Playtest` 已过期**，现行路径见 `TOOLING_PITFALLS.md` §9 |
+
 ## 许可证
 
 内部工具，未指定。

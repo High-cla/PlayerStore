@@ -33,3 +33,4 @@ proba.txt
 .tmp_decomp/
 .tmp_design/
 .tmp_rel/
+.tmp_commit_msg.txt

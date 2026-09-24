@@ -8,7 +8,7 @@ import re
 # 版本化的语料快照(仓库内, 供离线回归): 优先仓库内快照, 回退游戏实时 dump.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _VENDORED = os.path.join(_HERE, "inv_shape_dump.bak_20260830_231609")
-_LIVE = "D:/steam/steamapps/common/Probably Stolen Playtest/Mods/inv_shape_dump.txt"
+_LIVE = "D:/steam/steamapps/common/Probably Stolen Demo/Mods/inv_shape_dump.txt"
 _DEFAULT_DUMP = _VENDORED if os.path.exists(_VENDORED) else _LIVE
 
 def parse_dump(path=None):
