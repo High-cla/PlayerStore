@@ -246,7 +246,7 @@ namespace ProgressMod
                 }
                 WriteJson(res, code, resp);
             }
-            catch { /* IL2CPP 异常: 保持原值 */ }
+ catch { }
         }
 
 
@@ -592,7 +592,7 @@ namespace ProgressMod
             {
                 bool isNodeType = false, isModType = false;
                 try { isNodeType = item.IsGameItemType("NODE"); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
-                try { isModType = item.IsGameItemType("MODULE"); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { isModType = item.IsGameItemType("MODULE"); } catch { }
                 if (isNodeType || isModType)
                 {
                     ModuleEffectHelper.InitRandomEffect(item);
@@ -700,7 +700,7 @@ namespace ProgressMod
                 }
                 // Edit
                 if (!ApplyEditField(item, field, value)) return;
-                try { item.Validate(); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { item.Validate(); } catch { }
                 RefreshItemAreas();
                 MelonLogger.Msg($"[ItemOp] edited uid={uid} {field}={value}");
             }
@@ -747,7 +747,7 @@ namespace ProgressMod
                 case "tagModifiedRemove": RemoveItemTag(item, value, true); break;
                 case "tagAdd": AddItemTag(item, value); break;
                 case "featureAdd": AddItemFeatureByCategory(item, value); break;
-                case "featureRemove": if (!string.IsNullOrWhiteSpace(value)) { try { item.RemoveItemFeatureByID(value); } catch { /* ponytail: IL2CPP native probe, silent fallback */ } } break;
+ case "featureRemove": if (!string.IsNullOrWhiteSpace(value)) { try { item.RemoveItemFeatureByID(value); } catch { } } break;
                 default: MelonLogger.Warning($"[ItemOp] 未知字段 {field}"); return false;
             }
             return true;
@@ -762,7 +762,7 @@ namespace ProgressMod
                 if (low == "1" || low == "true" || low == "on") { setter(true); return; }
                 if (low == "0" || low == "false" || low == "off") { setter(false); return; }
             }
-            try { setter(!getter()); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { setter(!getter()); } catch { }
         }
 
         //============ 库存枚举 / 定位 / 删除 (任意库存物品) ============ 全部玩家库存清单 (照 mod GetKnownInventories 主库存集合). 每个返回 GameInventory 注意: spawn 落点 = EmporiumEntry.invElement (柜台货架/主背包, 本函数第 451 行已枚举); 其余后柜台/巴扎等容器一并枚举, 供 edit/delete 定位任意库存物品
@@ -773,7 +773,7 @@ namespace ProgressMod
             {
                 if (inv != null) list.Add(inv);
             }
-            try { var p = PlayerStore.Instance; if (p != null) AddInv(p.gridInv); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { var p = PlayerStore.Instance; if (p != null) AddInv(p.gridInv); } catch { }
             try
             {
                 var e = EmporiumEntry.Instance;
@@ -844,7 +844,7 @@ namespace ProgressMod
             try
             {
                 if (inv == null) return "";
-                try { if (inv == PlayerStore.Instance?.gridInv) return "主背包"; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { if (inv == PlayerStore.Instance?.gridInv) return "主背包"; } catch { }
                 try
                 {
                     var e = EmporiumEntry.Instance;
@@ -880,7 +880,7 @@ namespace ProgressMod
                     if (found != null) return found;
                 }
             }
-            catch { /* IL2CPP 异常: 保持原值 */ }
+ catch { }
             return null;
         }
 
@@ -892,10 +892,10 @@ namespace ProgressMod
                 foreach (var it in items)
                 {
                     if (it == null) continue;
-                    try { if (it.uniqueId == uid) return it; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { if (it.uniqueId == uid) return it; } catch { }
                 }
             }
-            catch { /* IL2CPP 异常: 保持原值 */ }
+ catch { }
             return null;
         }
 
@@ -994,14 +994,14 @@ namespace ProgressMod
             try
             {
                 if (!inventory.Expel(item)) return false;
-                try { item.Destroy(); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { item.Destroy(); } catch { }
                 return true;
             }
             finally
             {
                 if (restoredLock)
                 {
-                    try { inventory.overrideLockRemove = overrideLockRemove; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { inventory.overrideLockRemove = overrideLockRemove; } catch { }
                 }
             }
         }
@@ -1036,8 +1036,8 @@ namespace ProgressMod
             foreach (var it in ReadInventoryItems(inventory))
             {
                 if (it == null) continue;
-                try { if (it == item) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
-                try { if (it.uniqueId != 0 && item.uniqueId != 0 && it.uniqueId == item.uniqueId) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { if (it == item) return true; } catch { }
+ try { if (it.uniqueId != 0 && item.uniqueId != 0 && it.uniqueId == item.uniqueId) return true; } catch { }
             }
             return false;
         }
@@ -1078,8 +1078,8 @@ namespace ProgressMod
         private static bool IsSameItem(GameItem a, GameItem b)
         {
             if (a == null || b == null) return false;
-            try { if (a == b) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
-            try { if (a.uniqueId != 0 && a.uniqueId == b.uniqueId) return true; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { if (a == b) return true; } catch { }
+ try { if (a.uniqueId != 0 && a.uniqueId == b.uniqueId) return true; } catch { }
             return false;
         }
 
@@ -1120,7 +1120,7 @@ namespace ProgressMod
             if (eq > 0) { key = keyAndState.Substring(0, eq); bool.TryParse(keyAndState.Substring(eq + 1), out enable); }
             var st = FindTagState(item, key, modified);
             if (st == null) { MelonLogger.Warning($"[ItemOp] tag {key} 不存在"); return; }
-            try { st.SetEnabled(enable); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { st.SetEnabled(enable); } catch { }
         }
 
         private static void SetItemTagStringValue(GameItem item, string keyValue, bool modified)
@@ -1132,7 +1132,7 @@ namespace ProgressMod
             string val = keyValue.Substring(eq + 1);
             var st = FindTagState(item, key, modified);
             if (st == null) { MelonLogger.Warning($"[ItemOp] tag {key} 不存在"); return; }
-            try { st.SetString(val); } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { st.SetString(val); } catch { }
         }
 
         // 照原版 RemoveTagFromItem (ItemManager.cs:2665): 只从指定 system 的 dict.Remove, 缺失报错, 不做跨 system fallback
@@ -1196,7 +1196,7 @@ namespace ProgressMod
                 {
                     // ponytail: IL2CPP native probe, silent fallback
                 }
-                try { f.parentItemUniqueId = item.uniqueId; } catch { /* ponytail: IL2CPP native probe, silent fallback */ }
+ try { f.parentItemUniqueId = item.uniqueId; } catch { }
                 item.AddItemFeature(f);
                 MelonLogger.Msg($"[ItemOp] feature added: {category.Trim()}");
             }
@@ -1433,7 +1433,7 @@ namespace ProgressMod
                     if (!string.IsNullOrWhiteSpace(text)) return text;
                 }
             }
-            catch { /* IL2CPP 异常: 保持原值 */ }
+ catch { }
             return tableKey;
         }
 
@@ -1468,7 +1468,7 @@ namespace ProgressMod
                 try
                 {
                     bool isMachine = false;
-                    try { isMachine = machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { /* IL2CPP 异常: 保持原值 */ }
+ try { isMachine = machine.IsTag("MACHINE_STATE_TAG") || machine.IsTag("PROGRESS_TYPE_MACHINE_TAG"); } catch { }
                     if (!isMachine) return true;
 
                     var tgtTag = machine.GetTagReadonly("MACHINE_PROGRESS_TARGET_TAG");
@@ -1686,19 +1686,19 @@ namespace ProgressMod
         //============ 永不受伤: 拾荒/战斗/深夜伤口全消毒 ============ ScavHelper 负责拾荒受伤掷骰; HealthData 负责伤口结算与恶化. 统一策略: bool 返回 Postfix 强制 false/0, void 结算 Prefix 跳过.
         [HarmonyPatch(typeof(ScavHelper), "RollMinorWound")] public static class PatchRollMinorWound
         {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
+ public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
         }
         [HarmonyPatch(typeof(ScavHelper), "RollMajorWound")] public static class PatchRollMajorWound
         {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
+ public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetMinorWoundChance")] public static class PatchGetMinorWoundChance
         {
-            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { /* IL2CPP 异常: 保持原值 */ } }
+ public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetMajorWoundChance")] public static class PatchGetMajorWoundChance
         {
-            public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { /* IL2CPP 异常: 保持原值 */ } }
+ public static void Postfix(ref float __result) { try { if (NeverWounded) __result = 0f; } catch { } }
         }
         [HarmonyPatch(typeof(HealthData), "ReceiveMinorWound")] public static class PatchReceiveMinorWound
         {
@@ -1710,7 +1710,7 @@ namespace ProgressMod
         }
         [HarmonyPatch(typeof(HealthData), "IsSeriouslyWounded")] public static class PatchIsSeriouslyWounded
         {
-            public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { /* IL2CPP 异常: 保持原值 */ } }
+ public static void Postfix(ref bool __result) { try { if (NeverWounded) __result = false; } catch { } }
         }
         [HarmonyPatch(typeof(HealthData), "HandleNightlyWound")] public static class PatchHandleNightlyWound
         {
@@ -1721,15 +1721,15 @@ namespace ProgressMod
         [HarmonyPatch(typeof(ScavHelper), "CanScavenge")]
         public static class PatchCanScavenge
         {
-            public static void Postfix(ref bool __result) { try { if (InfiniteScavenging) __result = true; } catch { /* IL2CPP 异常: 保持原值 */ } }
+ public static void Postfix(ref bool __result) { try { if (InfiniteScavenging) __result = true; } catch { } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetMaxScavAttempts")] public static class PatchGetMaxScavAttempts
         {
-            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { /* IL2CPP 异常: 保持原值 */ } }
+ public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
         }
         [HarmonyPatch(typeof(ScavHelper), "GetScavTimeLeft")] public static class PatchGetScavTimeLeft
         {
-            public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { /* IL2CPP 异常: 保持原值 */ } }
+ public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
         }
 
     }
