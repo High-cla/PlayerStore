@@ -890,7 +890,6 @@ $('scrim').onclick = closeDrawer;
 function openCatalog(id){
   const i = ITEMS.find(x => x.stableId === id);
   if(!i) return;
-  $('drawer').className = 'drawer';
   $('dwName').textContent = i.nameZh || i.nameEn || id;
   $('dwSub').textContent = i.nameEn || '';
   $('dwTabs').innerHTML = '';
@@ -952,7 +951,6 @@ async function loadInstance(){
 }
 function renderInstance(it){
   S.ins = it;
-  $('drawer').className = 'drawer';
   $('dwName').textContent = (it.name || it.id || '') + (it.unitCount > 1 ? ' ×' + it.unitCount : '');
   $('dwSub').textContent = (it.id||'') + ' · uid ' + it.uid + ' · 单价 ' + it.unitValue;
   $('dwTabs').innerHTML = INSTANCE_TABS.map(([k,label]) =>
