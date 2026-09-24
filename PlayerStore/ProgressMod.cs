@@ -23,6 +23,7 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgFaucetAlwaysPure = Cfg.CreateEntry<bool>("FaucetAlwaysPure", false, "水龙头: 接出100%纯水 (原版只给高品质水)");
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
+        public static readonly MelonPreferences_Entry<int> CfgCatalogRefreshSec = Cfg.CreateEntry<int>("CatalogRefreshSec", 300, "图鉴目录刷新间隔(秒), 0=仅首次");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
         public static bool ForceFinish => CfgForceFinish.Value;
         public static bool NoDurability => CfgNoDurability.Value;
@@ -35,6 +36,7 @@ namespace ProgressMod
         public static bool FaucetAlwaysPure => CfgFaucetAlwaysPure.Value;
         public static bool NeverWounded => CfgNeverWounded.Value;
         public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
+        public static int CatalogRefreshSec => CfgCatalogRefreshSec.Value;
 
         public override void OnInitializeMelon()
         {
@@ -237,6 +239,7 @@ namespace ProgressMod
                     if (req.Url.AbsolutePath == "/api/spawn") RouteSpawn(req, out resp, out code);
                     else if (req.Url.AbsolutePath == "/api/mine") RouteMine(out resp, out code);
                     else if (req.Url.AbsolutePath == "/api/inventory") RouteInventory(out resp, out code);
+                    else if (req.Url.AbsolutePath == "/api/list") RouteList(out resp, out code);
                     else if (req.Url.AbsolutePath == "/api/item") RouteItem(req, out resp, out code);
                     else if (req.Url.AbsolutePath == "/api/edit") RouteEdit(req, out resp, out code);
                     else if (req.Url.AbsolutePath == "/api/delete") RouteDelete(req, out resp, out code);
@@ -366,11 +369,14 @@ namespace ProgressMod
             public volatile object Mine;
             public volatile object Inv;
             public volatile bool InSave;   // false = 快照尚未反映存档内状态 (未进存档/刚启动), 前端据此短重试
+            public volatile object Ids;    // 游戏当前全部物品 stableId (懒构建, null = 尚未构建)
         }
         private static readonly ReadSnapshot Snapshot = new ReadSnapshot();
         private static volatile bool _wantMine;
         private static volatile bool _wantInv;
+        private static volatile bool _wantIds;      // 目录集合冷加载 (与 Mine/Inv 同机制, 但独立节流: 全目录枚举远重于背包快照)
         private static long _lastSnapshotMs;
+        private static long _lastCatalogMs;
         private const int SnapshotMinIntervalMs = 120;   // 重建节流: 请求洪峰只触发一次重建, 不放大主线程开销
 
         // GET /api/mine → 读主线程维护的快照, 立即返回 (不阻塞 HTTP 线程). inSave=false 表示快照未反映存档内状态.
@@ -392,6 +398,7 @@ namespace ProgressMod
         // 仅主线程调用 (OnUpdate). 有需求且过了节流窗口才重建.
         private static void RefreshSnapshots()
         {
+            RefreshCatalog();
             if (!_wantMine && !_wantInv) return;
             long now = System.Environment.TickCount64;
             if (now - _lastSnapshotMs < SnapshotMinIntervalMs) return;
@@ -401,6 +408,63 @@ namespace ProgressMod
             Snapshot.InSave = inSave;
             if (_wantMine) { _wantMine = false; Snapshot.Mine = BuildMineSnapshot(); }
             if (_wantInv) { _wantInv = false; Snapshot.Inv = BuildInvSnapshot(); }
+        }
+
+        // 目录集合: 游戏当前存在的全部物品 stableId。这是「生成表动态化」的服务端真源 ——
+        // 前端拿它与内嵌静态表对账, 得出「已失效」(表有游戏无) 与「新增」(游戏有表无) 两个集合。
+        // 懒构建 (首次请求触发), 之后按 CfgCatalogRefreshSec 节流; 全程主线程。
+        // 独立于 Mine/Inv 节流: 枚举全部目录要几百次反射调用, 比背包快照重得多。
+        private static void RefreshCatalog()
+        {
+            if (Snapshot.Ids != null && !_wantIds)
+            {
+                int sec = CatalogRefreshSec;
+                if (sec <= 0) return;   // 0 = 只构建一次, 不随游戏更新刷新
+                if (System.Environment.TickCount64 - _lastCatalogMs < (long)sec * 1000L) return;
+            }
+            _wantIds = false;
+            _lastCatalogMs = System.Environment.TickCount64;
+            try { Snapshot.Ids = BuildItemIdList(); }
+            catch (Exception e) { MelonLogger.Error($"[List] 目录枚举失败: {e.Message}"); }
+        }
+
+        // GET /api/list → 游戏当前全部物品 stableId。同 /api/mine 的快照模式: 立即回当前快照,
+        // 冷启动时置位请求重建, 下次 OnUpdate 补上 (ids=null 表示尚未构建好, 前端据此保持静态)。
+        private static void RouteList(out object resp, out int code)
+        {
+            if (Snapshot.Ids == null) _wantIds = true;
+            resp = new { ok = true, ids = Snapshot.Ids, inSave = Snapshot.InSave };
+            code = 200;
+        }
+
+        // 反射扫描全部 ItemDirectory 派生类, 对每个调 GetIdentifierList<T>()。两条理由:
+        //   ① 不硬编码目录清单 —— 游戏新增目录时自动纳入 (硬编码清单必然随版本腐化);
+        //   ② GetIdentifierList 是静态泛型而目录类型运行时才可知, 必须 MakeGenericMethod。
+        // 返回的 List<string> 是 stableId; 名称/描述走 Unity 本地化表、不在程序集内, 对账只需 id。
+        private static string[] BuildItemIdList()
+        {
+            var seen = new System.Collections.Generic.HashSet<string>();
+            var m = HarmonyLib.AccessTools.Method(typeof(DirectoryMaster), "GetIdentifierList");
+            if (m == null) { MelonLogger.Warning("[List] 找不到 DirectoryMaster.GetIdentifierList"); return new string[0]; }
+            int dirCount = 0;
+            foreach (var ty in typeof(DirectoryMaster).Assembly.GetTypes())
+            {
+                try
+                {
+                    if (ty == null || !ty.IsClass || ty.IsAbstract) continue;
+                    if (!typeof(ItemDirectory).IsAssignableFrom(ty)) continue;
+                    var list = m.MakeGenericMethod(ty).Invoke(null, new object[1] { null })
+                               as System.Collections.Generic.List<string>;
+                    if (list == null) continue;
+                    dirCount++;
+                    foreach (string id in list) if (!string.IsNullOrEmpty(id)) seen.Add(id);
+                }
+                catch { /* 该目录不可枚举 (无标识符表/类型不匹配): 跳过, 不影响其余 */ }
+            }
+            var arr = new string[seen.Count];
+            seen.CopyTo(arr);
+            MelonLogger.Msg($"[List] 目录 {dirCount} 个, 物品 {arr.Length} 个");
+            return arr;
         }
 
         // 构建「我的生成」快照 (仅主线程): 枚举 SpawnedItems + 读 GameItem 字段.

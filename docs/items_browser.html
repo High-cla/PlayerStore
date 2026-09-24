@@ -206,6 +206,10 @@ input,select,textarea{font:inherit}
 /* destructive(文档 semantic 而非独立色): 描边红字 */
 .btn.danger{background:transparent;color:var(--error);border:1px solid var(--error)}
 .pill-note{font-size:11px;line-height:1.4;color:var(--mute);display:inline-flex;align-items:center;gap:5px}
+/* 已失效 = 静态表里有、游戏当前版本已删除。标灰加删除线, 但仍可搜到 — 用户要能确认「游戏里没了」。 */
+.card.stale{opacity:.62}
+.card.stale .card-name{color:var(--mute);text-decoration:line-through}
+.pill-stale{background:rgba(217,153,136,.18);color:#d98;font-weight:600}
 .grid.compact .card{padding:10px}
 .grid.compact .card-name{font-size:12px}
 .grid.compact .card-desc{display:none}
@@ -437,8 +441,9 @@ input,select,textarea{font:inherit}
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </div>
 
-<!-- 数据带版本戳: 数据更新时必须同步 bump, 否则浏览器按 max-age 缓存旧副本 -->
-<script src="items_data_full.js?v=20260923"></script>
+<!-- 物品表不再用 <script src> 同步加载: 启动时 fetch 自取, 一是无缓存歧义(不必再手写 ?v= 版本戳),
+     二是必须先拿到 /api/list 的游戏当前 id 集合, 才能注入「新增」占位条目 —— 顺序反了就会被表覆盖。
+     tag_zh.js 与物品表无关, 仍是普通全局脚本。 -->
 <script src="tag_zh.js?v=20260916"></script>
 <script>
 // mod 生成引擎合成卡 (参照 ProbablyStolenItemManager.GeneratedEntries): 随机掉落表 + 预置变体
@@ -475,7 +480,6 @@ const GENERATED_ITEMS = [
   {stableId:'prebuilt:random_ribwich',nameZh:'变体：随机 Ribwich',nameEn:'Variant: Random Ribwich',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机 Ribwich 三明治',descriptionEn:'Prebuilt variant: random Ribwich',kind:'mod-generator'},
   {stableId:'prebuilt:random_hand',nameZh:'变体：随机手部物品',nameEn:'Variant: Random hand item',categories:['PREBUILT'],descriptionZh:'游戏预置变体：随机手部物品',descriptionEn:'Prebuilt variant: random hand item',kind:'mod-generator'}
 ];
-ITEMS.push(...GENERATED_ITEMS);
 // ===== NEW_ITEMS 30 项中英名补全 (源: mod/item_catalog.json + 同类推断); 仅填空, 不覆盖非空值 =====
 const EXTRA_NAMES = {
  "3d_printer_instruction":{"zh":"3D打印机说明","en":"3D Printer Instruction"},
@@ -509,11 +513,17 @@ const EXTRA_NAMES = {
  "wine_bloomberry":{"zh":"荧光莓果酿","en":"BloomBerry Wine"},
  "wine_gloomberry":{"zh":"阴光莓果酿","en":"GloomBerry Wine"}
 };
-ITEMS.forEach(it => {
-  const x = EXTRA_NAMES[it.stableId];
-  if(x && !it.nameZh) it.nameZh = x.zh;
-  if(x && !it.nameEn) it.nameEn = x.en;
-});
+// GENERATED_ITEMS 与 EXTRA_NAMES 都是「静态表之上的补充层」, 必须等表加载完再应用:
+// 表改为启动时 fetch 自取后, 顶层脚本执行到这里时 ITEMS 还不存在。
+// 故收进函数, 由启动序列在 loadItems() 之后调用 (早于 reconcile, 否则补充层会被当成新增项)。
+function augmentItems(){
+  ITEMS.push(...GENERATED_ITEMS);
+  ITEMS.forEach(it => {
+    const x = EXTRA_NAMES[it.stableId];
+    if(x && !it.nameZh) it.nameZh = x.zh;
+    if(x && !it.nameEn) it.nameEn = x.en;
+  });
+}
 
 // ===== 词表 =====
 const CAT_ZH = {
@@ -560,6 +570,11 @@ const TAG_ZH_SAFE = () => (typeof TAG_ZH !== 'undefined' ? TAG_ZH : null);
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
   .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
+// ===== 物品表 =====
+// 由启动时的 loadItems() 填充 (静态表 + 服务端对账出的新增项)。显式声明: 原本这张表由
+// <script src="items_data_full.js"> 用 const 提供, 改成 fetch 自取后必须自己声明。
+let ITEMS = [];
+
 // ===== 状态 =====
 // 新生成 token 的宽限期. 服务端快照按需重建, 刚生成的 token 必然暂时不在快照里;
 // 无宽限期就会把新条目当死 token 立即删掉 (表现为「生成后列表始终为空」).
@@ -570,7 +585,9 @@ const S = {
   density: localStorage.getItem('ps_density') || 'comfortable',
   fav:new Set(JSON.parse(localStorage.getItem('itemFavs') || '[]')),
   tokens:new Set(JSON.parse(localStorage.getItem('mySpawnTokens') || '[]')),
-  inv:[], mine:[], ins:null, insTab:'basic', uid:0
+  inv:[], mine:[], ins:null, insTab:'basic', uid:0,
+  gameIds:null,     // Set: 游戏当前存在的 stableId (来自 /api/list); null = 未连服务端, 对账停用
+  stale:new Set()   // 已失效的 stableId (表有游戏无)
 };
 const $ = id => document.getElementById(id);
 const grid=$('grid'), rowList=$('rowList'), navList=$('navList'), viewExtra=$('viewExtra');
@@ -659,6 +676,60 @@ function setDensity(d){
   $('densityBtn').title = compact ? '当前: 紧凑 — 点击切换为舒适' : '当前: 舒适 — 点击切换为紧凑';
 }
 
+// ===== 动态对账 =====
+// 静态表随游戏更新必然腐化: 游戏删物品后表里仍留着, 进游戏生成就会失败。故用游戏当前目录与表对账 --
+//   表有游戏无 => 已失效 (标灰, 禁用生成)
+//   游戏有表无 => 新增 (自动补占位条目)
+// 名称/描述走 Unity 本地化表、不在程序集内, 运行时取不到, 故新增项只显示英文 id。
+function reconcile(){
+  if(!S.gameIds) return;                       // 未连上服务端: 保持纯静态行为
+  ITEMS.forEach(i => {
+    // mod-generator 是 mod 自己合成的生成器卡 (stableId 带 table:/prebuilt: 前缀, 由 ProgressMod
+    // 按前缀分发到掉落表/预置工厂), 它们本来就不在游戏物品目录里, 不能拿目录去对账。
+    if(i.kind === 'mod-generator') return;
+    i.stale = !S.gameIds.has(i.stableId);
+  });
+}
+
+// 静态表产物是单行严格 JSON (const ITEMS = [...];)。用 JSON.parse 而非 eval, 不执行任意代码。
+// 走 fetch 自取而非 <script src>: 必须先拿到服务端 id 集合, 才能决定注入哪些占位条目,
+// 否则注入的条目会被随后加载的静态表整体覆盖 (顺序反了就白做)。
+async function loadItems(){
+  if(Array.isArray(ITEMS) && ITEMS.length) return;
+  try {
+    const r = await fetch('items_data_full.js', {cache:'no-store'});    // 本地服务端, 每次拿 DLL 内嵌的最新副本
+    if(!r.ok) throw new Error("HTTP " + r.status);
+    const s = await r.text();
+    ITEMS = JSON.parse(s.slice(s.indexOf("["), s.lastIndexOf("]") + 1));
+  } catch(e){
+    ITEMS = [];
+    console.error('items_data_full.js 解析失败', e);
+  }
+}
+
+// 与 /api/list 对账: 补新增占位 + 标已失效。服务端离线时静默保持纯静态 (GitHub Pages 场景)。
+async function reconcileWithServer(){
+  const r = await apiFetch('/api/list');
+  if(!r.ok || !Array.isArray(r.ids) || !r.ids.length) return;
+  const have = new Set(ITEMS.map(i => i.stableId));
+  let added = 0;
+  r.ids.forEach(id => {
+    if(have.has(id)) return;
+    ITEMS.push({kind:'ITEM', stableId:id, directory:'', nameZh:'', nameEn:id,
+      descriptionZh:'', descriptionEn:'', atlasPath:'', spritePath:'', categories:[],
+      itemTypes:[], addPolicy:'ENABLED', spriteStatus:'UNVERIFIED', new_item:true, stale:false});
+    added++;
+  });
+  S.gameIds = new Set(r.ids);
+  reconcile();
+  S.stale = new Set(ITEMS.filter(i => i.stale).map(i => i.stableId));
+  renderNav(); renderContent();
+  if(added){
+    const msg = '目录已同步: 新增 ' + added + ' 项' + (S.stale.size ? ', ' + S.stale.size + ' 项已失效' : '');
+    toast(msg, 'ok'); $('svText').textContent = msg;
+  }
+}
+
 // ===== 匹配 =====
 function matches(i){
   if(S.cat === 'FAV' && !S.fav.has(i.stableId)) return false;
@@ -697,19 +768,26 @@ function renderCatalog(){
     const isInstr = id.endsWith('_instruction');
     // 卡片本身不是按钮: 点空白处不弹抽屉 (抽屉只由「详情」按钮开).
     // role=group + aria-label 保证屏幕阅读器仍能成组朗读.
-    return `<article class="card" data-id="${esc(id)}" role="group" aria-label="${esc(i.nameZh||i.nameEn||id)}">
+    // 已失效 = 游戏已删除该项, 生成必然失败 => 直接隐去生成按钮, 不让用户点了才报错。
+    // 新增 = 游戏当前有、静态表里还没有 (静态表跟不上游戏更新), 只显示英文 id。
+    const badge = i.stale ? '<span class="cat-chip pill-stale">已失效</span>'
+                : (i.new_item ? '<span class="cat-chip">新增</span>' : '');
+    return `<article class="card${i.stale?' stale':''}" data-id="${esc(id)}" role="group" aria-label="${esc(i.nameZh||i.nameEn||id)}">
       <button class="fav ${on?'on':''}" type="button" data-fav="${esc(id)}" aria-pressed="${on}" aria-label="收藏">${on?'★':'☆'}</button>
       <h3 class="card-name">${esc(i.nameZh || i.nameEn || id)}</h3>
       <p class="card-en">${esc(i.nameEn||'')}</p>
-      <div class="card-cats">${catChips(i.categories, 2)}</div>
+      <div class="card-cats">${catChips(i.categories, 2)}${badge}</div>
       <code class="card-id">${esc(id)}</code>
       <p class="card-desc">${esc(i.descriptionZh||i.descriptionEn||'')}</p>
-      <div class="card-foot">${isInstr
+      <div class="card-foot">${i.stale
+        ? `<span class="pill-note">游戏已删除 — 无法生成</span>
+           <span class="foot-right"><button class="btn link" type="button" data-detail="${esc(id)}">详情</button></span>`
+        : (isInstr
         ? `<span class="pill-note">图纸 — 不可直接生成</span>
            <span class="foot-right"><button class="btn link" type="button" data-detail="${esc(id)}">详情</button></span>`
         : `<button class="btn" type="button" data-spawn="${esc(id)}">生成</button>
            <button class="btn ghost" type="button" data-spawn="${esc(id)}" data-count="10">生成十个</button>
-           <span class="foot-right"><button class="btn link" type="button" data-detail="${esc(id)}">详情</button></span>`}</div>
+           <span class="foot-right"><button class="btn link" type="button" data-detail="${esc(id)}">详情</button></span>`)}</div>
     </article>`;
   }).join('');
   grid.querySelectorAll('.fav').forEach(b => b.onclick = () => toggleFav(b.dataset.fav));
@@ -810,6 +888,7 @@ async function checkServer(){
   if(h.ok){
     $('svDot').className = 'dot on';
     $('svText').textContent = '生成服务器已连接 (ProgressMod)';
+    await reconcileWithServer();    // 已连上: 与游戏当前目录对账 (补新增 / 标失效)
     return true;
   }
   $('svDot').className = 'dot off';
@@ -822,7 +901,11 @@ async function spawnItem(id, btn, count){
   const n = Math.max(1, Math.min(999, Math.floor(count) || 1));
   try {
     const r = await apiFetch('/api/spawn?itemId=' + encodeURIComponent(id) + '&count=' + n);
-    if(!r.ok){ toast('生成失败: ' + (r.err||''), 'bad'); return; }
+    // 游戏删掉的物品静态表里还在 — 生成会失败。缓存该判定并刷新, 卡片当场标「已失效」。
+    if(!r.ok){
+      if((r.err||'').indexOf('Unknown') >= 0){ if(S.gameIds) S.gameIds.delete(id); S.stale.add(id); renderContent(); }
+      toast('生成失败: ' + (r.err||''), 'bad'); return;
+    }
     if(r.token) rememberToken(r.token);
     toast('已生成: ' + id, 'ok');
     // /api/spawn 入队即回, 产物由主线程稍后落到存档, 服务端快照随之重建.
@@ -1180,11 +1263,18 @@ function startPolling(){
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshCurrent(); });
 
 // ===== 启动 =====
-setDensity(S.density);
-setView('catalog');
-$('myCount').textContent = S.tokens.size;
-checkServer();
-startPolling();
+// 数据表改为自取 (fetch + JSON.parse) 而非 <script src>: 需要先拿到服务端 id 集合,
+// 再决定注入哪些「新增」占位条目 — 顺序反了就会被静态表覆盖。
+(async () => {
+  await loadItems();
+  augmentItems();      // 静态表之上的补充层 (GENERATED_ITEMS + EXTRA_NAMES)
+  reconcile();
+  setDensity(S.density);
+  setView('catalog');
+  $('myCount').textContent = S.tokens.size;
+  checkServer();
+  startPolling();
+})();
 </script>
 </body>
 </html>

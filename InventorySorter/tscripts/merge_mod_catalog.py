@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 """merge_mod_catalog.py — 以 mod/item_catalog.json 为权威源，对齐 docs/items_data_full.js 的物品名称。
 
+本脚本是 docs/items_data_full.js 的唯一写入者。该文件是全仓物品表的单一来源:
+  · 唯一运行时消费者 = PlayerStore.csproj 的 <EmbeddedResource Include="..\docs\items_data_full.js">
+    (LogicalName web.items_data_full.js), 由网页端 fetch 自取;
+  · 曾经的 docs/items_data.js (merge_catalog.py 产物) 与
+    InventorySorter/tscripts/xmod/items_data{,_full}.js 三份副本已删除 —— 它们无消费者且已漂移。
+游戏更新导致的增删, 不再靠重跑本脚本(离线、必然滞后)同步, 而由运行时的 /api/list 对账补正:
+前端拿游戏当前目录与表比对, 表有游戏无 => 标「已失效」, 游戏有表无 => 补占位条目。
+
 权威源: mod/item_catalog.json        441 项 {id, english, chinese, aliases[], source_key}
 目标:   docs/items_data_full.js      `const ITEMS = [...];` 单行紧凑 (python json.dumps 默认分隔符, 无尾换行)
 
