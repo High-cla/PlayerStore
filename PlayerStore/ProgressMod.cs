@@ -4,7 +4,7 @@ using HarmonyLib;
 using Il2Cpp;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.13.0", "local")]
+[assembly: MelonInfo(typeof(ProgressMod.Core), "ProgressMod", "1.14.0", "local")]
 [assembly: MelonGame("Questing Goose Studio", "Probably Stolen")]
 
 namespace ProgressMod
@@ -114,6 +114,11 @@ namespace ProgressMod
         // 主线程作业队列长度上限(背压阈值). 32: 单帧处理 32 个纯读作业耗时远低于 5s 超时窗口,
         // 又能吸收网页端并发的 /api/mine + /api/inventory + /api/item 组合请求.
         private const int MaxPendingJobs = 32;
+        // HTTP accept 线程数. 上限受限于两处: (a) 主线程作业队列只有 MaxPendingJobs 个槽,
+        // (b) 每个 accept 线程最多同时持有一个作业 (它在 RunOnMainThread 上阻塞等待). 故取值须
+        // 明显小于 MaxPendingJobs, 否则超时释放的线程会立刻抢占已被拒的槽位. 4 => 网页首屏
+        // (mine + inventory + 静态资源) 可并行, 又给主线程留出 28 个槽的余量.
+        private const int HttpAcceptThreads = 4;
 
         // HTTP 线程调用: 入队 + 等主线程执行 (最长 timeoutMs). 返回 false = 未响应 (过载/超时由 overloaded 区分)
         // (失焦暂停 / 大存档卡帧 / 未进存档 都会超时, 故不在此断言具体成因).
@@ -203,8 +208,15 @@ namespace ProgressMod
                 _listener = new System.Net.HttpListener();
                 _listener.Prefixes.Add($"http://localhost:{ServerPort}/");
                 _listener.Start();
-                var t = new System.Threading.Thread(ServerLoop) { IsBackground = true };
-                t.Start();
+                // 多线程 accept: 每个线程各自 GetContext 取走下一个排队连接, 处理完再取下一个.
+                // 单线程时 ServerLoop 串行处理 => 任一请求在 RunOnMainThread 上阻塞 5s 期间, 其余连接
+                // 全堆在 HttpListener 内核队列里, 页面并发的 /api/mine + /api/inventory + 静态资源
+                // 被逐个串行化. 多 accept 线程让这些请求能同时在途.
+                for (int i = 0; i < HttpAcceptThreads; i++)
+                {
+                    var t = new System.Threading.Thread(ServerLoop) { IsBackground = true, Name = "ProgressMod.Http" + i };
+                    t.Start();
+                }
                 try
                 {
                     // 打开本地页 —— 页面与数据由本 mod 的 HttpListener 同源发出, 打开即连上,
@@ -359,6 +371,20 @@ namespace ProgressMod
             code = 200;
         }
 
+        // 物品字段投影 (id/name/count/unitValue). RouteMine 与 RouteInventory 共用同一组
+        // SafeStr/SafeInt/SafeLong 探针; 抽出一处以免两处各自漂移 (原先 4 行逐字重复).
+        // 只在主线程作业内调用 (探针触达 native 字段).
+        private static dynamic ItemBrief(GameItem it)
+        {
+            return new
+            {
+                id = SafeStr(() => it.identifier, ""),
+                name = SafeStr(() => it.name, ""),
+                count = SafeInt(() => it.unitCount),
+                unitValue = SafeLong(() => it.unitValue)
+            };
+        }
+
         // GET /api/mine → 列出本次会话生成且仍在跟踪的物品 (token 引用)
         // 枚举 SpawnedItems + 读 GameItem 字段全部在主线程作业内完成: 前者与 SpawnItem 同锁域 (免并发改写
         // 抛 InvalidOperationException), 后者避免跨线程 native 读取.
@@ -379,14 +405,15 @@ namespace ProgressMod
                     // 已无意义: 保留会让网页端收到 uid=0 的死条目, 点「完整检查器」必然 400, 且因服务端
                     // 仍在返回该 token, 前端 refreshMine() 的死 token 清理永不触发.
                     if (u == 0) { dead.Add(kv.Key); continue; }
+                    var b = ItemBrief(it);
                     list.Add(new
                     {
                         token = kv.Key,
                         uid = u,
-                        id = SafeStr(() => it.identifier, ""),
-                        name = SafeStr(() => it.name, ""),
-                        count = SafeInt(() => it.unitCount),
-                        unitValue = SafeLong(() => it.unitValue),
+                        id = b.id,
+                        name = b.name,
+                        count = b.count,
+                        unitValue = b.unitValue,
                         shortDescription = SafeStr(() => it.shortDescription, "")
                     });
                 }
@@ -428,13 +455,14 @@ namespace ProgressMod
                             MelonLogger.Warning("[ItemOp] inventory: 读取 item.uniqueId 失败, 跳过该物品");
                         }
                         if (u == 0 || !seen.Add(u)) continue;
+                        var b = ItemBrief(it);
                         list.Add(new
                         {
                             uid = u,
-                            id = SafeStr(() => it.identifier, ""),
-                            name = SafeStr(() => it.name, ""),
-                            count = SafeInt(() => it.unitCount),
-                            unitValue = SafeLong(() => it.unitValue),
+                            id = b.id,
+                            name = b.name,
+                            count = b.count,
+                            unitValue = b.unitValue,
                             inv = invName
                         });
                     }
