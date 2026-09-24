@@ -20,7 +20,7 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgUvFullPurify = Cfg.CreateEntry<bool>("UvFullPurify", true, "紫外线灯: 除杀菌外一并清除全部杂质");
         public static readonly MelonPreferences_Entry<bool> CfgPurifierFullPurify = Cfg.CreateEntry<bool>("PurifierFullPurify", true, "海德拉净水器: 清除全部杂质(含原版跳过的高纯度水)");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyFillToFull = Cfg.CreateEntry<bool>("PurifyFillToFull", true, "净化后: 用100%纯水补满容器到容量上限");
-        public static readonly MelonPreferences_Entry<bool> CfgFaucetAlwaysPure = Cfg.CreateEntry<bool>("FaucetAlwaysPure", true, "水龙头: 接出100%纯水 (原版只给高品质水)");
+        public static readonly MelonPreferences_Entry<bool> CfgFaucetAlwaysPure = Cfg.CreateEntry<bool>("FaucetAlwaysPure", false, "水龙头: 接出100%纯水 (原版只给高品质水)");
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
@@ -1564,7 +1564,7 @@ namespace ProgressMod
             }
         }
 
-        //水龙头: 原版出水走 AddHighQualityWater (grade=1), 即「高品质水」而非纯水 —— grade 是水质类别(0纯水/1高品质/2基础/3幽灵/4锈/5沟流), 不是纯度百分比, 故原版水龙头设计上就接不出纯水. 出水调用点唯一: WaterHelper.InitLiquidContainerItem 的闭包 (NestedType___c__DisplayClass10_0) 里 AddWater(容器, 1, 0x98967F, true, Station[52], Station[52]); addAmount=9999999 这个魔数全 ISIL dump 仅两处 0x98967F, 都在该闭包内, 连同 grade==1 即水龙头指纹. 命中则 grade 改 0 并关掉 useRange(否则纯度仍按 low/high 区间随机), 接出即 100% 纯水; 其余 25 处 AddWater 调用不受影响. 参数用位置名而非真名: IL2CPP 下参数名可能缺失, 位置名不会静默绑不上. 托管签名 AddWater(GameItem, int grade, int addAmount, bool useRange, int low, int high, bool init) => __1=grade, __2=addAmount, __3=useRange.
+        //水龙头: 原版出水走 AddHighQualityWater (grade=1), 即「高品质水」而非纯水 —— grade 是水质类别(0纯水/1高品质/2基础/3幽灵/4锈/5沟流), 不是纯度百分比, 故原版水龙头设计上就接不出纯水. 出水调用点唯一: WaterHelper.InitLiquidContainerItem 的闭包 (NestedType___c__DisplayClass10_0) 里 AddWater(容器, 1, 0x98967F, true, Station[52], Station[52]); addAmount=9999999 这个魔数全 ISIL dump 仅两处 0x98967F, 都在该闭包内, 连同 grade==1 即水龙头指纹. 命中则 grade 改 0 并关掉 useRange(否则纯度仍按 low/high 区间随机), 接出即 100% 纯水; 其余 25 处 AddWater 调用不受影响. 默认关闭 (FaucetAlwaysPure=false): 原版设计上水龙头只给高品质水, 是否破例交给玩家决定. 参数用位置名而非真名: IL2CPP 下参数名可能缺失, 位置名不会静默绑不上. 托管签名 AddWater(GameItem, int grade, int addAmount, bool useRange, int low, int high, bool init) => __1=grade, __2=addAmount, __3=useRange.
         private const int FaucetWaterMarker = 9999999;
 
         [HarmonyPatch(typeof(WaterHelper), "AddWater")]
