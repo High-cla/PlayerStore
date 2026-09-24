@@ -20,6 +20,7 @@ namespace ProgressMod
         public static readonly MelonPreferences_Entry<bool> CfgUvFullPurify = Cfg.CreateEntry<bool>("UvFullPurify", true, "紫外线灯: 除杀菌外一并清除全部杂质");
         public static readonly MelonPreferences_Entry<bool> CfgPurifierFullPurify = Cfg.CreateEntry<bool>("PurifierFullPurify", true, "海德拉净水器: 清除全部杂质(含原版跳过的高纯度水)");
         public static readonly MelonPreferences_Entry<bool> CfgPurifyFillToFull = Cfg.CreateEntry<bool>("PurifyFillToFull", true, "净化后: 用100%纯水补满容器到容量上限");
+        public static readonly MelonPreferences_Entry<bool> CfgFaucetAlwaysPure = Cfg.CreateEntry<bool>("FaucetAlwaysPure", true, "水龙头: 接出100%纯水 (原版只给高品质水)");
         public static readonly MelonPreferences_Entry<bool> CfgNeverWounded = Cfg.CreateEntry<bool>("NeverWounded", true, "永不受伤: 拾荒/战斗永不产生伤口, 伤口永不恶化, 深夜不恶化");
         public static readonly MelonPreferences_Entry<bool> CfgInfiniteScavenging = Cfg.CreateEntry<bool>("InfiniteScavenging", true, "无限拾荒: 拾荒次数/冷却不受限");
         // 逻辑引用保持同名只读属性, 24 处调用处零改动
@@ -31,6 +32,7 @@ namespace ProgressMod
         public static bool UvFullPurify => CfgUvFullPurify.Value;
         public static bool PurifierFullPurify => CfgPurifierFullPurify.Value;
         public static bool PurifyFillToFull => CfgPurifyFillToFull.Value;
+        public static bool FaucetAlwaysPure => CfgFaucetAlwaysPure.Value;
         public static bool NeverWounded => CfgNeverWounded.Value;
         public static bool InfiniteScavenging => CfgInfiniteScavenging.Value;
 
@@ -1541,7 +1543,7 @@ namespace ProgressMod
             }
         }
 
-        // 净水器/净化器: PurifyToBaseWater -> 清空 + 加等量纯水 (净化效果100%)
+        // 净水器/净化器: PurifyToBaseWater -> 剥离全部杂质到零 (与紫外线灯同一条路径)
         [HarmonyPatch(typeof(WaterHelper), "PurifyToBaseWater")]
         public static class PatchPurifyToPure
         {
@@ -1551,12 +1553,35 @@ namespace ProgressMod
                 {
                     if (!PurifyAlwaysPure) return true;
                     if (__0 == null) return false;
+                    //原实现只有 EmptyContainer + AddPureWater(vol) 两步, 缺的正是最后一轮剥离: EmptyContainer 清的是容器里的「水」(基液), 把锈水/沟流水换成 100% 纯水靠它, 但 6 类杂质是各自独立的 part, 它一个都不碰 (其 IL 全程无杂质 id 字面量, 只有 ModifyTag 容器 parts 与 DisableTag("STRIP_TESTED_TAG"))。所以基液已是纯水、杂质却原样留下 —— 这就是净水器与紫外线灯表现不一致的原因 (后者不调 EmptyContainer, 只剥离)。三步齐全才能既不杂质又真纯水。
                     int vol = WaterHelper.GetTotalVolume(__0);
                     WaterHelper.EmptyContainer(__0);
                     WaterHelper.AddPureWater(__0, vol);
+                    StripAllContaminants(__0);   // 逐类 RemoveContaminantFromContainer(minPercentage=0) 迭代到收敛 + 按需补满
                     return false; // 跳过原逻辑
                 }
                 catch (Exception e) { MelonLogger.Error($"[Water] PurifyToBaseWater patch err: {e.Message}"); return true; }
+            }
+        }
+
+        //水龙头: 原版出水走 AddHighQualityWater (grade=1), 即「高品质水」而非纯水 —— grade 是水质类别(0纯水/1高品质/2基础/3幽灵/4锈/5沟流), 不是纯度百分比, 故原版水龙头设计上就接不出纯水. 出水调用点唯一: WaterHelper.InitLiquidContainerItem 的闭包 (NestedType___c__DisplayClass10_0) 里 AddWater(容器, 1, 0x98967F, true, Station[52], Station[52]); addAmount=9999999 这个魔数全 ISIL dump 仅两处 0x98967F, 都在该闭包内, 连同 grade==1 即水龙头指纹. 命中则 grade 改 0 并关掉 useRange(否则纯度仍按 low/high 区间随机), 接出即 100% 纯水; 其余 25 处 AddWater 调用不受影响. 参数用位置名而非真名: IL2CPP 下参数名可能缺失, 位置名不会静默绑不上. 托管签名 AddWater(GameItem, int grade, int addAmount, bool useRange, int low, int high, bool init) => __1=grade, __2=addAmount, __3=useRange.
+        private const int FaucetWaterMarker = 9999999;
+
+        [HarmonyPatch(typeof(WaterHelper), "AddWater")]
+        public static class PatchFaucetPure
+        {
+            public static void Prefix(GameItem __0, ref int __1, int __2, ref bool __3)
+            {
+                try
+                {
+                    if (!FaucetAlwaysPure) return;
+                    if (__1 != 1 || __2 != FaucetWaterMarker) return;   // 非水龙头出水
+                    __1 = 0;        // grade 0 = 纯水
+                    __3 = false;    // 关掉区间随机, 否则纯度仍按 low/high 浮动
+                    //仅换 grade 不够: AddWater 是「追加混合」(遍历 LIQUID_CONTAINER_CAPACITY 加量), 只保证新加的那份是纯水, 容器原有杂质原封不动 —— 接水前残留多少就还是多少。故先剥离到零, 再由原生流程补入纯水; 不调 FillWithPureWater, 否则补满后原生无处可加。
+                    StripContaminantsOnly(__0);
+                }
+                catch (Exception e) { MelonLogger.Error($"[Water] AddWater patch err: {e.Message}"); }
             }
         }
 
@@ -1624,6 +1649,14 @@ namespace ProgressMod
 
         private static void StripAllContaminants(GameItem container)
         {
+            StripContaminantsOnly(container);
+            //剥离后按需补满 (顺序关键: 先剥离再取 free —— 容量按水的刻度算, 而 GetTotalVolume 把杂质体积也计入, 反了会按含杂质的体积补水而溢出容量)。
+            if (PurifyFillToFull) FillWithPureWater(container);
+        }
+
+        //只剥离、不补满。水龙头出水走这一支: 剥离后原生 AddWater 本就按容量补入纯水, 若先 FillWithPureWater 补满, 后续就无处可加。
+        private static void StripContaminantsOnly(GameItem container)
+        {
             if (container == null) return;
             int vol = WaterHelper.GetTotalVolume(container);
             if (vol <= 0) return;
@@ -1635,8 +1668,6 @@ namespace ProgressMod
                 if (after >= vol) break;
                 vol = after;
             }
-            //剥离后按需补满 (顺序关键: 先剥离再取 free —— 容量按水的刻度算, 而 GetTotalVolume 把杂质体积也计入, 反了会按含杂质的体积补水而溢出容量)。
-            if (PurifyFillToFull) FillWithPureWater(container);
         }
 
         //紫外线灯: 原版 OnUVUsed 只把 microbe 归零并把其体积并回 water, 对其余 5 类杂质 (physical_contaminant / chemical_contaminant / mineral / heavy_metal / organic_waste) 完全不作为. Postfix 照 MachinePurifier.PurifyContainer 的做法补一轮移除.
