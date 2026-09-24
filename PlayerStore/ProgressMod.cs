@@ -792,7 +792,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             return list;
         }
@@ -858,12 +857,10 @@ namespace ProgressMod
                 }
                 catch
                 {
-                    // ponytail: IL2CPP native probe, silent fallback
                 }
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             return "";
         }
@@ -913,7 +910,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             try
             {
@@ -924,7 +920,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             return list;
         }
@@ -989,7 +984,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             try
             {
@@ -1016,7 +1010,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             try
             {
@@ -1025,7 +1018,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
         }
 
@@ -1056,7 +1048,6 @@ namespace ProgressMod
                 }
                 catch
                 {
-                    // ponytail: IL2CPP native probe, silent fallback
                 }
                 try
                 {
@@ -1064,12 +1055,10 @@ namespace ProgressMod
                 }
                 catch
                 {
-                    // ponytail: IL2CPP native probe, silent fallback
                 }
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             return false;
         }
@@ -1106,7 +1095,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             return null;
         }
@@ -1146,7 +1134,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
         }
 
@@ -1167,7 +1154,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
         }
 
@@ -1194,7 +1180,6 @@ namespace ProgressMod
                 }
                 catch
                 {
-                    // ponytail: IL2CPP native probe, silent fallback
                 }
  try { f.parentItemUniqueId = item.uniqueId; } catch { }
                 item.AddItemFeature(f);
@@ -1202,7 +1187,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
         }
 
@@ -1239,7 +1223,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             return null;
         }
@@ -1297,7 +1280,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
         }
 
@@ -1332,7 +1314,6 @@ namespace ProgressMod
             }
             catch
             {
-                // ponytail: IL2CPP native probe, silent fallback
             }
             return feats;
         }
