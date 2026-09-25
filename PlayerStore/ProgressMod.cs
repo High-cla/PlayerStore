@@ -451,100 +451,66 @@ namespace ProgressMod
             code = 200;
         }
 
-        // 两道扫描: 先用反射列出全部 ItemDirectory 派生类 (不硬编码目录清单 —— 游戏新增目录时
-        // 自动纳入, 硬编码清单必然随版本腐化); 再查 DirectoryMaster.directories 拿到该目录实例,
-        // 从 Directory.factoryDictionary 取全部 stableId 键。
+        // 列出游戏当前全部物品 stableId。
+        //
+        // 关键结构 (实测日志确认, 曾因此连错两轮):
+        //   DirectoryMaster.directories 的类型是
+        //     Dictionary<DirectoryEntry类型, List<目录实例>>
+        //   键 = DirectoryEntry 的**具体类型**, 实测只有 GameItem 与 CombatAbilityEffect 两个;
+        //   值 = 该条目类型下注册的全部目录实例。
+        //   所有 ItemDirectory 派生类都是 Directory<GameItem> (见 ItemDirectory.cs 基类声明),
+        //   因此它们**全部挂在 GameItem 这一个键下**。
+        //
+        // 由签名 AddDirectory<T>(Directory<T> directory) where T : DirectoryEntry 可知, 泛型参数 T
+        // 是**条目**类型而非目录类型。所以「按目录类型名去查表」(拿 AmenitiesItemDirectory 去查)
+        // 永远查不到 —— 这是前两轮失败的直接原因。
+        //
+        // 正解: 不去查表, 直接遍历全部值, 从中筛出 Directory<GameItem> 实例再读 factoryDictionary。
+        // 好处是既不猜 Il2Cpp 类型名怎么拼, 也不硬编码目录清单 (游戏增删目录自动适配)。
         // 取到的是 stableId; 名称/描述走 Unity 本地化表、不在程序集内, 对账只需 id。
         private static string[] BuildItemIdList()
         {
-            // 走 DirectoryMaster.directories + Directory.factoryDictionary —— 已实测有效的路径。
-            // 不用 DirectoryMaster.GetIdentifierList<T>(): 在本游戏 IL2CPP 下经反射调用恒返回空
-            // (实测日志「[List] 目录 0 个, 物品 0 个」), 且失败被空 catch 吞掉毫无痕迹。
             var seen = new System.Collections.Generic.HashSet<string>();
-            var types = new System.Collections.Generic.List<System.Type>();
-            foreach (var ty in typeof(DirectoryMaster).Assembly.GetTypes())
-            {
-                if (ty == null || !ty.IsClass || ty.IsAbstract) continue;
-                if (typeof(ItemDirectory).IsAssignableFrom(ty)) types.Add(ty);
-            }
-
-            MelonLogger.Msg($"[List] 候选目录类型 {types.Count} 个");
-
-            // 直接读 directories 的真实键名建索引 —— 不猜 Il2Cpp 类型名怎么拼。
-            // 上次失败的盲区正在此处: 用 Il2CppSystem.Type.GetType(FullName) 逐个解析,
-            // 若格式不对则全部返回 null 并静默 continue, 结果 dirCount=0 且零异常,
-            // 日志上完全看不出线索。改为拿真实键反查, 并统计未解析数。
-            var byName = new System.Collections.Generic.Dictionary<string, Il2CppSystem.Type>();
+            int keyCount = 0, dirCount = 0, errCount = 0;
+            string firstErr = null;
             try
             {
-                int kn = 0;
-                var sample = new System.Collections.Generic.List<string>();
-                foreach (var k in DirectoryMaster.directories.Keys)
-                {
-                    if (k == null) continue;
-                    string fn = null, sn = null;
-                    try { fn = k.FullName; } catch { }
-                    try { sn = k.Name; } catch { }
-                    if (!string.IsNullOrEmpty(fn) && !byName.ContainsKey(fn)) byName[fn] = k;
-                    if (!string.IsNullOrEmpty(sn) && !byName.ContainsKey(sn)) byName[sn] = k;
-                    kn++;
-                    if (sample.Count < 4) sample.Add(fn ?? sn ?? "?");
-                }
-                MelonLogger.Msg($"[List] directories 注册 {kn} 个键; 样例: " + string.Join(" | ", sample));
-            }
-            catch (Exception e) { MelonLogger.Warning($"[List] 读 directories 失败: {e.Message}"); }
+                // 先快照键集合: 遍历过程中目录可能被游戏注册 (实测启动后从 0 个键涨到 2 个键)。
+                var keys = new System.Collections.Generic.List<Il2CppSystem.Type>();
+                foreach (var k in DirectoryMaster.directories.Keys) if (k != null) keys.Add(k);
 
-            int dirCount = 0, errCount = 0, missCount = 0;
-            string firstErr = null, firstMiss = null;
-            foreach (var ty in types)
-            {
-                try
+                foreach (var k in keys)
                 {
-                    Il2CppSystem.Type t = null;
-                    // Managed 类型全名带 "Il2Cpp." 命名空间前缀, 而 IL2CPP 侧命名空间为空 ——
-                    // 必须剥前缀, 否则 Il2CppSystem.Type.GetType 恒返回 null (静默 continue)。
-                    string full = ty.FullName ?? "";
-                    const string pfx = "Il2Cpp.";
-                    if (full.StartsWith(pfx, StringComparison.Ordinal)) full = full.Substring(pfx.Length);
-                    // 三条解析路径依次尝试: 剥前缀全名 → 注册表全名/短名 → 带前缀原名
-                    try { t = Il2CppSystem.Type.GetType(full); } catch { }
-                    if (t == null) byName.TryGetValue(full, out t);
-                    if (t == null) byName.TryGetValue(ty.Name ?? "", out t);
-                    if (t == null) byName.TryGetValue(ty.FullName ?? "", out t);
-                    if (t == null) { missCount++; if (firstMiss == null) firstMiss = ty.FullName; continue; }
-                    if (!DirectoryMaster.directories.TryGetValue(t, out var insts)) continue;
-                    if (insts == null || insts.Count == 0) continue;
-                    var inst = insts[0] as Directory<GameItem>;
-                    if (inst == null) continue;
-                    var fd = inst.factoryDictionary;
-                    if (fd == null) continue;
-                    dirCount++;
-                    foreach (var kv in fd) if (!string.IsNullOrEmpty(kv.Key)) seen.Add(kv.Key);
-                }
-                catch (Exception e)
-                {
-                    errCount++;
-                    if (firstErr == null) firstErr = ty.Name + ": " + e.Message;
+                    keyCount++;
+                    if (!DirectoryMaster.directories.TryGetValue(k, out var insts)) continue;
+                    if (insts == null) continue;
+                    foreach (var o in insts)
+                    {
+                        if (o == null) continue;
+                        try
+                        {
+                            var d = o as Directory<GameItem>;
+                            if (d == null) continue;
+                            var fd = d.factoryDictionary;
+                            if (fd == null) continue;
+                            dirCount++;
+                            foreach (var p in fd)
+                                if (!string.IsNullOrEmpty(p.Key)) seen.Add(p.Key);
+                        }
+                        catch (Exception e)
+                        {
+                            errCount++;
+                            if (firstErr == null) firstErr = e.Message;
+                        }
+                    }
                 }
             }
+            catch (Exception e) { MelonLogger.Error($"[List] 遍历 directories 失败: {e.Message}"); }
 
             var arr = new string[seen.Count];
             seen.CopyTo(arr);
-            MelonLogger.Msg($"[List] 目录 {dirCount} 个, 物品 {arr.Length} 个"
-                + (missCount > 0 ? $", 未解析 {missCount}" : "")
+            MelonLogger.Msg($"[List] 键 {keyCount} 个 / 目录 {dirCount} 个, 物品 {arr.Length} 个"
                 + (errCount > 0 ? $", 失败 {errCount}" : ""));
-            if (firstMiss != null) MelonLogger.Warning($"[List] 首个未解析: {firstMiss}");
-            if (missCount > 0 && dirCount == 0)
-            {
-                // 解析全失败时, 直接列出结构体实际注册的键, 与候选类型全名对比 ——
-                // 这是「猜名字」类 bug 的一击定位手段, 免去多轮试错往返。
-                var ks = new System.Collections.Generic.List<string>();
-                try { foreach (var k in DirectoryMaster.directories.Keys) if (k != null) ks.Add(k.FullName ?? k.Name ?? "?"); } catch { }
-                MelonLogger.Warning($"[List] 注册表键({ks.Count}): " + string.Join(", ", ks));
-                var cs = new System.Collections.Generic.List<string>();
-                foreach (var ty in types) { if (cs.Count < 12) cs.Add(ty.FullName ?? "?"); }
-                MelonLogger.Warning($"[List] 候选类型样例: " + string.Join(", ", cs));
-            }
             if (firstErr != null) MelonLogger.Warning($"[List] 首个失败: {firstErr}");
             if (arr.Length == 0)
             {

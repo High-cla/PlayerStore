@@ -227,11 +227,51 @@ dotnet build -c Release PlayerStore/ProgressMod.csproj
 | 5 | `--debug-query` 语义 | dump 出 pattern AST 却当成文件 AST 分析 | 调试目标代码用 `format=cst` 扫文件 |
 | 6 | `dump/ascs/` 是 `throw null` 空壳 | 据 ascs 判断「方法没做事」 | 读逻辑一律走 ISIL |
 | 7 | 静态表 / 旧文档 | 拿 427 条旧表当现状 | 以运行时枚举 + 新 dump 为准 |
-| 8 | IL2CPP 类型查找的两个陷阱：静态泛型反射调用 / 未剥 `Il2Cpp.` 前缀 | 图鉴目录枚举恒为 0 个（日志「[List] 目录 0 个, 物品 0 个」且**无任何警告**） | 见 §7.1：遍历 `directories.Keys` 建索引，免去名字拼法假设 |
+| 8 | IL2CPP 容器语义靠猜：泛型参数是条目类型而非目录类型 | 图鉴目录枚举**连错三轮**恒为 0 个（日志「[List] 目录 0 个, 物品 0 个」且无任何警告） | 见 §7.1：读签名 + 打印真实键；遍历 `directories` 的**值** |
 
-### 7.1 目录枚举：两个坑叠在一起，各自都会让结果恒为空
+### 7.1 目录枚举：连错三轮，每一轮都撞在不同的假设上
 
-「列出游戏当前全部物品 stableId」的正确写法，以及**两条都踩过**的错法：
+**正确写法（最终）—— 遍历字典的值，不查键：**
+
+```csharp
+// DirectoryMaster.directories : Dictionary<DirectoryEntry类型, List<目录实例>>
+// 键 = DirectoryEntry 的**具体类型**，实测只有 GameItem 与 CombatAbilityEffect 两个；
+// 值 = 该条目类型下注册的全部目录实例。
+// 所有 ItemDirectory 都是 Directory<GameItem>，故**全部挂在 GameItem 这一个键下**。
+foreach (var k in DirectoryMaster.directories.Keys)
+foreach (var o in DirectoryMaster.directories[k]) {
+    var d = o as Directory<GameItem>;              // 筛出物品目录
+    if (d == null) continue;
+    foreach (var p in d.factoryDictionary) ids.Add(p.Key);   // Key = stableId
+}
+```
+
+签名早已写明键是什么：`AddDirectory<T>(Directory<T> directory) where T : DirectoryEntry`
+—— **`T` 是条目类型，不是目录类型**。
+
+三次失败各撞在不同假设上（都曾让结果恒为空且**零异常**）：
+
+| 轮次 | 错误假设 | 实际 |
+|---|---|---|
+| 1 | 用 `GetIdentifierList<T>` 反射调用即可 | `Il2CppClassPointerStore<T>.NativeClassPtr` 对运行时 `T` 永不初始化 ⇒ 返回 null |
+| 2 | 换成 `directories` + 记类型名即可 | Managed 全名带 `Il2Cpp.` 前缀，IL2CPP 侧命名空间为空 ⇒ `GetType` 恒 null |
+| 3 | 剥掉前缀，按**目录类型名**查键 | 键是**条目类型**（`GameItem`），按目录名查永远查不到 |
+
+**这一节真正的教训是方法论：**
+
+- **读签名，别猜语义。** `AddDirectory<T>` 的 `where T : DirectoryEntry` 与属性类型
+  `Dictionary<Il2CppSystem.Type, List<Il2CppSystem.Object>>` 都在 dump 里躺着，
+  三轮错误全部源于「按名字像什么去猜它是什么」。**先看泛型参数约束与容器键值类型，
+  这两处几乎从不撒谎。**
+- **打印真实数据，不要推断。** 第 3 轮的突破完全来自一行日志
+  `directories 注册 2 个键; 样例: GameItem | CombatAbilityEffect` ——
+  在此之前的两轮都在用「应该是什么」推「为什么不是」。诊断代码要先做**枚举真实成员**这件事。
+- **别在同一个盲区里连续修两次。** 第 1、2 轮都是「API 用错」，第 3 轮才去打印真实键。
+  正确次序是：**先让失败可见（枚举真实结构），再选 API。**
+- 启动早期该字典**会从 0 个键涨到 2 个键**（子目录是被游戏陆续注册的），
+  所以「枚举为空」不能缓存，必须允许重试 —— 这一条在第 1 轮就该得出。
+
+以下保留前两轮的错法与原因，供对照：
 
 ```csharp
 // ✗ 坑一: 静态泛型 MakeGenericMethod —— 恒返回 null
