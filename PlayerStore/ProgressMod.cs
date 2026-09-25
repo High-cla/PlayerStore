@@ -380,9 +380,13 @@ namespace ProgressMod
         private static long _lastCatalogMs;
         private const int SnapshotMinIntervalMs = 120;   // 重建节流: 请求洪峰只触发一次重建, 不放大主线程开销
         private const int CatalogRetryMinMs = 1000;      // 目录枚举失败后的最短重试间隔 (启动早期目录未注册完, 须容许重试)
-        private const int CatalogStableRounds = 3;       // 数量连续 N 轮不变即认定目录注册完成 (此前每轮都立即重建)
-        private static int _catalogCount;                // 上轮枚举数量, 用于判断是否仍在增长
+        private const int CatalogStableRounds = 3;       // 数量连续 N 轮不变即认定目录注册完成
+        private const int CatalogSettleMs = 90000;       // 「等目录注册完」的观察窗口上限; 超时后接受现状并告警
+        private static int _catalogCount;                // 上轮枚举总数, 用于判断是否仍在增长
+        private static int _catalogDirCount = -1;        // 上轮目录源命中的目录数 (独立计数!)
         private static int _catalogStableRounds;         // 数量已连续不变的轮数
+        private static long _catalogStartMs;             // 首次成功构建时刻 = 观察窗口起点
+        private static volatile bool _catalogSettled;    // true = 已认定注册完成, 转为常规节流
 
         // GET /api/mine → 读主线程维护的快照, 立即返回 (不阻塞 HTTP 线程). inSave=false 表示快照未反映存档内状态.
         private static void RouteMine(out object resp, out int code)
@@ -422,48 +426,59 @@ namespace ProgressMod
         private static void RefreshCatalog()
         {
             long now = System.Environment.TickCount64;
-            bool have = Snapshot.Ids != null;
 
-            if (have)
+            if (_catalogSettled)
             {
+                // 已认定注册完成: 常规节流。CfgCatalogRefreshSec<=0 表示只构建一次。
                 if (!_wantIds)
                 {
                     int sec = CatalogRefreshSec;
-                    if (sec <= 0) return;   // 0 = 只构建一次, 不随游戏更新刷新
+                    if (sec <= 0) return;
                     if (now - _lastCatalogMs < (long)sec * 1000L) return;
                 }
             }
-            else if (!_wantIds) return;      // 从未成功且无请求: 等前端 /api/list 置位, 别白跑
-            else if (now - _lastCatalogMs < CatalogRetryMinMs) return;   // 有请求但尚无快照: 短窗口重试
+            else
+            {
+                // 观察窗口内: 按 CatalogRetryMinMs 节流反复重建, 直到「目录数不再增长」或超时。
+                // 不要在这里写 `_lastCatalogMs = 0` 以求立即重试 —— 那会让 OnUpdate **每帧**
+                // 重建全量目录枚举 (实测日志 16.132→16.405 连打 6 轮, 每轮 20~50ms)。
+                if (now - _lastCatalogMs < CatalogRetryMinMs) return;
+                if (Snapshot.Ids != null && !_wantIds) { /* 窗口内主动轮询, 不依赖前端请求 */ }
+            }
 
             _wantIds = false;
             _lastCatalogMs = now;
             try
             {
-                var ids = BuildItemIdList();
+                var ids = BuildItemIdList(out int dirCount);
                 if (ids == null) return;   // 失败(空)不写入, 保留 null 让下次重试
 
-                // 目录是被游戏**陆续注册**的 (实测启动后注册表从 0 个键涨到 2 个键), 因此早期
-                // 枚举出的集合虽非空却**不完整** —— 一旦就此缓存, 缺失的物品会被前端永久误标
-                // 「已失效」并禁用生成按钮。故: 只要本次结果比上次更大, 就认定尚未稳定,
-                // 短时间内继续重建; 连续若干次数量不变才停手。
-                int prev = _catalogCount;
+                if (_catalogStartMs == 0) _catalogStartMs = now;
+                int prevLen = _catalogCount, prevDir = _catalogDirCount;
                 _catalogCount = ids.Length;
+                _catalogDirCount = dirCount;
                 Snapshot.Ids = ids;
-                if (ids.Length > prev)
+
+                // 判定「注册是否完成」: 只看总数会被误导 —— 本地化源数量恒定 (实测 383),
+                // 目录源却在持续增长, 总数可能长时间不变而目录仍在注册。故**目录数也独立计数**,
+                // 两者都不再增长才算稳定。
+                bool grew = ids.Length > prevLen || dirCount > prevDir;
+                if (grew)
                 {
                     _catalogStableRounds = 0;
-                    _lastCatalogMs = 0;        // 立即允许下一轮重建
                 }
-                else if (_catalogStableRounds < CatalogStableRounds)
+                else if (++_catalogStableRounds >= CatalogStableRounds)
                 {
-                    _catalogStableRounds++;
-                    _lastCatalogMs = 0;
+                    _catalogSettled = true;
+                    MelonLogger.Msg($"[List] 目录集合已稳定: 物品 {ids.Length} 个 / 目录 {dirCount} 个");
                 }
-                else
+
+                // 超时兜底: 某些 mod 很晚才注册目录 (实测 BE 系列在启动 5s 后), 不能无限等。
+                if (!_catalogSettled && now - _catalogStartMs > CatalogSettleMs)
                 {
-                    // 已稳定: 交给 CfgCatalogRefreshSec 正常节流
-                    MelonLogger.Msg($"[List] 目录集合已稳定: {ids.Length} 个物品");
+                    _catalogSettled = true;
+                    MelonLogger.Warning($"[List] 观察窗口 {CatalogSettleMs / 1000}s 超时, 接受现状: "
+                        + $"物品 {ids.Length} 个 / 目录 {dirCount} 个 (可能仍不完整)");
                 }
             }
             catch (Exception e) { MelonLogger.Error($"[List] 目录枚举失败: {e.Message}"); }
@@ -489,22 +504,26 @@ namespace ProgressMod
         //   源3 目录常量  : 各 *ItemDirectory 类里硬编码的 stableId 字面量, 覆盖机器件等
         // 判定原则: **宁可漏标也不误标**。误标「已失效」会禁用生成按钮 (硬故障);
         // 漏标只是少一个提示 (软缺陷)。故任一源命中即算存在。
-        private static string[] BuildItemIdList()
+        private static string[] BuildItemIdList(out int dirCount)
         {
             var seen = new System.Collections.Generic.HashSet<string>();
             CollectFromLocalization(seen, out int nLoc);
-            int nDir = CollectFromDirectories(seen);
+            dirCount = CollectFromDirectories(seen);
 
             var arr = new string[seen.Count];
             seen.CopyTo(arr);
-            MelonLogger.Msg($"[List] 本地化 {nLoc} + 目录源 {nDir} 个目录 => 去重 {arr.Length} 个物品");
+            MelonLogger.Msg($"[List] 本地化 {nLoc} + 目录源 {dirCount} 个目录 => 去重 {arr.Length} 个物品");
             if (arr.Length == 0)
             {
                 MelonLogger.Warning("[List] 枚举为空, 不缓存, 下次请求重试");
                 return null;
             }
-            try { Snapshot.Names = BuildNameTable(); }
-            catch (Exception e) { MelonLogger.Warning($"[List] 名称表构建失败: {e.Message}"); }
+            // 名称表与 id 集合都变了才重建 (建表要遍历 6 种语言的全部条目, 不便宜)
+            if (Snapshot.Names == null)
+            {
+                try { Snapshot.Names = BuildNameTable(); }
+                catch (Exception e) { MelonLogger.Warning($"[List] 名称表构建失败: {e.Message}"); }
+            }
             return arr;
         }
 
