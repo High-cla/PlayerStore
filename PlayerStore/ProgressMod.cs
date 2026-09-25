@@ -379,14 +379,23 @@ namespace ProgressMod
         private static long _lastSnapshotMs;
         private static long _lastCatalogMs;
         private const int SnapshotMinIntervalMs = 120;   // 重建节流: 请求洪峰只触发一次重建, 不放大主线程开销
-        private const int CatalogRetryMinMs = 1000;      // 目录枚举失败后的最短重试间隔 (启动早期目录未注册完, 须容许重试)
-        private const int CatalogStableRounds = 3;       // 数量连续 N 轮不变即认定目录注册完成
-        private const int CatalogSettleMs = 90000;       // 「等目录注册完」的观察窗口上限; 超时后接受现状并告警
-        private static int _catalogCount;                // 上轮枚举总数, 用于判断是否仍在增长
-        private static int _catalogDirCount = -1;        // 上轮目录源命中的目录数 (独立计数!)
-        private static int _catalogStableRounds;         // 数量已连续不变的轮数
+        private const int CatalogRetryMinMs = 1000;      // 注册未完成时的最短重试间隔
+        private const int CatalogSettleMs = 90000;       // 兜底观察窗口上限; 超时接受现状并告警
+        private static int _catalogDirCount = -1;        // 上轮目录源命中的目录数
+        private static int _lastDirInit;                 // 上轮读到的 InitDirectory 计数
+        private static int _stableRounds;                // 连续无进展的轮数
         private static long _catalogStartMs;             // 首次成功构建时刻 = 观察窗口起点
         private static volatile bool _catalogSettled;    // true = 已认定注册完成, 转为常规节流
+
+        // 目录注册进度 —— 由 PatchDirInit 的 Postfix 累加 (见文件末尾)。这是判定「注册是否完成」的
+        // 唯一可靠信号: 游戏有 17 个 ItemDirectory 子类, 各自 override InitDirectory 往
+        // factoryDictionary 里塞物品, 且**时机很晚** (实测 BE 系列 mod 在启动 5s 后才注册自己的目录),
+        // 而第三方的 mod (如 BrewingExpansion) 还会挂同一个 InitDirectory 的 Postfix 继续追加。
+        // 早期版本改用「数量连续 N 轮不变」判稳, 被本地化源的恒定量误导 —— 目录源停在 0 却判稳,
+        // 结果 aug_chip 等只存在于目录源的物品被误标「已失效」。
+        private static volatile int _dirInitCount;
+        private static volatile bool _dirInitHooked;     // 挂载是否成功; 失败时改用回退判稳 (见 RefreshCatalog)
+        private const int ExpectedItemDirs = 17;         // dump/ascs 里 override InitDirectory 的 ItemDirectory 子类数
 
         // GET /api/mine → 读主线程维护的快照, 立即返回 (不阻塞 HTTP 线程). inSave=false 表示快照未反映存档内状态.
         private static void RouteMine(out object resp, out int code)
@@ -454,31 +463,41 @@ namespace ProgressMod
                 if (ids == null) return;   // 失败(空)不写入, 保留 null 让下次重试
 
                 if (_catalogStartMs == 0) _catalogStartMs = now;
-                int prevLen = _catalogCount, prevDir = _catalogDirCount;
-                _catalogCount = ids.Length;
+                int prevDir = _catalogDirCount;
                 _catalogDirCount = dirCount;
                 Snapshot.Ids = ids;
 
-                // 判定「注册是否完成」: 只看总数会被误导 —— 本地化源数量恒定 (实测 383),
-                // 目录源却在持续增长, 总数可能长时间不变而目录仍在注册。故**目录数也独立计数**,
-                // 两者都不再增长才算稳定。
-                bool grew = ids.Length > prevLen || dirCount > prevDir;
-                if (grew)
-                {
-                    _catalogStableRounds = 0;
-                }
-                else if (++_catalogStableRounds >= CatalogStableRounds)
+                // 判定「注册是否完成」, 双信号:
+                //   主信号: InitDirectory 调用计数 (PatchDirInit 累加) —— 精确反映游戏侧注册进度;
+                //   辅信号: 目录数不再增长 —— 兜住「某个目录的 InitDirectory 未被 patch 到」的情况。
+                // 两者都用「独立计数」而非总数: 本地化源数量恒定 (实测 383), 拿总数判稳会被它掩盖。
+                int inited = _dirInitCount;
+                bool progressed = inited > _lastDirInit || dirCount > prevDir;
+                _lastDirInit = inited;
+
+                // 两路判稳:
+                //   ① 挂载成功时 —— InitDirectory 已全部触发且无新进展, 这是精确信号;
+                //   ② 挂载失败时 (_dirInitCount 恒 0, 例如 IL2CPP 下 TargetMethods 没挂上) ——
+                //      退化回「目录数不变」, 但要求更多轮 (5 轮) 以抵消不确定性, 且明确告警。
+                bool initSignal = _dirInitHooked && inited >= ExpectedItemDirs && !progressed;
+                bool fallback = !_dirInitHooked && !progressed && ++_stableRounds >= 5;
+                if (initSignal || fallback)
                 {
                     _catalogSettled = true;
-                    MelonLogger.Msg($"[List] 目录集合已稳定: 物品 {ids.Length} 个 / 目录 {dirCount} 个");
+                    if (fallback)
+                        MelonLogger.Warning($"[List] InitDirectory 未挂上, 回退按目录数判稳: "
+                            + $"目录 {dirCount} 个, 物品 {ids.Length} 个");
+                    else
+                        MelonLogger.Msg($"[List] 注册完成: InitDirectory {inited}/{ExpectedItemDirs} 次, "
+                            + $"目录 {dirCount} 个, 物品 {ids.Length} 个");
                 }
 
-                // 超时兜底: 某些 mod 很晚才注册目录 (实测 BE 系列在启动 5s 后), 不能无限等。
+                // 兜底: 某些目录可能始终不触发 InitDirectory (或被 mod 接管), 不能无限等。
                 if (!_catalogSettled && now - _catalogStartMs > CatalogSettleMs)
                 {
                     _catalogSettled = true;
                     MelonLogger.Warning($"[List] 观察窗口 {CatalogSettleMs / 1000}s 超时, 接受现状: "
-                        + $"物品 {ids.Length} 个 / 目录 {dirCount} 个 (可能仍不完整)");
+                        + $"InitDirectory {inited}/{ExpectedItemDirs} 次, 目录 {dirCount} 个, 物品 {ids.Length} 个");
                 }
             }
             catch (Exception e) { MelonLogger.Error($"[List] 目录枚举失败: {e.Message}"); }
@@ -2048,5 +2067,47 @@ namespace ProgressMod
  public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
         }
 
+        //============ 目录注册进度追踪 ============
+        // 游戏有 17 个 ItemDirectory 子类, 各自 override InitDirectory() 把物品塞进
+        // Directory.factoryDictionary; 时机很晚 (实测 BE 系列 mod 在启动 5s 后才注册),
+        // 第三方 mod (如 BrewingExpansion 的 PatchAmenitiesDirInit / PatchMiscDirInit /
+        // PatchRegisterItems) 还挂同一个 InitDirectory 的 Postfix 继续追加自己的物品。
+        // 故 InitDirectory 的调用次数是「注册是否完成」最精确的信号 —— 用它替代「数量连续N轮不变」
+        // 那种猜测式判稳 (后者曾被本地化源的恒定量误导, 目录源停在 0 就判稳)。
+        //
+        // 用 [HarmonyTargetMethods] 批量挂载: InitDirectory 在基类 Directory<T> 上是 abstract,
+        // IL2CPP 下泛型实例是独立类, 挂 open generic 不生效, 必须逐类挂到具体 override 上。
+        // 用一个补丁覆盖全部 17 个, 避免写 17 个几乎相同的类。
+        [HarmonyPatch]
+        public static class PatchDirInit
+        {
+            [HarmonyTargetMethods]
+            public static System.Collections.Generic.IEnumerable<System.Reflection.MethodBase> TargetMethods()
+            {
+                var list = new System.Collections.Generic.List<System.Reflection.MethodBase>();
+                foreach (var ty in typeof(DirectoryMaster).Assembly.GetTypes())
+                {
+                    try
+                    {
+                        if (ty == null || !ty.IsClass || ty.IsAbstract) continue;
+                        if (!typeof(ItemDirectory).IsAssignableFrom(ty)) continue;
+                        // InitDirectory 是 protected, 用 AccessTools 拿声明方法 (含基类链)
+                        var m = HarmonyLib.AccessTools.DeclaredMethod(ty, "InitDirectory");
+                        if (m != null) list.Add(m);
+                    }
+                    catch { }
+                }
+                Core._dirInitHooked = list.Count > 0;
+                MelonLogger.Msg($"[List] InitDirectory 挂载 {list.Count} 个 (预期 {ExpectedItemDirs})"
+                    + (list.Count == 0 ? " —— 信号不可用, 将回退按目录数判稳" : ""));
+                return list;
+            }
+
+            public static void Postfix()
+            {
+                // 嵌套类访问外层 private static 需显式限定 (C# 允许直接访问, 但显式更清晰)
+                try { Core._dirInitCount++; } catch { }
+            }
+        }
     }
 }
