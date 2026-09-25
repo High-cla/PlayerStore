@@ -49,6 +49,11 @@
       <HintPath>$(GameDir)\MelonLoader\Il2CppAssemblies\Il2CppSystem.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- 本地化表: 取物品表全量键 (比目录枚举完整), 见 BuildItemIdList 注释 -->
+    <Reference Include="Unity.Localization">
+      <HintPath>$(GameDir)\MelonLoader\Il2CppAssemblies\Unity.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- 网页端资源内嵌: 本地启动时由 ProgressMod 自带的 HttpListener 直接服务——

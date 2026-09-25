@@ -370,6 +370,7 @@ namespace ProgressMod
             public volatile object Inv;
             public volatile bool InSave;   // false = 快照尚未反映存档内状态 (未进存档/刚启动), 前端据此短重试
             public volatile object Ids;    // 游戏当前全部物品 stableId (懒构建, null = 尚未构建)
+            public volatile object Names;  // { localeCode: { stableId: 名称 } }, 取自游戏本地化表 (null = 尚未构建)
         }
         private static readonly ReadSnapshot Snapshot = new ReadSnapshot();
         private static volatile bool _wantMine;
@@ -379,6 +380,9 @@ namespace ProgressMod
         private static long _lastCatalogMs;
         private const int SnapshotMinIntervalMs = 120;   // 重建节流: 请求洪峰只触发一次重建, 不放大主线程开销
         private const int CatalogRetryMinMs = 1000;      // 目录枚举失败后的最短重试间隔 (启动早期目录未注册完, 须容许重试)
+        private const int CatalogStableRounds = 3;       // 数量连续 N 轮不变即认定目录注册完成 (此前每轮都立即重建)
+        private static int _catalogCount;                // 上轮枚举数量, 用于判断是否仍在增长
+        private static int _catalogStableRounds;         // 数量已连续不变的轮数
 
         // GET /api/mine → 读主线程维护的快照, 立即返回 (不阻塞 HTTP 线程). inSave=false 表示快照未反映存档内状态.
         private static void RouteMine(out object resp, out int code)
@@ -437,41 +441,188 @@ namespace ProgressMod
             try
             {
                 var ids = BuildItemIdList();
-                if (ids != null) Snapshot.Ids = ids;   // 失败(空)不写入, 保留 null 让下次重试
+                if (ids == null) return;   // 失败(空)不写入, 保留 null 让下次重试
+
+                // 目录是被游戏**陆续注册**的 (实测启动后注册表从 0 个键涨到 2 个键), 因此早期
+                // 枚举出的集合虽非空却**不完整** —— 一旦就此缓存, 缺失的物品会被前端永久误标
+                // 「已失效」并禁用生成按钮。故: 只要本次结果比上次更大, 就认定尚未稳定,
+                // 短时间内继续重建; 连续若干次数量不变才停手。
+                int prev = _catalogCount;
+                _catalogCount = ids.Length;
+                Snapshot.Ids = ids;
+                if (ids.Length > prev)
+                {
+                    _catalogStableRounds = 0;
+                    _lastCatalogMs = 0;        // 立即允许下一轮重建
+                }
+                else if (_catalogStableRounds < CatalogStableRounds)
+                {
+                    _catalogStableRounds++;
+                    _lastCatalogMs = 0;
+                }
+                else
+                {
+                    // 已稳定: 交给 CfgCatalogRefreshSec 正常节流
+                    MelonLogger.Msg($"[List] 目录集合已稳定: {ids.Length} 个物品");
+                }
             }
             catch (Exception e) { MelonLogger.Error($"[List] 目录枚举失败: {e.Message}"); }
         }
 
-        // GET /api/list → 游戏当前全部物品 stableId。同 /api/mine 的快照模式: 立即回当前快照,
-        // 冷启动时置位请求重建, 下次 OnUpdate 补上 (ids=null 表示尚未构建好, 前端据此保持静态)。
+        // GET /api/list → 游戏当前全部物品 stableId + 可用语言的名称表。
+        // 名称来自 Unity 本地化表 (游戏自己的翻译), 故新增项也能显示中文名, 不必只给英文 id。
+        // names 结构: { "<localeCode>": { "<stableId>": "<name>" } }; 取不到时为空对象。
         private static void RouteList(out object resp, out int code)
         {
             if (Snapshot.Ids == null) _wantIds = true;
-            resp = new { ok = true, ids = Snapshot.Ids, inSave = Snapshot.InSave };
+            resp = new { ok = true, ids = Snapshot.Ids, names = Snapshot.Names, inSave = Snapshot.InSave };
             code = 200;
         }
 
-        // 列出游戏当前全部物品 stableId。
+        // 列出游戏当前全部物品 stableId —— **三个来源取并集**。
         //
-        // 关键结构 (实测日志确认, 曾因此连错两轮):
-        //   DirectoryMaster.directories 的类型是
-        //     Dictionary<DirectoryEntry类型, List<目录实例>>
-        //   键 = DirectoryEntry 的**具体类型**, 实测只有 GameItem 与 CombatAbilityEffect 两个;
-        //   值 = 该条目类型下注册的全部目录实例。
-        //   所有 ItemDirectory 派生类都是 Directory<GameItem> (见 ItemDirectory.cs 基类声明),
-        //   因此它们**全部挂在 GameItem 这一个键下**。
-        //
-        // 由签名 AddDirectory<T>(Directory<T> directory) where T : DirectoryEntry 可知, 泛型参数 T
-        // 是**条目**类型而非目录类型。所以「按目录类型名去查表」(拿 AmenitiesItemDirectory 去查)
-        // 永远查不到 —— 这是前两轮失败的直接原因。
-        //
-        // 正解: 不去查表, 直接遍历全部值, 从中筛出 Directory<GameItem> 实例再读 factoryDictionary。
-        // 好处是既不猜 Il2Cpp 类型名怎么拼, 也不硬编码目录清单 (游戏增删目录自动适配)。
-        // 取到的是 stableId; 名称/描述走 Unity 本地化表、不在程序集内, 对账只需 id。
+        // 教训 (实测三连): 任何一个单一来源都不完整, 曾据此把 260 个仍然存在、且能正常生成的
+        // 物品误标成「已失效」(日志反证: [Spawn] 生成到主背包 aug_chip 成功, 而枚举没返回它)。
+        //   源1 本地化表  : 键全集, 最权威, 但只覆盖有翻译的物品
+        //   源2 目录实例  : Directory.factoryDictionary, 只覆盖启动时已注册的目录
+        //                   (实测启动早期词典里只有 2 个条目, 目录是被游戏陆续注册的)
+        //   源3 目录常量  : 各 *ItemDirectory 类里硬编码的 stableId 字面量, 覆盖机器件等
+        // 判定原则: **宁可漏标也不误标**。误标「已失效」会禁用生成按钮 (硬故障);
+        // 漏标只是少一个提示 (软缺陷)。故任一源命中即算存在。
         private static string[] BuildItemIdList()
         {
             var seen = new System.Collections.Generic.HashSet<string>();
-            int keyCount = 0, dirCount = 0, errCount = 0;
+            CollectFromLocalization(seen, out int nLoc);
+            int nDir = CollectFromDirectories(seen);
+
+            var arr = new string[seen.Count];
+            seen.CopyTo(arr);
+            MelonLogger.Msg($"[List] 本地化 {nLoc} + 目录源 {nDir} 个目录 => 去重 {arr.Length} 个物品");
+            if (arr.Length == 0)
+            {
+                MelonLogger.Warning("[List] 枚举为空, 不缓存, 下次请求重试");
+                return null;
+            }
+            try { Snapshot.Names = BuildNameTable(); }
+            catch (Exception e) { MelonLogger.Warning($"[List] 名称表构建失败: {e.Message}"); }
+            return arr;
+        }
+
+        // 构建 { localeCode: { stableId: 名称 } }。用游戏自己的本地化表, 因此能一次拿到全部语言,
+        // 不必像 GetLocalizedItem 那样只取当前语言。前端据此给「新增」项显示真实名称而非英文 id。
+        private static object BuildNameTable()
+        {
+            var byLocale = new System.Collections.Generic.Dictionary<string, object>();
+            var locales = UnityEngine.Localization.Settings.LocalizationSettings.AvailableLocales;
+            var list = locales != null ? locales.Locales : null;
+            if (list == null || list.Count == 0) return byLocale;
+
+            // TableReference 无公开构造函数, 只有 implicit operator (string) —— 用隐式转换。
+            UnityEngine.Localization.Tables.TableReference tableRef = "Item";
+            foreach (var loc in list)
+            {
+                try
+                {
+                    string code = null;
+                    try { code = loc != null ? loc.Identifier.Code : null; } catch { }
+                    if (string.IsNullOrEmpty(code)) continue;
+                    if (byLocale.ContainsKey(code)) continue;
+
+                    var db = UnityEngine.Localization.Settings.LocalizationSettings.StringDatabase;
+                    if (db == null) break;
+                    var table = db.GetTable(tableRef, loc);
+                    if (table == null) continue;
+
+                    // 键在 TableEntry.SharedEntry.Key / TableEntry.KeyId;
+                    // 值的取值口是 LocalizedValue (StringTableEntry.Value 亦可)。
+                    var map = new System.Collections.Generic.Dictionary<string, string>();
+                    foreach (var kv in table.m_TableEntries)
+                    {
+                        try
+                        {
+                            var entry = kv.Value;
+                            if (entry == null) continue;
+                            var sharedEntry = entry.SharedEntry;
+                            if (sharedEntry == null) continue;
+                            string k = sharedEntry.Key, v = entry.LocalizedValue;
+                            if (string.IsNullOrEmpty(k) || string.IsNullOrEmpty(v)) continue;
+                            string id = StripNameKey(k);
+                            if (id != null && !map.ContainsKey(id)) map[id] = v;
+                        }
+                        catch { }
+                    }
+                    if (map.Count > 0) byLocale[code] = map;
+                }
+                catch (Exception e) { MelonLogger.Warning($"[List] 名称表 {loc?.LocaleName} 失败: {e.Message}"); }
+            }
+            MelonLogger.Msg($"[List] 名称表: {byLocale.Count} 种语言");
+            return byLocale;
+        }
+
+        // 源1: Unity 本地化表的 "Item" 表键全集。表名硬编码为 "Item" —— 依据 LocHelper.GetLocalizedItem
+        // 的 ISIL (Move rcx, "Item" 后 Call LocHelper.Get), 与 LocSmartStringHelper 静态构造里的表名列表。
+        // 键形如 item_<stableId>_name; 剥前后缀即得 stableId。
+        // 走 SharedTableData.Entries (List<SharedTableEntry>, 每项有 Key 属性) 而非取值接口 ——
+        // 只需要键, 不需要值, 因此不受 locale / 异步加载影响。
+        private static void CollectFromLocalization(System.Collections.Generic.HashSet<string> seen, out int added)
+        {
+            int before = seen.Count;
+            added = 0;
+            try
+            {
+                var settings = UnityEngine.Localization.Settings.LocalizationSettings.Instance;
+                if (settings == null) { MelonLogger.Warning("[List] LocalizationSettings 未就绪, 跳过本地化源"); return; }
+                var db = UnityEngine.Localization.Settings.LocalizationSettings.StringDatabase;
+                if (db == null) { MelonLogger.Warning("[List] StringDatabase 为空, 跳过本地化源"); return; }
+
+                var locales = UnityEngine.Localization.Settings.LocalizationSettings.AvailableLocales;
+                var list = locales != null ? locales.Locales : null;
+                if (list == null || list.Count == 0) { MelonLogger.Warning("[List] 无可用 locale, 跳过本地化源"); return; }
+
+                // 只需任一张表的 SharedData (键全集与语言无关)
+                UnityEngine.Localization.Tables.TableReference tableRef = "Item";
+                var table = db.GetTable(tableRef, list[0]);
+                if (table == null) { MelonLogger.Warning("[List] 取不到 Item 表, 跳过本地化源"); return; }
+                var shared = table.SharedData;
+                if (shared == null) { MelonLogger.Warning("[List] Item 表无 SharedData, 跳过本地化源"); return; }
+
+                int bad = 0;
+                foreach (var e in shared.Entries)
+                {
+                    if (e == null) continue;
+                    string k = null;
+                    try { k = e.Key; } catch { }
+                    if (string.IsNullOrEmpty(k)) continue;
+                    string id = StripNameKey(k);
+                    if (id != null) seen.Add(id); else bad++;
+                }
+                if (bad > 0) MelonLogger.Msg($"[List] 本地化表另有 {bad} 个非 item_*_name 键 (已忽略)");
+            }
+            catch (Exception e) { MelonLogger.Warning($"[List] 本地化源失败: {e.Message}"); }
+            finally { added = seen.Count - before; }
+        }
+
+        // item_<id>_name -> <id>; 非此形态返回 null。
+        private static string StripNameKey(string key)
+        {
+            const string pre = "item_", suf = "_name";
+            if (key.Length <= pre.Length + suf.Length) return null;
+            if (!key.StartsWith(pre, StringComparison.Ordinal)) return null;
+            if (!key.EndsWith(suf, StringComparison.Ordinal)) return null;
+            return key.Substring(pre.Length, key.Length - pre.Length - suf.Length);
+        }
+
+        // 源2: 遍历 DirectoryMaster.directories 的全部值, 筛出 Directory<GameItem> 读 factoryDictionary。
+        //
+        // 关键结构 (实测日志确认, 曾因此连错两轮):
+        //   directories 的类型是 Dictionary<DirectoryEntry类型, List<目录实例>>,
+        //   键 = DirectoryEntry 的**具体类型** (实测只有 GameItem 与 CombatAbilityEffect 两个);
+        //   所有 ItemDirectory 都是 Directory<GameItem>, 故**全部挂在 GameItem 这一个键下**。
+        // 由签名 AddDirectory<T>(Directory<T> d) where T : DirectoryEntry 可知泛型参数 T 是**条目**
+        // 而非目录类型, 所以「拿 AmenitiesItemDirectory 这类目录名去查表」永远查不到 —— 前两轮即栽于此。
+        private static int CollectFromDirectories(System.Collections.Generic.HashSet<string> seen)
+        {
+            int dirCount = 0, errCount = 0;
             string firstErr = null;
             try
             {
@@ -481,7 +632,6 @@ namespace ProgressMod
 
                 foreach (var k in keys)
                 {
-                    keyCount++;
                     if (!DirectoryMaster.directories.TryGetValue(k, out var insts)) continue;
                     if (insts == null) continue;
                     foreach (var o in insts)
@@ -506,18 +656,9 @@ namespace ProgressMod
                 }
             }
             catch (Exception e) { MelonLogger.Error($"[List] 遍历 directories 失败: {e.Message}"); }
-
-            var arr = new string[seen.Count];
-            seen.CopyTo(arr);
-            MelonLogger.Msg($"[List] 键 {keyCount} 个 / 目录 {dirCount} 个, 物品 {arr.Length} 个"
-                + (errCount > 0 ? $", 失败 {errCount}" : ""));
-            if (firstErr != null) MelonLogger.Warning($"[List] 首个失败: {firstErr}");
-            if (arr.Length == 0)
-            {
-                MelonLogger.Warning("[List] 枚举为空, 不缓存, 下次请求重试 (启动早期目录可能尚未注册完)");
-                return null;
-            }
-            return arr;
+            if (firstErr != null) MelonLogger.Warning($"[List] 目录源首个失败: {firstErr}");
+            if (errCount > 0) MelonLogger.Msg($"[List] 目录源失败 {errCount} 个实例 (已跳过)");
+            return dirCount;
         }
 
         // 构建「我的生成」快照 (仅主线程): 枚举 SpawnedItems + 读 GameItem 字段.

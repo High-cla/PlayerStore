@@ -711,15 +711,33 @@ async function loadItems(){
 async function reconcileWithServer(){
   const r = await apiFetch('/api/list');
   if(!r.ok || !Array.isArray(r.ids) || !r.ids.length) return;
+  // 名称表: 服务端从游戏本地化表取全部语言 { "<localeCode>": { id: 名称 } }。
+  // 有了它, 新增项就能显示真实名称 (含中文), 不必只给英文 id。
+  const names = r.names && typeof r.names === 'object' ? r.names : {};
+  const zh = names['zh'] || names['zh-Hans'] || names['zh-CN'] || null;
+  const en = names['en'] || null;
   const have = new Set(ITEMS.map(i => i.stableId));
-  let added = 0;
+  let added = 0, named = 0;
   r.ids.forEach(id => {
     if(have.has(id)) return;
-    ITEMS.push({kind:'ITEM', stableId:id, directory:'', nameZh:'', nameEn:id,
+    const nameZh = zh && zh[id] ? zh[id] : '';
+    const nameEn = en && en[id] ? en[id] : id;
+    if(nameZh || (en && en[id])) named++;
+    ITEMS.push({kind:'ITEM', stableId:id, directory:'', nameZh:nameZh, nameEn:nameEn,
       descriptionZh:'', descriptionEn:'', atlasPath:'', spritePath:'', categories:[],
       itemTypes:[], addPolicy:'ENABLED', spriteStatus:'UNVERIFIED', new_item:true, stale:false});
     added++;
   });
+  if(added) console.log('[reconcile] 新增 ' + added + ' 项, 其中有名称 ' + named + ' 项');
+  // 已有条目也补名 (静态表里 nameZh 空、但游戏本地化表有翻译的)
+  if(zh || en){
+    ITEMS.forEach(i => {
+      const nm = i.stableId;
+      if(!nm) return;
+      if(!i.nameZh && zh && zh[nm]) i.nameZh = zh[nm];
+      if(en && en[nm] && (!i.nameEn || i.nameEn === i.stableId)) i.nameEn = en[nm];
+    });
+  }
   S.gameIds = new Set(r.ids);
   reconcile();
   S.stale = new Set(ITEMS.filter(i => i.stale).map(i => i.stableId));
