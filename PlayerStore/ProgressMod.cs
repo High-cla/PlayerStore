@@ -468,14 +468,50 @@ namespace ProgressMod
                 if (typeof(ItemDirectory).IsAssignableFrom(ty)) types.Add(ty);
             }
 
-            int dirCount = 0, errCount = 0;
-            string firstErr = null;
+            MelonLogger.Msg($"[List] 候选目录类型 {types.Count} 个");
+
+            // 直接读 directories 的真实键名建索引 —— 不猜 Il2Cpp 类型名怎么拼。
+            // 上次失败的盲区正在此处: 用 Il2CppSystem.Type.GetType(FullName) 逐个解析,
+            // 若格式不对则全部返回 null 并静默 continue, 结果 dirCount=0 且零异常,
+            // 日志上完全看不出线索。改为拿真实键反查, 并统计未解析数。
+            var byName = new System.Collections.Generic.Dictionary<string, Il2CppSystem.Type>();
+            try
+            {
+                int kn = 0;
+                var sample = new System.Collections.Generic.List<string>();
+                foreach (var k in DirectoryMaster.directories.Keys)
+                {
+                    if (k == null) continue;
+                    string fn = null, sn = null;
+                    try { fn = k.FullName; } catch { }
+                    try { sn = k.Name; } catch { }
+                    if (!string.IsNullOrEmpty(fn) && !byName.ContainsKey(fn)) byName[fn] = k;
+                    if (!string.IsNullOrEmpty(sn) && !byName.ContainsKey(sn)) byName[sn] = k;
+                    kn++;
+                    if (sample.Count < 4) sample.Add(fn ?? sn ?? "?");
+                }
+                MelonLogger.Msg($"[List] directories 注册 {kn} 个键; 样例: " + string.Join(" | ", sample));
+            }
+            catch (Exception e) { MelonLogger.Warning($"[List] 读 directories 失败: {e.Message}"); }
+
+            int dirCount = 0, errCount = 0, missCount = 0;
+            string firstErr = null, firstMiss = null;
             foreach (var ty in types)
             {
                 try
                 {
-                    var t = Il2CppSystem.Type.GetType(ty.FullName);
-                    if (t == null) continue;
+                    Il2CppSystem.Type t = null;
+                    // Managed 类型全名带 "Il2Cpp." 命名空间前缀, 而 IL2CPP 侧命名空间为空 ——
+                    // 必须剥前缀, 否则 Il2CppSystem.Type.GetType 恒返回 null (静默 continue)。
+                    string full = ty.FullName ?? "";
+                    const string pfx = "Il2Cpp.";
+                    if (full.StartsWith(pfx, StringComparison.Ordinal)) full = full.Substring(pfx.Length);
+                    // 三条解析路径依次尝试: 剥前缀全名 → 注册表全名/短名 → 带前缀原名
+                    try { t = Il2CppSystem.Type.GetType(full); } catch { }
+                    if (t == null) byName.TryGetValue(full, out t);
+                    if (t == null) byName.TryGetValue(ty.Name ?? "", out t);
+                    if (t == null) byName.TryGetValue(ty.FullName ?? "", out t);
+                    if (t == null) { missCount++; if (firstMiss == null) firstMiss = ty.FullName; continue; }
                     if (!DirectoryMaster.directories.TryGetValue(t, out var insts)) continue;
                     if (insts == null || insts.Count == 0) continue;
                     var inst = insts[0] as Directory<GameItem>;
@@ -494,7 +530,21 @@ namespace ProgressMod
 
             var arr = new string[seen.Count];
             seen.CopyTo(arr);
-            MelonLogger.Msg($"[List] 目录 {dirCount} 个, 物品 {arr.Length} 个" + (errCount > 0 ? $", 失败 {errCount}" : ""));
+            MelonLogger.Msg($"[List] 目录 {dirCount} 个, 物品 {arr.Length} 个"
+                + (missCount > 0 ? $", 未解析 {missCount}" : "")
+                + (errCount > 0 ? $", 失败 {errCount}" : ""));
+            if (firstMiss != null) MelonLogger.Warning($"[List] 首个未解析: {firstMiss}");
+            if (missCount > 0 && dirCount == 0)
+            {
+                // 解析全失败时, 直接列出结构体实际注册的键, 与候选类型全名对比 ——
+                // 这是「猜名字」类 bug 的一击定位手段, 免去多轮试错往返。
+                var ks = new System.Collections.Generic.List<string>();
+                try { foreach (var k in DirectoryMaster.directories.Keys) if (k != null) ks.Add(k.FullName ?? k.Name ?? "?"); } catch { }
+                MelonLogger.Warning($"[List] 注册表键({ks.Count}): " + string.Join(", ", ks));
+                var cs = new System.Collections.Generic.List<string>();
+                foreach (var ty in types) { if (cs.Count < 12) cs.Add(ty.FullName ?? "?"); }
+                MelonLogger.Warning($"[List] 候选类型样例: " + string.Join(", ", cs));
+            }
             if (firstErr != null) MelonLogger.Warning($"[List] 首个失败: {firstErr}");
             if (arr.Length == 0)
             {

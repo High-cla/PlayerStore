@@ -227,34 +227,65 @@ dotnet build -c Release PlayerStore/ProgressMod.csproj
 | 5 | `--debug-query` 语义 | dump 出 pattern AST 却当成文件 AST 分析 | 调试目标代码用 `format=cst` 扫文件 |
 | 6 | `dump/ascs/` 是 `throw null` 空壳 | 据 ascs 判断「方法没做事」 | 读逻辑一律走 ISIL |
 | 7 | 静态表 / 旧文档 | 拿 427 条旧表当现状 | 以运行时枚举 + 新 dump 为准 |
-| 8 | `DirectoryMaster.GetIdentifierList<T>()` 经反射调用**恒返回空** | 图鉴目录枚举出 0 个（日志「[List] 目录 0 个, 物品 0 个」） | 走 `DirectoryMaster.directories` + `Directory.factoryDictionary`（见 §7.1） |
+| 8 | IL2CPP 类型查找的两个陷阱：静态泛型反射调用 / 未剥 `Il2Cpp.` 前缀 | 图鉴目录枚举恒为 0 个（日志「[List] 目录 0 个, 物品 0 个」且**无任何警告**） | 见 §7.1：遍历 `directories.Keys` 建索引，免去名字拼法假设 |
 
-### 7.1 目录枚举：只有一条路走得通
+### 7.1 目录枚举：两个坑叠在一起，各自都会让结果恒为空
 
-「列出游戏当前全部物品 stableId」有两种写法，**实测只有一种可用**：
+「列出游戏当前全部物品 stableId」的正确写法，以及**两条都踩过**的错法：
 
 ```csharp
-// ✗ 恒返回空列表 —— 静态泛型 + MakeGenericMethod 反射调用在 IL2CPP 下不工作
+// ✗ 坑一: 静态泛型 MakeGenericMethod —— 恒返回 null
 HarmonyLib.AccessTools.Method(typeof(DirectoryMaster), "GetIdentifierList")
     .MakeGenericMethod(dirType).Invoke(null, new object[1] { null });
+```
 
-// ✓ 实测有效（历史版曾据此跑出 427 条）
-var t = Il2CppSystem.Type.GetType(ty.FullName);              // 必须转 Il2Cpp 类型做字典键
+**为什么恒返回 null**：该方法体是
+`return (intPtr != 0) ? Il2CppObjectPool.Get<List<string>>(intPtr) : null;`，
+而 `intPtr` 来自 `Il2CppClassPointerStore<T>.NativeClassPtr` —— 由 interop 静态构造函数
+为**编译期已知的 T** 填充。用反射传入运行时才知道的 `T` 时，该字段永不被初始化，
+方法指针为空 ⇒ 返回 null（不是空列表）。**不是方法不能用，是不能这么用。**
+
+```csharp
+// ✗ 坑二: 直接用 Managed 类型全名去查 IL2CPP 类型 —— 恒返回 null
+var t = Il2CppSystem.Type.GetType(ty.FullName);   // ty.FullName = "Il2Cpp.AmenitiesItemDirectory"
+```
+
+**为什么恒返回 null**：interop 生成的类型在 `namespace Il2Cpp;` 下，但 IL2CPP 侧的命名空间
+是**空字符串** —— 反编译可证：`IL2CPP.GetIl2CppClass("Assembly-CSharp.dll", "", "DirectoryMaster")`。
+所以查询名必须**剥掉 `Il2Cpp.` 前缀**。源码有 `using Il2Cpp;` 时这个前缀必然存在，极易忽略。
+
+```csharp
+// ✓ 正确写法
+var t = Il2CppSystem.Type.GetType(剥掉Il2Cpp前缀的FullName);
 if (DirectoryMaster.directories.TryGetValue(t, out var insts)
     && insts != null && insts.Count > 0)
 {
     var inst = insts[0] as Directory<GameItem>;
-    var fd = inst.factoryDictionary;                          // Dictionary<string, Func<T>>
-    foreach (var kv in fd) ids.Add(kv.Key);                   // 键 = stableId
+    var fd = inst.factoryDictionary;              // Dictionary<string, Func<T>>
+    foreach (var kv in fd) ids.Add(kv.Key);       // 键 = stableId
 }
+// directories 的实际类型: Dictionary<Il2CppSystem.Type, List<Il2CppSystem.Object>>
+// 属性是 public static (getter 标 Private_Static, interop 已暴露), token 100663893
 ```
 
-配套纪律（这两条是这个 bug 的真正教训）：
-- **空 `catch {}` 让探测失败毫无痕迹。** 上面踩坑时 31 个目录类一个都没成功，
-  却因为没有日志而只能靠读 `dirCount=0` 反推。现在改为计数 + 记录首个异常。
-- **枚举为空时不要缓存空结果。** 否则启动早期（目录尚未注册完）的一次失败会被永久固化；
+**不要靠猜名字。** 更稳的做法是**遍历 `directories.Keys` 取其 `FullName`/`Name` 建索引**，
+再与候选类型名对照 —— 完全不依赖对命名空间拼法的假设：
+
+```csharp
+var byName = new Dictionary<string, Il2CppSystem.Type>();
+foreach (var k in DirectoryMaster.directories.Keys) {
+    byName[k.FullName] = k; byName[k.Name] = k;   // 同时收全名与短名
+}
+```
+配套纪律（三条，都是这个 bug 的真实教训）：
+- **空 `catch {}` 让探测失败毫无痕迹。** 31 个目录类一个都没成功，却因无日志只能靠
+  `dirCount=0` 反推。改为分别统计「未解析 / 查不到 / 异常」三类计数并各记首例。
+- **枚举为空时不要缓存空结果。** 否则启动早期（目录尚未注册完）的一次失败被永久固化；
   且若 `Ids` 恒为 null 而节流条件写成 `Ids != null && ...`，OnUpdate 会**每帧**重跑全量枚举。
   正确做法：`Ids==null` 时保留 null 并设最短重试窗口，成功才写入。
+- **区分「静默 continue」与「抛异常」。** 日志出现 `dirCount=0` 却**零警告**时，问题必在
+  查找之前的解析阶段；有警告才是查找阶段。这个区分能把定位范围砍掉一半 ——
+  第一轮就是没做这个区分，白跑了一轮「改 API」的修复。
 
 **通用戒律**：工具「没有输出」不等于「结果为否」——先排除「命令失败/路径错/编码错」，
 再把它当证据。
