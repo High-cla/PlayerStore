@@ -378,6 +378,7 @@ namespace ProgressMod
         private static long _lastSnapshotMs;
         private static long _lastCatalogMs;
         private const int SnapshotMinIntervalMs = 120;   // 重建节流: 请求洪峰只触发一次重建, 不放大主线程开销
+        private const int CatalogRetryMinMs = 1000;      // 目录枚举失败后的最短重试间隔 (启动早期目录未注册完, 须容许重试)
 
         // GET /api/mine → 读主线程维护的快照, 立即返回 (不阻塞 HTTP 线程). inSave=false 表示快照未反映存档内状态.
         private static void RouteMine(out object resp, out int code)
@@ -416,15 +417,28 @@ namespace ProgressMod
         // 独立于 Mine/Inv 节流: 枚举全部目录要几百次反射调用, 比背包快照重得多。
         private static void RefreshCatalog()
         {
-            if (Snapshot.Ids != null && !_wantIds)
+            long now = System.Environment.TickCount64;
+            bool have = Snapshot.Ids != null;
+
+            if (have)
             {
-                int sec = CatalogRefreshSec;
-                if (sec <= 0) return;   // 0 = 只构建一次, 不随游戏更新刷新
-                if (System.Environment.TickCount64 - _lastCatalogMs < (long)sec * 1000L) return;
+                if (!_wantIds)
+                {
+                    int sec = CatalogRefreshSec;
+                    if (sec <= 0) return;   // 0 = 只构建一次, 不随游戏更新刷新
+                    if (now - _lastCatalogMs < (long)sec * 1000L) return;
+                }
             }
+            else if (!_wantIds) return;      // 从未成功且无请求: 等前端 /api/list 置位, 别白跑
+            else if (now - _lastCatalogMs < CatalogRetryMinMs) return;   // 有请求但尚无快照: 短窗口重试
+
             _wantIds = false;
-            _lastCatalogMs = System.Environment.TickCount64;
-            try { Snapshot.Ids = BuildItemIdList(); }
+            _lastCatalogMs = now;
+            try
+            {
+                var ids = BuildItemIdList();
+                if (ids != null) Snapshot.Ids = ids;   // 失败(空)不写入, 保留 null 让下次重试
+            }
             catch (Exception e) { MelonLogger.Error($"[List] 目录枚举失败: {e.Message}"); }
         }
 
@@ -437,33 +451,56 @@ namespace ProgressMod
             code = 200;
         }
 
-        // 反射扫描全部 ItemDirectory 派生类, 对每个调 GetIdentifierList<T>()。两条理由:
-        //   ① 不硬编码目录清单 —— 游戏新增目录时自动纳入 (硬编码清单必然随版本腐化);
-        //   ② GetIdentifierList 是静态泛型而目录类型运行时才可知, 必须 MakeGenericMethod。
-        // 返回的 List<string> 是 stableId; 名称/描述走 Unity 本地化表、不在程序集内, 对账只需 id。
+        // 两道扫描: 先用反射列出全部 ItemDirectory 派生类 (不硬编码目录清单 —— 游戏新增目录时
+        // 自动纳入, 硬编码清单必然随版本腐化); 再查 DirectoryMaster.directories 拿到该目录实例,
+        // 从 Directory.factoryDictionary 取全部 stableId 键。
+        // 取到的是 stableId; 名称/描述走 Unity 本地化表、不在程序集内, 对账只需 id。
         private static string[] BuildItemIdList()
         {
+            // 走 DirectoryMaster.directories + Directory.factoryDictionary —— 已实测有效的路径。
+            // 不用 DirectoryMaster.GetIdentifierList<T>(): 在本游戏 IL2CPP 下经反射调用恒返回空
+            // (实测日志「[List] 目录 0 个, 物品 0 个」), 且失败被空 catch 吞掉毫无痕迹。
             var seen = new System.Collections.Generic.HashSet<string>();
-            var m = HarmonyLib.AccessTools.Method(typeof(DirectoryMaster), "GetIdentifierList");
-            if (m == null) { MelonLogger.Warning("[List] 找不到 DirectoryMaster.GetIdentifierList"); return new string[0]; }
-            int dirCount = 0;
+            var types = new System.Collections.Generic.List<System.Type>();
             foreach (var ty in typeof(DirectoryMaster).Assembly.GetTypes())
+            {
+                if (ty == null || !ty.IsClass || ty.IsAbstract) continue;
+                if (typeof(ItemDirectory).IsAssignableFrom(ty)) types.Add(ty);
+            }
+
+            int dirCount = 0, errCount = 0;
+            string firstErr = null;
+            foreach (var ty in types)
             {
                 try
                 {
-                    if (ty == null || !ty.IsClass || ty.IsAbstract) continue;
-                    if (!typeof(ItemDirectory).IsAssignableFrom(ty)) continue;
-                    var list = m.MakeGenericMethod(ty).Invoke(null, new object[1] { null })
-                               as System.Collections.Generic.List<string>;
-                    if (list == null) continue;
+                    var t = Il2CppSystem.Type.GetType(ty.FullName);
+                    if (t == null) continue;
+                    if (!DirectoryMaster.directories.TryGetValue(t, out var insts)) continue;
+                    if (insts == null || insts.Count == 0) continue;
+                    var inst = insts[0] as Directory<GameItem>;
+                    if (inst == null) continue;
+                    var fd = inst.factoryDictionary;
+                    if (fd == null) continue;
                     dirCount++;
-                    foreach (string id in list) if (!string.IsNullOrEmpty(id)) seen.Add(id);
+                    foreach (var kv in fd) if (!string.IsNullOrEmpty(kv.Key)) seen.Add(kv.Key);
                 }
-                catch { /* 该目录不可枚举 (无标识符表/类型不匹配): 跳过, 不影响其余 */ }
+                catch (Exception e)
+                {
+                    errCount++;
+                    if (firstErr == null) firstErr = ty.Name + ": " + e.Message;
+                }
             }
+
             var arr = new string[seen.Count];
             seen.CopyTo(arr);
-            MelonLogger.Msg($"[List] 目录 {dirCount} 个, 物品 {arr.Length} 个");
+            MelonLogger.Msg($"[List] 目录 {dirCount} 个, 物品 {arr.Length} 个" + (errCount > 0 ? $", 失败 {errCount}" : ""));
+            if (firstErr != null) MelonLogger.Warning($"[List] 首个失败: {firstErr}");
+            if (arr.Length == 0)
+            {
+                MelonLogger.Warning("[List] 枚举为空, 不缓存, 下次请求重试 (启动早期目录可能尚未注册完)");
+                return null;
+            }
             return arr;
         }
 

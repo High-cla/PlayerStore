@@ -227,6 +227,34 @@ dotnet build -c Release PlayerStore/ProgressMod.csproj
 | 5 | `--debug-query` 语义 | dump 出 pattern AST 却当成文件 AST 分析 | 调试目标代码用 `format=cst` 扫文件 |
 | 6 | `dump/ascs/` 是 `throw null` 空壳 | 据 ascs 判断「方法没做事」 | 读逻辑一律走 ISIL |
 | 7 | 静态表 / 旧文档 | 拿 427 条旧表当现状 | 以运行时枚举 + 新 dump 为准 |
+| 8 | `DirectoryMaster.GetIdentifierList<T>()` 经反射调用**恒返回空** | 图鉴目录枚举出 0 个（日志「[List] 目录 0 个, 物品 0 个」） | 走 `DirectoryMaster.directories` + `Directory.factoryDictionary`（见 §7.1） |
+
+### 7.1 目录枚举：只有一条路走得通
+
+「列出游戏当前全部物品 stableId」有两种写法，**实测只有一种可用**：
+
+```csharp
+// ✗ 恒返回空列表 —— 静态泛型 + MakeGenericMethod 反射调用在 IL2CPP 下不工作
+HarmonyLib.AccessTools.Method(typeof(DirectoryMaster), "GetIdentifierList")
+    .MakeGenericMethod(dirType).Invoke(null, new object[1] { null });
+
+// ✓ 实测有效（历史版曾据此跑出 427 条）
+var t = Il2CppSystem.Type.GetType(ty.FullName);              // 必须转 Il2Cpp 类型做字典键
+if (DirectoryMaster.directories.TryGetValue(t, out var insts)
+    && insts != null && insts.Count > 0)
+{
+    var inst = insts[0] as Directory<GameItem>;
+    var fd = inst.factoryDictionary;                          // Dictionary<string, Func<T>>
+    foreach (var kv in fd) ids.Add(kv.Key);                   // 键 = stableId
+}
+```
+
+配套纪律（这两条是这个 bug 的真正教训）：
+- **空 `catch {}` 让探测失败毫无痕迹。** 上面踩坑时 31 个目录类一个都没成功，
+  却因为没有日志而只能靠读 `dirCount=0` 反推。现在改为计数 + 记录首个异常。
+- **枚举为空时不要缓存空结果。** 否则启动早期（目录尚未注册完）的一次失败会被永久固化；
+  且若 `Ids` 恒为 null 而节流条件写成 `Ids != null && ...`，OnUpdate 会**每帧**重跑全量枚举。
+  正确做法：`Ids==null` 时保留 null 并设最短重试窗口，成功才写入。
 
 **通用戒律**：工具「没有输出」不等于「结果为否」——先排除「命令失败/路径错/编码错」，
 再把它当证据。

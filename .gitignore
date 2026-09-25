@@ -34,3 +34,4 @@ proba.txt
 .tmp_design/
 .tmp_rel/
 .tmp_commit_msg.txt
+.tmp_*
