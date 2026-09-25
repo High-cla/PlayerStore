@@ -230,6 +230,7 @@ dotnet build -c Release PlayerStore/ProgressMod.csproj
 | 8 | IL2CPP 容器语义靠猜：泛型参数是条目类型而非目录类型 | 图鉴目录枚举**连错三轮**恒为 0 个（日志「[List] 目录 0 个, 物品 0 个」且无任何警告） | 见 §7.1：读签名 + 打印真实键；遍历 `directories` 的**值** |
 | 9 | 拿单一来源当「全集」 | 枚举只拿到 2 个目录/191 项，**260 个仍存在且能正常生成的物品被误标「已失效」** | 见 §7.2：三源取并集，且**宁可漏标不误标** |
 | 10 | 启动期用 `[HarmonyTargetMethods]` 批量 patch 29 个 IL2CPP 方法 | **游戏启动直接闪退**（日志停在挂载完成那行） | 见 §7.3：逐个显式声明且只挂必要的少数几个 |
+| 11 | 判稳写「连续 N 轮无增长」但计数器在增长时**未清零**（实为累计） | 判稳过早 ⇒ 漏掉的目录被当成「已删除」⇒ 物品误标「已失效」 | 见 §7.4：增长即清零 + 数字必须自解释 |
 
 ### 7.1 目录枚举：连错三轮，每一轮都撞在不同的假设上
 
@@ -400,6 +401,65 @@ foreach (var k in DirectoryMaster.directories.Keys) {
 
 **通用戒律**：工具「没有输出」不等于「结果为否」——先排除「命令失败/路径错/编码错」，
 再把它当证据。
+
+### 7.4 「连续 N 轮」写成「累计 N 轮」—— 注释与实现不一致，无测试可发现
+
+**症状**：判稳过早，仍有目录在注册时就认定「注册完成」，据此对账 ⇒ 物品被误标「已失效」。
+
+**代码（错）**：
+
+```csharp
+bool progressed = ids.Length > prevLen || dirCount > prevDir;
+if (!progressed && ++_stableRounds >= CatalogStableRounds)   // ✗ 只跳过递增，没清零
+```
+
+注释写的是「**连续** N 轮无增长」，实现是「**累计** N 轮无增长」。`progressed` 为真时
+只是不递增，**计数器保留此前累计值** —— 于是「增长 → 停 1 轮」也能凑够 3。
+
+**日志坐实**（2026-09-25_09-01-42.log）：
+
+| 时刻 | 物品/目录 | progressed | `_stableRounds` |
+|---|---|---|---|
+| 09:01:54.210 | 383/0 | true（首次） | 0 |
+| 09:01:55.206 | 383/0 | false | 1 |
+| 09:01:56.205 | 383/0 | false | 2 |
+| 09:02:00.560 | **485/2** | **true** | **2 ← 应清零** |
+| 09:02:01.621 | 485/2 | false | **3 → 判稳** |
+
+注册刚在 09:02:00 增长，**1 秒后就判稳**；而 BE 的 `[BE-REPAIR] 扫描 78 件` 到
+**09:02:07** 仍在活动 —— 判稳之后 6 秒。
+
+**修法**：
+
+```csharp
+if (progressed) _stableRounds = 0;
+else if (++_stableRounds >= CatalogStableRounds) { _catalogSettled = true; ... }
+```
+
+**为什么这类 bug 特别毒**：
+- 编译器不管（逻辑合法）；测试不管（无单测覆盖启停时序）；**只有日志能发现**。
+- 它不报错，只是「早了一点」—— 而早一点在**对账**语义下就是**误标**，直接影响用户能不能点生成。
+- 修好后行为变化极小（多等 1~2 轮），所以**不做日志核验就永远不会被发现**。
+
+**纪律**：
+- 注释里出现「连续 / 累计 / 至少 / 不超过」等**量词**时，实现必须逐字对照注释核验一遍。
+- 计数器型判据一律显式写「增长即清零」，不要依赖 `!progressed && ++` 这种隐式写法。
+- **判据必须双维独立计数**（见 §7.2）：只看总数会被恒定量掩盖。
+
+**配套：让数字能自解释。** 「目录 2 个」这种聚合数无法定位 —— 游戏有 29 个
+`ItemDirectory` 子类，差 27 个却说不出是谁。改为逐个打印 `类型名:条数`：
+
+```csharp
+try { detail.Add($"{d.GetType().Name}:{fd.Count}"); } catch { detail.Add($"?:{fd.Count}"); }
+...
+if (detail.Count > 0) MelonLogger.Msg($"[List] 目录源明细: {string.Join(", ", detail)}");
+```
+
+补充事实：`DirectoryMaster.directories` 的键是 **`DirectoryEntry` 类型**（实测仅
+`GameItem` / `CombatAbilityEffect`），29 个 `ItemDirectory` 子类**全部挂在 `GameItem`
+这一个键下**（`ItemDirectory : Directory<GameItem>`）。所以 `dirCount < 29` 只可能是
+「实例尚未 `Awake`」，不可能是「分键了」—— 注册发生在 `Directory<T>.Awake()` 中
+（ISIL 可证：`Awake` 依次调 `AddDirectory` → `InitDirectory`）。
 
 ---
 
