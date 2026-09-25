@@ -380,22 +380,13 @@ namespace ProgressMod
         private static long _lastCatalogMs;
         private const int SnapshotMinIntervalMs = 120;   // 重建节流: 请求洪峰只触发一次重建, 不放大主线程开销
         private const int CatalogRetryMinMs = 1000;      // 注册未完成时的最短重试间隔
+        private const int CatalogStableRounds = 3;       // 连续 N 轮「物品数与目录数都不增长」才认定注册完成
         private const int CatalogSettleMs = 90000;       // 兜底观察窗口上限; 超时接受现状并告警
+        private static int _catalogCount = -1;           // 上轮物品总数 (与目录数一起判增长)
         private static int _catalogDirCount = -1;        // 上轮目录源命中的目录数
-        private static int _lastDirInit;                 // 上轮读到的 InitDirectory 计数
         private static int _stableRounds;                // 连续无进展的轮数
         private static long _catalogStartMs;             // 首次成功构建时刻 = 观察窗口起点
         private static volatile bool _catalogSettled;    // true = 已认定注册完成, 转为常规节流
-
-        // 目录注册进度 —— 由 PatchDirInit 的 Postfix 累加 (见文件末尾)。这是判定「注册是否完成」的
-        // 唯一可靠信号: 游戏有 17 个 ItemDirectory 子类, 各自 override InitDirectory 往
-        // factoryDictionary 里塞物品, 且**时机很晚** (实测 BE 系列 mod 在启动 5s 后才注册自己的目录),
-        // 而第三方的 mod (如 BrewingExpansion) 还会挂同一个 InitDirectory 的 Postfix 继续追加。
-        // 早期版本改用「数量连续 N 轮不变」判稳, 被本地化源的恒定量误导 —— 目录源停在 0 却判稳,
-        // 结果 aug_chip 等只存在于目录源的物品被误标「已失效」。
-        private static volatile int _dirInitCount;
-        private static volatile bool _dirInitHooked;     // 挂载是否成功; 失败时改用回退判稳 (见 RefreshCatalog)
-        private const int ExpectedItemDirs = 17;         // dump/ascs 里 override InitDirectory 的 ItemDirectory 子类数
 
         // GET /api/mine → 读主线程维护的快照, 立即返回 (不阻塞 HTTP 线程). inSave=false 表示快照未反映存档内状态.
         private static void RouteMine(out object resp, out int code)
@@ -463,41 +454,31 @@ namespace ProgressMod
                 if (ids == null) return;   // 失败(空)不写入, 保留 null 让下次重试
 
                 if (_catalogStartMs == 0) _catalogStartMs = now;
-                int prevDir = _catalogDirCount;
+                int prevLen = _catalogCount, prevDir = _catalogDirCount;
+                _catalogCount = ids.Length;
                 _catalogDirCount = dirCount;
                 Snapshot.Ids = ids;
 
-                // 判定「注册是否完成」, 双信号:
-                //   主信号: InitDirectory 调用计数 (PatchDirInit 累加) —— 精确反映游戏侧注册进度;
-                //   辅信号: 目录数不再增长 —— 兜住「某个目录的 InitDirectory 未被 patch 到」的情况。
-                // 两者都用「独立计数」而非总数: 本地化源数量恒定 (实测 383), 拿总数判稳会被它掩盖。
-                int inited = _dirInitCount;
-                bool progressed = inited > _lastDirInit || dirCount > prevDir;
-                _lastDirInit = inited;
-
-                // 两路判稳:
-                //   ① 挂载成功时 —— InitDirectory 已全部触发且无新进展, 这是精确信号;
-                //   ② 挂载失败时 (_dirInitCount 恒 0, 例如 IL2CPP 下 TargetMethods 没挂上) ——
-                //      退化回「目录数不变」, 但要求更多轮 (5 轮) 以抵消不确定性, 且明确告警。
-                bool initSignal = _dirInitHooked && inited >= ExpectedItemDirs && !progressed;
-                bool fallback = !_dirInitHooked && !progressed && ++_stableRounds >= 5;
-                if (initSignal || fallback)
+                // 判定「注册是否完成」: 双维独立计数 —— 物品总数与**目录数**都要停止增长。
+                // 只看总数不行: 本地化源数量恒定 (实测 383), 会把总数锁死, 于是目录仍在陆续注册
+                // (实测 BE 系列在启动 5s 后才注册) 却已判稳, 目录源停在 0 —— aug_chip 这类
+                // 只存在于目录源的物品因此被误标「已失效」。
+                // 注: 曾用 InitDirectory 的 Harmony hook 做精确信号, 但批量挂 29 个 IL2CPP 方法
+                // 导致启动闪退, 已移除 (见文件末尾 PatchDirInit 处的记录)。
+                bool progressed = ids.Length > prevLen || dirCount > prevDir;
+                if (!progressed && ++_stableRounds >= CatalogStableRounds)
                 {
                     _catalogSettled = true;
-                    if (fallback)
-                        MelonLogger.Warning($"[List] InitDirectory 未挂上, 回退按目录数判稳: "
-                            + $"目录 {dirCount} 个, 物品 {ids.Length} 个");
-                    else
-                        MelonLogger.Msg($"[List] 注册完成: InitDirectory {inited}/{ExpectedItemDirs} 次, "
-                            + $"目录 {dirCount} 个, 物品 {ids.Length} 个");
+                    MelonLogger.Msg($"[List] 注册已稳定 ({_stableRounds} 轮无增长): "
+                        + $"目录 {dirCount} 个, 物品 {ids.Length} 个");
                 }
 
-                // 兜底: 某些目录可能始终不触发 InitDirectory (或被 mod 接管), 不能无限等。
+                // 兜底: 若某个目录长期持续注册 (或计数抖动), 不能无限等。
                 if (!_catalogSettled && now - _catalogStartMs > CatalogSettleMs)
                 {
                     _catalogSettled = true;
                     MelonLogger.Warning($"[List] 观察窗口 {CatalogSettleMs / 1000}s 超时, 接受现状: "
-                        + $"InitDirectory {inited}/{ExpectedItemDirs} 次, 目录 {dirCount} 个, 物品 {ids.Length} 个");
+                        + $"目录 {dirCount} 个, 物品 {ids.Length} 个 (可能仍不完整)");
                 }
             }
             catch (Exception e) { MelonLogger.Error($"[List] 目录枚举失败: {e.Message}"); }
@@ -2067,47 +2048,22 @@ namespace ProgressMod
  public static void Postfix(ref int __result) { try { if (InfiniteScavenging) __result = 9999; } catch { } }
         }
 
-        //============ 目录注册进度追踪 ============
-        // 游戏有 17 个 ItemDirectory 子类, 各自 override InitDirectory() 把物品塞进
-        // Directory.factoryDictionary; 时机很晚 (实测 BE 系列 mod 在启动 5s 后才注册),
-        // 第三方 mod (如 BrewingExpansion 的 PatchAmenitiesDirInit / PatchMiscDirInit /
-        // PatchRegisterItems) 还挂同一个 InitDirectory 的 Postfix 继续追加自己的物品。
-        // 故 InitDirectory 的调用次数是「注册是否完成」最精确的信号 —— 用它替代「数量连续N轮不变」
-        // 那种猜测式判稳 (后者曾被本地化源的恒定量误导, 目录源停在 0 就判稳)。
+        //============ 目录注册进度追踪: 已移除 ============
+        // 曾有 PatchDirInit 用 [HarmonyTargetMethods] 批量挂 29 个 ItemDirectory 子类的
+        // InitDirectory 做 Postfix 计数, 想用它当「注册完成」的精确信号 (读 BrewingExpansion
+        // 学来的做法 —— 它挂 AmenitiesItemDirectory.InitDirectory 的 Postfix 注册自己的物品)。
         //
-        // 用 [HarmonyTargetMethods] 批量挂载: InitDirectory 在基类 Directory<T> 上是 abstract,
-        // IL2CPP 下泛型实例是独立类, 挂 open generic 不生效, 必须逐类挂到具体 override 上。
-        // 用一个补丁覆盖全部 17 个, 避免写 17 个几乎相同的类。
-        [HarmonyPatch]
-        public static class PatchDirInit
-        {
-            [HarmonyTargetMethods]
-            public static System.Collections.Generic.IEnumerable<System.Reflection.MethodBase> TargetMethods()
-            {
-                var list = new System.Collections.Generic.List<System.Reflection.MethodBase>();
-                foreach (var ty in typeof(DirectoryMaster).Assembly.GetTypes())
-                {
-                    try
-                    {
-                        if (ty == null || !ty.IsClass || ty.IsAbstract) continue;
-                        if (!typeof(ItemDirectory).IsAssignableFrom(ty)) continue;
-                        // InitDirectory 是 protected, 用 AccessTools 拿声明方法 (含基类链)
-                        var m = HarmonyLib.AccessTools.DeclaredMethod(ty, "InitDirectory");
-                        if (m != null) list.Add(m);
-                    }
-                    catch { }
-                }
-                Core._dirInitHooked = list.Count > 0;
-                MelonLogger.Msg($"[List] InitDirectory 挂载 {list.Count} 个 (预期 {ExpectedItemDirs})"
-                    + (list.Count == 0 ? " —— 信号不可用, 将回退按目录数判稳" : ""));
-                return list;
-            }
-
-            public static void Postfix()
-            {
-                // 嵌套类访问外层 private static 需显式限定 (C# 允许直接访问, 但显式更清晰)
-                try { Core._dirInitCount++; } catch { }
-            }
-        }
+        // **实测: 该做法导致游戏启动闪退**。日志 (2026-09-25_08-53-22.log, 停在 208 行):
+        //   [08:53:27.792] AccessTools.DeclaredMethod: Could not find method for type
+        //                  Il2Cpp.ItemDirectory and name InitDirectory and parameters
+        //   [08:53:27.801] [ProgressMod] [List] InitDirectory 挂载 29 个 (预期 17)
+        //   之后进程立即死亡; 而同一份 dump/存档下不带该 hook 的版本 (08-43-48.log)
+        //   跑满 1194 行并正常 Preferences Saved 收尾。
+        // 结论: 一次性 Harmony patch 29 个 IL2CPP 方法 (且其中 Il2Cpp.ItemDirectory 自身是
+        // abstract、DeclaredMethod 取不到) 在启动期不安全 —— 收益 (判稳早几秒) 远不抵代价。
+        //
+        // 现在的判稳退回到「目录数 / 物品数 双计数且连续多轮不变」, 见 RefreshCatalog。
+        // 若日后要重试精确信号, 应只挂**少数几个确实会注册物品的目录**(如 Amenities/Misc/Food),
+        // 逐个显式声明而非反射批量 —— 并且务必先在备份存档上验证启动。
     }
 }

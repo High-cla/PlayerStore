@@ -229,6 +229,7 @@ dotnet build -c Release PlayerStore/ProgressMod.csproj
 | 7 | 静态表 / 旧文档 | 拿 427 条旧表当现状 | 以运行时枚举 + 新 dump 为准 |
 | 8 | IL2CPP 容器语义靠猜：泛型参数是条目类型而非目录类型 | 图鉴目录枚举**连错三轮**恒为 0 个（日志「[List] 目录 0 个, 物品 0 个」且无任何警告） | 见 §7.1：读签名 + 打印真实键；遍历 `directories` 的**值** |
 | 9 | 拿单一来源当「全集」 | 枚举只拿到 2 个目录/191 项，**260 个仍存在且能正常生成的物品被误标「已失效」** | 见 §7.2：三源取并集，且**宁可漏标不误标** |
+| 10 | 启动期用 `[HarmonyTargetMethods]` 批量 patch 29 个 IL2CPP 方法 | **游戏启动直接闪退**（日志停在挂载完成那行） | 见 §7.3：逐个显式声明且只挂必要的少数几个 |
 
 ### 7.1 目录枚举：连错三轮，每一轮都撞在不同的假设上
 
@@ -299,6 +300,47 @@ foreach (var o in DirectoryMaster.directories[k]) {
 用 `LocalizationSettings.StringDatabase.GetTable(tableRef, locale)` 逐语言取
 `m_TableEntries`, 键经 `entry.SharedEntry.Key` 拿, 值取 `entry.LocalizedValue`。
 这样一次能拿**全部语言**, 不像 `GetLocalizedItem` 只给当前语言。
+
+### 7.3 启动期批量 Harmony patch 会闪退 —— 代价远高于收益
+
+**症状**：游戏启动即死，日志停在 patch 完成的那一行，无 ERROR 无堆栈。
+
+```
+[08:53:27.792] AccessTools.DeclaredMethod: Could not find method for type
+               Il2Cpp.ItemDirectory and name InitDirectory and parameters
+[08:53:27.801] [ProgressMod] [List] InitDirectory 挂载 29 个 (预期 17)
+               ← 之后进程死亡 (该 log 共 208 行)
+```
+
+同一份 dump/存档下，**不带该 hook 的版本跑满 1194 行并正常 `Preferences Saved!` 收尾** ——
+这是坐实因果的对照实验。
+
+**做法（错）**：想学 BrewingExpansion 用 `InitDirectory` 的 Postfix 当「目录注册完成」的精确信号：
+
+```csharp
+[HarmonyPatch]
+public static class PatchDirInit {
+    [HarmonyTargetMethods]                       // ✗ 反射批量挂 29 个
+    public static IEnumerable<MethodBase> TargetMethods() {
+        foreach (var ty in ...GetTypes())
+            if (typeof(ItemDirectory).IsAssignableFrom(ty))
+                list.Add(AccessTools.DeclaredMethod(ty, "InitDirectory"));
+        return list;
+    }
+    public static void Postfix() { _dirInitCount++; }
+}
+```
+
+问题不止一个：`Il2Cpp.ItemDirectory` 自身是 abstract（`DeclaredMethod` 取不到，已报警），
+29 个方法一次性 patch；且这个 hook 的**全部收益只是让判稳早几秒**。
+
+**纪律**：
+- **启动期的 Harmony patch 必须逐个显式声明**，不用反射批量 —— 崩了没有堆栈，只能靠二分。
+- **只挂确实需要的少数几个**。BE 只挂 `AmenitiesItemDirectory` / `MiscItemDirectory` /
+  `FoodItemDirectory` 三个它真正要注册物品的目录，不是 29 个全挂。
+- **收益必须配得上风险**。为「判稳早几秒」赌上启动稳定性是不划算的交易；
+  宁可退回多等几轮的启发式判稳（见 §7.2 双计数）。
+- 改启动期代码后**务必留存对照组日志**：这次能 30 秒定位，全靠上一次正常启动的 log 还在。
 
 以下保留前两轮的错法与原因，供对照：
 
