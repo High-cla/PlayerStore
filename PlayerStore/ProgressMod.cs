@@ -466,7 +466,11 @@ namespace ProgressMod
                 // 注: 曾用 InitDirectory 的 Harmony hook 做精确信号, 但批量挂 29 个 IL2CPP 方法
                 // 导致启动闪退, 已移除 (见文件末尾 PatchDirInit 处的记录)。
                 bool progressed = ids.Length > prevLen || dirCount > prevDir;
-                if (!progressed && ++_stableRounds >= CatalogStableRounds)
+                // 增长即清零: 必须是**连续** N 轮无增长才判稳。曾漏掉清零 —— 注册刚增长完
+                // 只需再 1 轮无增长即凑够 3 (累计而非连续): 实测 09:02:00.560 涨到 485/2,
+                // 09:02:01.621 就判了稳, 而 BE 到 09:02:07 仍在注册。
+                if (progressed) _stableRounds = 0;
+                else if (++_stableRounds >= CatalogStableRounds)
                 {
                     _catalogSettled = true;
                     MelonLogger.Msg($"[List] 注册已稳定 ({_stableRounds} 轮无增长): "
@@ -643,6 +647,9 @@ namespace ProgressMod
         {
             int dirCount = 0, errCount = 0;
             string firstErr = null;
+            // 明细: 「目录 N 个」必须能解释 —— 游戏有 29 个 ItemDirectory 子类,
+            // 若只命中少数几个, 正是「物品被误标已失效」的直接原因, 日志要一眼看出是谁。
+            var detail = new System.Collections.Generic.List<string>();
             try
             {
                 // 先快照键集合: 遍历过程中目录可能被游戏注册 (实测启动后从 0 个键涨到 2 个键)。
@@ -663,6 +670,7 @@ namespace ProgressMod
                             var fd = d.factoryDictionary;
                             if (fd == null) continue;
                             dirCount++;
+                            try { detail.Add($"{d.GetType().Name}:{fd.Count}"); } catch { detail.Add($"?:{fd.Count}"); }
                             foreach (var p in fd)
                                 if (!string.IsNullOrEmpty(p.Key)) seen.Add(p.Key);
                         }
@@ -677,6 +685,7 @@ namespace ProgressMod
             catch (Exception e) { MelonLogger.Error($"[List] 遍历 directories 失败: {e.Message}"); }
             if (firstErr != null) MelonLogger.Warning($"[List] 目录源首个失败: {firstErr}");
             if (errCount > 0) MelonLogger.Msg($"[List] 目录源失败 {errCount} 个实例 (已跳过)");
+            if (detail.Count > 0) MelonLogger.Msg($"[List] 目录源明细: {string.Join(", ", detail)}");
             return dirCount;
         }
 
